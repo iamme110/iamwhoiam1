@@ -329,7 +329,7 @@ class MosaicDetector:
 
     def _frame_feeder_worker(self):
         logger.debug("frame feeder: started")
-        with video_utils.VideoReader(self.video_file) as video_reader:
+        with video_utils.VideoReader(self.video_file, self.device) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
             video_frames_generator = video_reader.frames()

@@ -5,6 +5,7 @@ import subprocess
 from contextlib import contextmanager
 from fractions import Fraction
 from typing import Callable
+from pathlib import Path
 
 import av
 import cv2
@@ -66,15 +67,20 @@ def VideoReaderOpenCV(*args, **kwargs):
         cap.release()
 
 class VideoReader:
-    def __init__(self, file):
+    def __init__(self, file, device=None):
         self.file = file
         self.container = None
+        self.device = device
 
     def __enter__(self):
+        hwaccel = None
+        if Path(self.file).suffix in {'.mp4', '.mkv', 'm4v'} and self.device is not None and self.device.type == 'cuda':
+            hwaccel = av.codec.hwaccel.HWAccel(device=str(self.device.index), device_type='cuda', allow_software_fallback=False)
+
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
         # E.g. metadata could be encoded in CP936 instead of UTF-8 which would raise an error if we don't pass it in metadata_encoding.
         # If we use it in the future we have to consider non-default character encodings.
-        self.container = av.open(self.file, metadata_errors='ignore')
+        self.container = av.open(self.file, metadata_errors='ignore', hwaccel=hwaccel)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):

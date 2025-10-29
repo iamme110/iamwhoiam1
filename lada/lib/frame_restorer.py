@@ -298,7 +298,7 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with video_utils.VideoReader(self.video_meta_data.video_file) as video_reader:
+        with video_utils.VideoReader(self.video_meta_data.video_file, self.device) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
 
