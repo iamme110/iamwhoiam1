@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 import numpy as np
+import torch
 
 """
 A bounding box of a detected object defined by two points, the top/left and bottom/right pixel.
@@ -14,6 +15,7 @@ A segmentation mask of a detected object. Pixel values of 0 indicate that the pi
 Shape: (H, W, 1)
 """
 type Mask = np.ndarray[np.uint8]
+type MaskPyTorch = torch.Tensor
 
 """
 Color Image
@@ -21,6 +23,7 @@ Shape: (H, W, C)
 H, W, C stand for image height, width and color channels respectively. C is always 3 and must be in BGR instead of RGB order 
 """
 type Image = np.ndarray[np.uint8]
+type ImagePyTorch = torch.Tensor
 
 """
 Padding of an Image or Mask represented as tuple padding values (number of black pixels) added to each image edge:
