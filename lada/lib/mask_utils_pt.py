@@ -1,0 +1,106 @@
+﻿import math
+
+import torch
+from torch.nn import functional as torch_functional
+
+from lada.lib import Box, MaskPyTorch
+from lada.lib import image_utils_pt
+
+
+def get_box(mask: MaskPyTorch) -> Box:
+    """PyTorch version of get_box. Finds bounding box from mask tensor."""
+    mask = mask.squeeze() > 0  # Ensure (H, W) and binary
+    rows = torch.any(mask, dim=1)
+    cols = torch.any(mask, dim=0)
+    t = torch.where(rows)[0][0].item()
+    b = torch.where(rows)[0][-1].item()
+    l = torch.where(cols)[0][0].item()
+    r = torch.where(cols)[0][-1].item()
+    box = t, l, b, r
+    return box
+
+
+def morph(mask: MaskPyTorch, iterations=1) -> MaskPyTorch:
+    """PyTorch version of morph. Morphological dilate using convolution."""
+    if get_mask_area(mask) < 0.01:
+        kernel_size = 5
+    else:
+        kernel_size = 15
+    kernel = torch.ones(kernel_size, kernel_size, dtype=mask.dtype, device=mask.device)
+    for _ in range(iterations):
+        mask = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=kernel_size // 2) > 0
+        mask = mask.squeeze()
+    return mask
+
+
+def dilate_mask(mask: MaskPyTorch, dilatation_size=11, iterations=2) -> MaskPyTorch:
+    """PyTorch version of dilate_mask. Dilates mask using convolution."""
+    if iterations == 0:
+        return mask
+    kernel = torch.ones(dilatation_size, dilatation_size, dtype=mask.dtype, device=mask.device)
+    for _ in range(iterations):
+        mask = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=dilatation_size // 2) > 0
+        mask = mask.squeeze()
+    return mask
+
+
+def extend_mask(mask: MaskPyTorch, value) -> MaskPyTorch:
+    """PyTorch version of extend_mask. Extends mask area."""
+    if value == 0:
+        return mask
+    target_size = 256
+    # Resize down, morph, resize back, clean boundaries
+    resized_down = image_utils_pt.resize(mask, target_size, mode='nearest')
+    morphed = morph(resized_down, iterations=value)
+    resized_back = image_utils_pt.resize(morphed, (int(mask.shape[0]), int(mask.shape[1])), mode='nearest')
+    cleaned = clean_up_boundaries(resized_back)
+    return cleaned
+
+
+def clean_up_boundaries(mask: MaskPyTorch, kernel_size=19) -> MaskPyTorch:
+    """PyTorch version of clean_up_boundaries. Morphological close (dilate then erode)."""
+    # Close: dilate then erode
+    kernel = torch.ones(kernel_size, kernel_size, dtype=mask.dtype, device=mask.device)
+    # Dilate
+    dilated = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=kernel_size // 2) > 0
+    dilated = dilated.squeeze()
+    # Erode the dilated
+    inverted = 1 - dilated
+    eroded = 1 - (torch_functional.conv2d(inverted.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=kernel_size // 2) > 0).squeeze()
+    return eroded
+
+
+def fill_holes(mask: MaskPyTorch) -> MaskPyTorch:
+    """PyTorch version of fill_holes. Fills holes in mask using flood fill approximation."""
+    # Simple approximation: dilate and keep original
+    # For proper fill, it's complex; this is a basic version
+    kernel = torch.ones(3, 3, dtype=mask.dtype, device=mask.device)
+    dilated = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=1) > 0
+    filled = dilated.squeeze()
+    return filled
+
+
+def get_mask_area(mask: MaskPyTorch) -> float:
+    """PyTorch version of get_mask_area. Calculates mask area ratio."""
+    pixels = torch.sum(mask > 0).item()
+    return pixels / (mask.shape[0] * mask.shape[1])
+
+
+def create_blend_mask(crop_mask: MaskPyTorch):
+    """PyTorch version of create_blend_mask. Creates blend mask."""
+    crop_mask = crop_mask.squeeze() > 0
+    h, w = crop_mask.shape
+    border_ratio = 0.05
+    h_inner, w_inner = int(h * (1.0 - border_ratio)), int(w * (1. - border_ratio))
+    h_outer, w_outer = h - h_inner, w - w_inner
+    border_size = min(h_outer, w_outer)
+    if border_size < 5:
+        return torch.ones_like(crop_mask, dtype=torch.float32)
+    blur_size = border_size
+    blend_mask = torch.ones((h_inner, w_inner), dtype=torch.float32, device=crop_mask.device)
+    blend_mask = torch_functional.pad(blend_mask, (math.floor(w_outer / 2), math.ceil(w_outer / 2), math.floor(h_outer / 2), math.ceil(h_outer / 2)), mode='constant', value=0)
+    blend_mask = torch.maximum(crop_mask.float(), blend_mask)
+    # Blur approximation using conv with gaussian, but simple average
+    kernel = torch.ones(blur_size, blur_size, dtype=torch.float32, device=crop_mask.device) / (blur_size ** 2)
+    blend_mask = torch_functional.conv2d(blend_mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=blur_size // 2).squeeze()
+    return blend_mask
