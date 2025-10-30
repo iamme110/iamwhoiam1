@@ -22,11 +22,12 @@ def get_box(mask: MaskPyTorch) -> Box:
 
 def morph(mask: MaskPyTorch, iterations=1) -> MaskPyTorch:
     """PyTorch version of morph. Morphological dilate using convolution."""
+    mask = mask.float()  # Convert to float for conv
     if get_mask_area(mask) < 0.01:
         kernel_size = 5
     else:
         kernel_size = 15
-    kernel = torch.ones(kernel_size, kernel_size, dtype=mask.dtype, device=mask.device)
+    kernel = torch.ones(kernel_size, kernel_size, dtype=torch.float32, device=mask.device)
     for _ in range(iterations):
         mask = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=kernel_size // 2) > 0
         mask = mask.squeeze()
@@ -35,9 +36,10 @@ def morph(mask: MaskPyTorch, iterations=1) -> MaskPyTorch:
 
 def dilate_mask(mask: MaskPyTorch, dilatation_size=11, iterations=2) -> MaskPyTorch:
     """PyTorch version of dilate_mask. Dilates mask using convolution."""
+    mask = mask.float()  # Convert to float for conv
     if iterations == 0:
-        return mask
-    kernel = torch.ones(dilatation_size, dilatation_size, dtype=mask.dtype, device=mask.device)
+        return mask > 0
+    kernel = torch.ones(dilatation_size, dilatation_size, dtype=torch.float32, device=mask.device)
     for _ in range(iterations):
         mask = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=dilatation_size // 2) > 0
         mask = mask.squeeze()
@@ -50,31 +52,34 @@ def extend_mask(mask: MaskPyTorch, value) -> MaskPyTorch:
         return mask
     target_size = 256
     # Resize down, morph, resize back, clean boundaries
-    resized_down = image_utils_pt.resize(mask, target_size, mode='nearest')
-    morphed = morph(resized_down, iterations=value)
-    resized_back = image_utils_pt.resize(morphed, (int(mask.shape[0]), int(mask.shape[1])), mode='nearest')
-    cleaned = clean_up_boundaries(resized_back)
+    resized_down = image_utils_pt.resize(mask.float(), target_size, mode='nearest')
+    morphed = morph(resized_down)
+    resized_back = image_utils_pt.resize(morphed.float(), (int(mask.shape[0]), int(mask.shape[1])), mode='nearest')
+    cleaned = clean_up_boundaries(resized_back > 0)
     return cleaned
 
 
 def clean_up_boundaries(mask: MaskPyTorch, kernel_size=19) -> MaskPyTorch:
     """PyTorch version of clean_up_boundaries. Morphological close (dilate then erode)."""
+    mask = mask.float()  # Convert to float for conv
     # Close: dilate then erode
-    kernel = torch.ones(kernel_size, kernel_size, dtype=mask.dtype, device=mask.device)
+    kernel = torch.ones(kernel_size, kernel_size, dtype=torch.float32, device=mask.device)
     # Dilate
     dilated = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=kernel_size // 2) > 0
     dilated = dilated.squeeze()
     # Erode the dilated
-    inverted = 1 - dilated
-    eroded = 1 - (torch_functional.conv2d(inverted.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=kernel_size // 2) > 0).squeeze()
+    inverted = 1.0 - dilated.float()
+    eroded = 1.0 - (torch_functional.conv2d(inverted.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=kernel_size // 2) > 0).float()
+    eroded = eroded.squeeze()
     return eroded
 
 
 def fill_holes(mask: MaskPyTorch) -> MaskPyTorch:
     """PyTorch version of fill_holes. Fills holes in mask using flood fill approximation."""
+    mask = mask.float()  # Convert to float for conv
     # Simple approximation: dilate and keep original
     # For proper fill, it's complex; this is a basic version
-    kernel = torch.ones(3, 3, dtype=mask.dtype, device=mask.device)
+    kernel = torch.ones(3, 3, dtype=torch.float32, device=mask.device)
     dilated = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=1) > 0
     filled = dilated.squeeze()
     return filled

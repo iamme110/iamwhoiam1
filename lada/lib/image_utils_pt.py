@@ -110,11 +110,17 @@ def resize(img: torch.Tensor, size: int | tuple[int, int], mode='bilinear', alig
     # Add batch dim if needed
     if img.dim() == 2:
         img = img.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
-        resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode, align_corners=align_corners)
+        if mode in ['linear', 'bilinear', 'bicubic', 'trilinear']:
+            resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode, align_corners=align_corners)
+        else:
+            resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode)
         resized = resized.squeeze(0).squeeze(0)  # (H, W)
-    else:  # img.dim() == 3
+    elif img.dim() == 3:
         img = img.unsqueeze(0)  # (1, C, H, W)
-        resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode, align_corners=align_corners)
+        if mode in ['linear', 'bilinear', 'bicubic', 'trilinear']:
+            resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode, align_corners=align_corners)
+        else:
+            resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode)
         resized = resized.squeeze(0)  # (C, H, W)
     return resized
 
@@ -138,11 +144,17 @@ def resize_simple(img: torch.Tensor, size: int, mode='bilinear', align_corners=F
     # Resize
     if img.dim() == 2:
         img = img.unsqueeze(0).unsqueeze(0)
-        resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode, align_corners=align_corners)
+        if mode in ['linear', 'bilinear', 'bicubic', 'trilinear']:
+            resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode, align_corners=align_corners)
+        else:
+            resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode)
         resized = resized.squeeze(0).squeeze(0)
     else:  # img.dim() == 3
         img = img.unsqueeze(0)
-        resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode, align_corners=align_corners)
+        if mode in ['linear', 'bilinear', 'bicubic', 'trilinear']:
+            resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode, align_corners=align_corners)
+        else:
+            resized = torch_functional.interpolate(img, size=(new_h, new_w), mode=mode)
         resized = resized.squeeze(0)
     return resized
 
