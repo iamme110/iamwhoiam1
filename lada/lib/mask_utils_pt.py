@@ -13,23 +13,30 @@ def get_box(mask: MaskPyTorch) -> Box:
     rows = torch.any(mask, dim=1)
     cols = torch.any(mask, dim=0)
     t = torch.where(rows)[0][0].item()
-    b = torch.where(rows)[0][-1].item()
+    b = torch.where(rows)[0][-1].item() + 1
     l = torch.where(cols)[0][0].item()
-    r = torch.where(cols)[0][-1].item()
+    r = torch.where(cols)[0][-1].item() + 1
     box = t, l, b, r
     return box
 
 
 def morph(mask: MaskPyTorch, iterations=1) -> MaskPyTorch:
-    """PyTorch version of morph. Morphological dilate using convolution."""
+    """PyTorch version of morph. Morphological dilate using convolution with circular kernel."""
     mask = mask.float()  # Convert to float for conv
     if get_mask_area(mask) < 0.01:
         kernel_size = 5
     else:
         kernel_size = 15
-    kernel = torch.ones(kernel_size, kernel_size, dtype=torch.float32, device=mask.device)
+    # Create circular kernel to approximate cv2 MORPH_ELLIPSE
+    kernel = torch.zeros(kernel_size, kernel_size, dtype=torch.float32, device=mask.device)
+    center = kernel_size // 2
+    radius = center
+    for i in range(kernel_size):
+        for j in range(kernel_size):
+            if (i - center) ** 2 + (j - center) ** 2 <= radius ** 2:
+                kernel[i, j] = 1.0
     for _ in range(iterations):
-        mask = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=kernel_size // 2) > 0
+        mask = torch_functional.conv2d(mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=center) > 0
         mask = mask.squeeze()
     return mask
 
