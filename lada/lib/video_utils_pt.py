@@ -3,7 +3,7 @@ import torch
 from torchvision.transforms import functional as torch_functional
 from fractions import Fraction
 
-from lada.lib import ImagePyTorch, MaskPyTorch
+from lada.lib import ImagePt, MaskPt
 
 class VideoReaderPT(abc.ABC):
     @abc.abstractmethod
@@ -69,7 +69,7 @@ from .av_video_utils_pt import AVVideoReaderPT, AVVideoWriterPT
 NowVideoReaderPT = AVVideoReaderPT
 NowVideoWriterPT = AVVideoWriterPT
 
-def read_video_frames_pt(path: str, float32: bool = True, start_idx: int = 0, end_idx: int | None = None, normalize_neg1_pos1=False, binary_frames=False) -> list[ImagePyTorch]:
+def read_video_frames_pt(path: str, float32: bool = True, start_idx: int = 0, end_idx: int | None = None, normalize_neg1_pos1=False, binary_frames=False) -> list[ImagePt]:
     with NowVideoReaderPT(path) as video_reader:
         frames = []
         i = 0
@@ -88,7 +88,7 @@ def read_video_frames_pt(path: str, float32: bool = True, start_idx: int = 0, en
                 break
     return frames
 
-def resize_video_frames_pt(frames: list[ImagePyTorch], size: int | tuple[int, int]) -> list[ImagePyTorch]:
+def resize_video_frames_pt(frames: list[ImagePt], size: int | tuple[int, int]) -> list[ImagePt]:
     resized = []
     if isinstance(size, int):
         target_size = [size, size]
@@ -106,7 +106,7 @@ def resize_video_frames_pt(frames: list[ImagePyTorch], size: int | tuple[int, in
     return resized
 
 
-def pad_to_compatible_size_for_video_codecs_pt(imgs: list[ImagePyTorch]) -> list[ImagePyTorch]:
+def pad_to_compatible_size_for_video_codecs_pt(imgs: list[ImagePt]) -> list[ImagePt]:
     # dims need to be divisible by 2 by most codecs. given the chroma / pix format dims must be divisible by 4
     h, w = imgs[0].shape[:2]
     pad_h = 0 if h % 4 == 0 else 4 - (h % 4)
@@ -122,7 +122,7 @@ def pad_to_compatible_size_for_video_codecs_pt(imgs: list[ImagePyTorch]) -> list
         return padded
 
 
-def write_frames_to_video_file_pt(frames: list[ImagePyTorch], output_path, fps: int | float | Fraction, codec='libx264', preset='medium', crf=None):
+def write_frames_to_video_file_pt(frames: list[ImagePt], output_path, fps: int | float | Fraction, codec='libx264', preset='medium', crf=None):
     width = frames[0].shape[1]
     height = frames[0].shape[0]
     with NowVideoWriterPT(output_path, width, height, fps, codec, crf=crf, preset=preset) as writer:
@@ -130,7 +130,7 @@ def write_frames_to_video_file_pt(frames: list[ImagePyTorch], output_path, fps: 
             writer.write(frame)
 
 
-def write_masks_to_video_file_pt(frames: list[MaskPyTorch], output_path, fps: int | float | Fraction):
+def write_masks_to_video_file_pt(frames: list[MaskPt], output_path, fps: int | float | Fraction):
     width = frames[0].shape[1]
     height = frames[0].shape[0]
     with NowVideoWriterPT(output_path, width, height, fps, 'ffv1', custom_encoder_options='-level 3') as writer:

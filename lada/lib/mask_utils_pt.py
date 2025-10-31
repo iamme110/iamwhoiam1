@@ -3,11 +3,11 @@
 import torch
 from torch.nn import functional as torch_functional
 
-from lada.lib import Box, MaskPyTorch
+from lada.lib import Box, MaskPt
 from lada.lib import image_utils_pt
 
 
-def get_box(mask: MaskPyTorch) -> Box:
+def get_box(mask: MaskPt) -> Box:
     """PyTorch version of get_box. Finds bounding box from mask tensor."""
     mask = mask.squeeze() > 0  # Ensure (H, W) and binary
     rows = torch.any(mask, dim=1)
@@ -20,7 +20,7 @@ def get_box(mask: MaskPyTorch) -> Box:
     return box
 
 
-def morph(mask: MaskPyTorch, iterations=1) -> MaskPyTorch:
+def morph(mask: MaskPt, iterations=1) -> MaskPt:
     """PyTorch version of morph. Morphological dilate using convolution with circular kernel."""
     mask = mask.float()  # Convert to float for conv
     if get_mask_area(mask) < 0.01:
@@ -41,7 +41,7 @@ def morph(mask: MaskPyTorch, iterations=1) -> MaskPyTorch:
     return mask
 
 
-def dilate_mask(mask: MaskPyTorch, dilatation_size=11, iterations=2) -> MaskPyTorch:
+def dilate_mask(mask: MaskPt, dilatation_size=11, iterations=2) -> MaskPt:
     """PyTorch version of dilate_mask. Dilates mask using convolution."""
     mask = mask.float()  # Convert to float for conv
     if iterations == 0:
@@ -53,7 +53,7 @@ def dilate_mask(mask: MaskPyTorch, dilatation_size=11, iterations=2) -> MaskPyTo
     return mask
 
 
-def extend_mask(mask: MaskPyTorch, value) -> MaskPyTorch:
+def extend_mask(mask: MaskPt, value) -> MaskPt:
     """PyTorch version of extend_mask. Extends mask area."""
     if value == 0:
         return mask
@@ -66,7 +66,7 @@ def extend_mask(mask: MaskPyTorch, value) -> MaskPyTorch:
     return cleaned
 
 
-def clean_up_boundaries(mask: MaskPyTorch, kernel_size=19) -> MaskPyTorch:
+def clean_up_boundaries(mask: MaskPt, kernel_size=19) -> MaskPt:
     """PyTorch version of clean_up_boundaries. Morphological close (dilate then erode)."""
     mask = mask.float()  # Convert to float for conv
     # Close: dilate then erode
@@ -81,7 +81,7 @@ def clean_up_boundaries(mask: MaskPyTorch, kernel_size=19) -> MaskPyTorch:
     return eroded
 
 
-def fill_holes(mask: MaskPyTorch) -> MaskPyTorch:
+def fill_holes(mask: MaskPt) -> MaskPt:
     """PyTorch version of fill_holes. Fills holes in mask using flood fill approximation."""
     mask = mask.float()  # Convert to float for conv
     # Simple approximation: dilate and keep original
@@ -92,13 +92,13 @@ def fill_holes(mask: MaskPyTorch) -> MaskPyTorch:
     return filled
 
 
-def get_mask_area(mask: MaskPyTorch) -> float:
+def get_mask_area(mask: MaskPt) -> float:
     """PyTorch version of get_mask_area. Calculates mask area ratio."""
     pixels = torch.sum(mask > 0).item()
     return pixels / (mask.shape[0] * mask.shape[1])
 
 
-def create_blend_mask(crop_mask: MaskPyTorch):
+def create_blend_mask(crop_mask: MaskPt):
     """PyTorch version of create_blend_mask. Creates blend mask."""
     crop_mask = crop_mask.squeeze() > 0
     h, w = crop_mask.shape

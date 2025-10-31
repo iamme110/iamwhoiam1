@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as torch_functional
-from lada.lib import Box, ImagePyTorch, MaskPyTorch, VideoMetadata, threading_utils
+from lada.lib import Box, ImagePt, MaskPt, VideoMetadata, threading_utils
 from lada.lib.mosaic_detection_model_pt import MosaicDetectionModelPT
 from lada.lib.scene_utils_pt import crop_to_box_v3_pt
 from lada.lib.video_utils_pt import NowVideoReaderPT
@@ -16,7 +16,7 @@ from lada import LOG_LEVEL
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-def convert_pt_box(box_tensor, img_shape) -> Box:
+def convert_box_pt(box_tensor, img_shape) -> Box:
     # box_tensor: [x1, y1, x2, y2, conf, cls]
     x1, y1, x2, y2 = box_tensor[:4]
     l = int(torch.clip(x1, 0, img_shape[1]).item())
@@ -25,7 +25,7 @@ def convert_pt_box(box_tensor, img_shape) -> Box:
     b = int(torch.clip(y2, 0, img_shape[0]).item())
     return t, l, b, r
 
-def convert_pt_mask(mask_tensor, img_shape) -> MaskPyTorch:
+def convert_mask_pt(mask_tensor, img_shape) -> MaskPt:
     # mask_tensor: [H, W]
     # Resize using PyTorch
     mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0).float()  # [1, 1, H, W]
@@ -34,7 +34,7 @@ def convert_pt_mask(mask_tensor, img_shape) -> MaskPyTorch:
     mask_img = (mask_resized > 0.5).float()
     return mask_img
 
-def pt_resize(img: ImagePyTorch, size, interpolation='linear'):
+def resize_pt(img: ImagePt, size, interpolation='linear'):
     # img: torch.Tensor HWC
     img_tensor = img.permute(2, 0, 1).float()  # CHW
     if interpolation == 'linear':
@@ -46,7 +46,7 @@ def pt_resize(img: ImagePyTorch, size, interpolation='linear'):
     resized = torch_functional.interpolate(img_tensor.unsqueeze(0), size=size, mode=mode, align_corners=False).squeeze(0)
     return resized.permute(1, 2, 0)  # HWC
 
-def pt_pad(img: ImagePyTorch, height, width, mode='zero'):
+def pad_pt(img: ImagePt, height, width, mode='zero'):
     # img: torch.Tensor HWC
     img_tensor = img.permute(2, 0, 1).float()  # CHW
     h, w = img_tensor.shape[1], img_tensor.shape[2]
@@ -68,7 +68,7 @@ def pt_pad(img: ImagePyTorch, height, width, mode='zero'):
         raise NotImplementedError()
     return padded.permute(1, 2, 0), (pad_h_t, pad_h_b, pad_w_l, pad_w_r)
 
-class Scene:
+class ScenePt:
     def __init__(self, file_path: Path, video_meta_data: VideoMetadata):
         self.file_path = file_path
         self.video_meta_data = video_meta_data
@@ -80,7 +80,7 @@ class Scene:
     def __len__(self):
         return len(self.data)
 
-    def add_frame(self, frame_num: int, img: ImagePyTorch, mask: MaskPyTorch, box: Box):
+    def add_frame(self, frame_num: int, img: ImagePt, mask: MaskPt, box: Box):
         if self.frame_start is None:
             self.frame_start = frame_num
             self.frame_end = frame_num
@@ -90,7 +90,7 @@ class Scene:
             self.frame_end = frame_num
             self.data.append((img, mask, box))
 
-    def merge_mask_box(self, mask: MaskPyTorch, box: Box):
+    def merge_mask_box(self, mask: MaskPt, box: Box):
         assert self.belongs(box)
         current_box = self.data[-1][2]
         t = min(current_box[0], box[0])
@@ -137,8 +137,8 @@ class Scene:
             raise StopIteration
 
 
-class Clip:
-    def __init__(self, scene: Scene, size, pad_mode, id):
+class ClipPt:
+    def __init__(self, scene: ScenePt, size, pad_mode, id):
         self.id = id
         self.file_path = scene.file_path
         self.frame_start = scene.frame_start
@@ -167,13 +167,13 @@ class Clip:
             crop_shape = cropped_img.shape
 
             resize_shape = (int(crop_shape[0] * scale_height), int(crop_shape[1] * scale_width))
-            cropped_img = pt_resize(cropped_img, resize_shape, interpolation='linear')
-            cropped_mask = pt_resize(cropped_mask, resize_shape, interpolation='nearest')
+            cropped_img = resize_pt(cropped_img, resize_shape, interpolation='linear')
+            cropped_mask = resize_pt(cropped_mask, resize_shape, interpolation='nearest')
             assert cropped_mask.shape[:2] == cropped_img.shape[:2], f"{cropped_mask.shape[:2]}, {cropped_img.shape[:2]}"
             assert cropped_img.shape[0] <= size or cropped_img.shape[1] <= size
 
-            cropped_img, pad_after_resize = pt_pad(cropped_img, size, size, mode=self.pad_mode)
-            cropped_mask, _ = pt_pad(cropped_mask, size, size, mode='zero')
+            cropped_img, pad_after_resize = pad_pt(cropped_img, size, size, mode=self.pad_mode)
+            cropped_mask, _ = pad_pt(cropped_mask, size, size, mode='zero')
 
             self.data[i] = (cropped_img, cropped_mask, cropped_box, crop_shape, pad_after_resize)
 
@@ -189,10 +189,10 @@ class Clip:
                 max_width = width
         return max_width, max_height
 
-    def get_clip_images(self):
+    def get_clip_images(self) -> list[ImagePt]:
         return [clip_img for clip_img, _, _, _, _ in self.data]
 
-    def get_clip_boxes(self):
+    def get_clip_boxes(self) -> list[Box]:
         return [clip_box for _, _, clip_box, _, _ in self.data]
 
     def pop(self):
@@ -327,7 +327,7 @@ class MosaicDetectorPt:
                         completed_scenes.append(other_scene)
 
         for completed_scene in sorted(completed_scenes, key=lambda s: s.frame_start):
-            clip = Clip(completed_scene, self.clip_size, self.pad_mode, self.clip_counter)
+            clip = ClipPt(completed_scene, self.clip_size, self.pad_mode, self.clip_counter)
             self.queue_stats["mosaic_clip_queue_max_size"] = max(self.mosaic_clip_queue.qsize()+1, self.queue_stats["mosaic_clip_queue_max_size"])
             s = time.time()
             self.mosaic_clip_queue.put(clip)
@@ -339,7 +339,7 @@ class MosaicDetectorPt:
             scenes.remove(completed_scene)
             self.clip_counter += 1
 
-    def _create_or_append_scenes_based_on_prediction_result(self, results, scenes: list[Scene], frame_num):
+    def _create_or_append_scenes_based_on_prediction_result(self, results, scenes: list[ScenePt], frame_num):
         mosaic_detected = len(results.boxes) > 0
         self.queue_stats["frame_detection_queue_max_size"] = max(self.frame_detection_queue.qsize()+1, self.queue_stats["frame_detection_queue_max_size"])
         s = time.time()
@@ -350,12 +350,12 @@ class MosaicDetectorPt:
             return
         for i in range(len(results.boxes)):
             if self.model.is_segmentation_model:
-                mask = convert_pt_mask(results.masks[i], results.orig_shape)
+                mask = convert_mask_pt(results.masks[i], results.orig_shape)
             else:
                 # TODO: we currently don't use mosaic masks in the restoration pipeline, so we could also remove it
                 mask = torch.zeros(results.orig_shape[0], results.orig_shape[1], dtype=torch.float32)
 
-            box = convert_pt_box(results.boxes[i], results.orig_shape)
+            box = convert_box_pt(results.boxes[i], results.orig_shape)
 
             current_scene = None
             for scene in scenes:
@@ -368,7 +368,7 @@ class MosaicDetectorPt:
                         current_scene.add_frame(frame_num, results.orig_img, mask, box)
                     break
             if current_scene is None:
-                current_scene = Scene(self.video_file, self.video_meta_data)
+                current_scene = ScenePt(self.video_file, self.video_meta_data)
                 scenes.append(current_scene)
                 current_scene.add_frame(frame_num, results.orig_img, mask, box)
 
@@ -442,7 +442,7 @@ class MosaicDetectorPt:
 
     def _frame_detector_worker(self):
         logger.debug("frame detector worker: started")
-        scenes: list[Scene] = []
+        scenes: list[ScenePt] = []
         frame_num = self.start_frame
         eof = False
         while self.frame_detector_thread_should_be_running:

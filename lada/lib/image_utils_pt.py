@@ -79,7 +79,7 @@ def unpad_image(img: torch.Tensor, pad: Pad):
 
 
 def resize(img: torch.Tensor, size: int | tuple[int, int], mode='bilinear', align_corners=False):
-    """PyTorch version of resize. Resizes tensor using F.interpolate."""
+    """PyTorch version of resize. Resizes tensor using torch_functional.interpolate."""
     if isinstance(size, int):
         if img.dim() == 3:
             h, w = img.shape[1], img.shape[2]

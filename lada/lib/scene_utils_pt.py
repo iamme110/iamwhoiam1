@@ -1,6 +1,6 @@
 ﻿import torch
 
-from lada.lib import Box, MaskPyTorch, ImagePyTorch
+from lada.lib import Box, MaskPt, ImagePt
 
 def box_overlap(box1: Box, box2: Box):
     t1, l1, b1, r1 = box1
@@ -11,7 +11,7 @@ def box_overlap(box1: Box, box2: Box):
     r = min(r1, r2)
     return r > l and b > t
 
-def crop_to_box_v3_pt(box: Box, img: ImagePyTorch, mask_img: MaskPyTorch, target_size: tuple[int, int], max_box_expansion_factor=1.0, border_size=0):
+def crop_to_box_v3_pt(box: Box, img: ImagePt, mask_img: MaskPt, target_size: tuple[int, int], max_box_expansion_factor=1.0, border_size=0):
     """
     Crops Mask and Image by using Box. Will try to grow Box to better fit target size
     Parameters
@@ -68,6 +68,6 @@ def crop_to_box_v3_pt(box: Box, img: ImagePyTorch, mask_img: MaskPyTorch, target
     else:
         scale_factor = min(target_width / width, target_height / height)
 
-    cropped_box = t, l, b, r
+    cropped_box:Box = t, l, b, r
     assert img.shape[:2] == mask_img.shape[:2] == (cropped_box[2]-cropped_box[0]+1, cropped_box[3]-cropped_box[1]+1)
     return img, mask_img, cropped_box, scale_factor
