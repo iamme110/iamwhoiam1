@@ -4,16 +4,20 @@ import pathlib
 import sys
 import tempfile
 import textwrap
+from gettext import gettext as _
 
 import torch
+from sympy.core.evalf import pure_complex
 
 from lada import MODEL_WEIGHTS_DIR, VERSION
 from lada.cli import utils
 from lada.lib import audio_utils
 from lada.lib.frame_restorer import load_models, FrameRestorer
 from lada.lib.video_utils import get_video_meta_data, VideoWriter
+from lada.lib.video_utils_pt import NowVideoWriterPT
 
-def setup_argparser() -> argparse.ArgumentParser:
+
+def setup_argument_parser() -> argparse.ArgumentParser:
     examples_header_text = _("Examples:")
 
     example1_text = _("Restore video with default settings:")
@@ -46,6 +50,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general.add_argument('--output-file-pattern', type=str, default="{orig_file_name}.restored.mp4", help=_("Pattern used to determine output file name(s). Used when input is a directory or a file with no output path specified"))
     group_general.add_argument('--device', type=str, default="cuda:0", help=_('Device used for running Restoration and Detection models. Use "cpu" or "cuda". If you have multiple GPUs you can select a specific one via index e.g. "cuda:0" (default: %(default)s)'))
     group_general.add_argument('--list-devices', action='store_true', help=_("List available devices and exit"))
+    group_general.add_argument('--pure-gpu', default=False, action=argparse.BooleanOptionalAction, help=_("Use pure GPU mode for all operations (default: %(default)s)"))
     group_general.add_argument('--version', action='store_true', help=_("Display version and exit"))
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
 
@@ -71,18 +76,18 @@ def setup_argparser() -> argparse.ArgumentParser:
     return parser
 
 def process_video_file(input_path: str, output_path: str, device, mosaic_restoration_model, mosaic_detection_model,
-                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, moov_front, preset, custom_encoder_options):
+                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, moov_front, preset, custom_encoder_options, pure_gpu):
     video_metadata = get_video_meta_data(input_path)
 
     frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
-                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
+                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode, use_pt=pure_gpu)
     success = True
     video_tmp_file_output_path = os.path.join(tempfile.gettempdir(), f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
     pathlib.Path(output_path).parent.mkdir(exist_ok=True, parents=True)
     try:
         frame_restorer.start()
 
-        with VideoWriter(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
+        with (NowVideoWriterPT if pure_gpu else VideoWriter)(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
                          video_metadata.video_fps_exact, codec=codec, crf=crf, moov_front=moov_front,
                          time_base=video_metadata.time_base, preset=preset,
                          custom_encoder_options=custom_encoder_options) as video_writer:
@@ -113,8 +118,8 @@ def process_video_file(input_path: str, output_path: str, device, mosaic_restora
             os.remove(video_tmp_file_output_path)
 
 def main():
-    argparser = setup_argparser()
-    args = argparser.parse_args()
+    argument_parser = setup_argument_parser()
+    args = argument_parser.parse_args()
     if args.version:
         print("Lada: ", VERSION)
         sys.exit(0)
@@ -131,7 +136,7 @@ def main():
         utils.dump_torch_devices()
         sys.exit(0)
     if args.help or not args.input:
-        argparser.print_help()
+        argument_parser.print_help()
         sys.exit(0)
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         print(_("GPU {device} selected but CUDA is not available").format(device=args.device))
@@ -148,7 +153,7 @@ def main():
 
     mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode = load_models(
         args.device, args.mosaic_restoration_model, args.mosaic_restoration_model_path, args.mosaic_restoration_config_path,
-        args.mosaic_detection_model_path
+        args.mosaic_detection_model_path, use_pt=args.pure_gpu
     )
 
     input_files, output_files = utils.setup_input_and_output_paths(args.input, args.output, args.output_file_pattern)
@@ -161,7 +166,7 @@ def main():
         try:
             process_video_file(input_path=input_path, output_path=output_path, device=args.device, mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
                                mosaic_restoration_model_name=args.mosaic_restoration_model, preferred_pad_mode=preferred_pad_mode, max_clip_length=args.max_clip_length,
-                               codec=args.codec, crf=args.crf, moov_front=args.moov_front, preset=args.preset, custom_encoder_options=args.custom_encoder_options)
+                               codec=args.codec, crf=args.crf, moov_front=args.moov_front, preset=args.preset, custom_encoder_options=args.custom_encoder_options, pure_gpu=args.pure_gpu)
         except KeyboardInterrupt:
             print(_("Received Ctrl-C, stopping restoration."))
             break
