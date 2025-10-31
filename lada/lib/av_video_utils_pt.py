@@ -1,4 +1,4 @@
-﻿import av
+import av
 from typing import Iterator, Tuple
 import torch
 from video_utils_pt import VideoReaderPT, VideoWriterPT
