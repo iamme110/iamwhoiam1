@@ -31,8 +31,6 @@ def get_default_gan_inference_config() -> dict:
 
 def load_model(config: str | dict | None, checkpoint_path, device):
     register_all_modules()
-    if device and type(device) == str:
-        device = torch.device(device)
     if type(config) == str:
         config = Config.fromfile(config).model
     elif type(config) == dict:
@@ -40,9 +38,9 @@ def load_model(config: str | dict | None, checkpoint_path, device):
     else:
         raise Exception("unsupported value for 'config', Must be either a file path to a config file or a dict definition of the model")
     model = MODELS.build(config)
-    load_checkpoint(model, checkpoint_path, map_location='cpu', logger=logger)
+    load_checkpoint(model, checkpoint_path, map_location=device, logger=logger)
     model.cfg = config
-    model.to(device)
+    model.to(torch.device(device) if type(device) == str else device)
     model.eval()
     return model
 

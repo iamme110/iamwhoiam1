@@ -30,6 +30,7 @@ class Scene:
         self.frame_end: int | None = None
         self.use_pt = use_pt
         self._index: int = 0
+        self.maximum = torch.maximum if self.use_pt else np.maximum
 
     def __len__(self):
         return len(self.data)
@@ -54,7 +55,7 @@ class Scene:
         new_box = (t, l, b, r)
 
         current_mask = self.data[-1][1]
-        new_mask = (torch.maximum if self.use_pt else np.maximum)(current_mask, mask)
+        new_mask = self.maximum(current_mask, mask)
 
         self.data[-1] = self.data[-1][0], new_mask, new_box
 
@@ -105,7 +106,7 @@ class Clip:
         scene_images = scene.get_images()
         scene_boxes = scene.get_boxes()
         pad_after_resize = (0, 0, 0, 0)
-        use_pt = scene.use_pt
+        _image_utils = image_utils_pt if scene.use_pt else image_utils
 
         # crop scene
         for i in range(len(scene)):
@@ -116,19 +117,18 @@ class Clip:
         # resize crops to out_size
         max_width, max_height = self.get_max_width_height()
         scale_width, scale_height = size/max_width, size/max_height
-        self.use_pt = use_pt
 
         for i, (cropped_img, cropped_mask, cropped_box, _, _) in enumerate(self.data):
             crop_shape = cropped_img.shape
 
             resize_shape = (int(crop_shape[0] * scale_height), int(crop_shape[1] * scale_width))
-            cropped_img = (image_utils_pt if self.use_pt else image_utils).resize(cropped_img, resize_shape, interpolation=cv2.INTER_LINEAR)
-            cropped_mask = (image_utils_pt if self.use_pt else image_utils).resize(cropped_mask, resize_shape, interpolation=cv2.INTER_NEAREST)
+            cropped_img = _image_utils.resize(cropped_img, resize_shape, interpolation=cv2.INTER_LINEAR)
+            cropped_mask = _image_utils.resize(cropped_mask, resize_shape, interpolation=cv2.INTER_NEAREST)
             assert cropped_mask.shape[:2] == cropped_img.shape[:2], f"{cropped_mask.shape[:2]}, {cropped_img.shape[:2]}"
             assert cropped_img.shape[0] <= size or cropped_img.shape[1] <= size
 
-            cropped_img, pad_after_resize = (image_utils_pt if self.use_pt else image_utils).pad_image(cropped_img, size, size, mode=self.pad_mode)
-            cropped_mask, _ = (image_utils_pt if self.use_pt else image_utils).pad_image(cropped_mask, size, size, mode='zero')
+            cropped_img, pad_after_resize = _image_utils.pad_image(cropped_img, size, size, mode=self.pad_mode)
+            cropped_mask, _ = _image_utils.pad_image(cropped_mask, size, size, mode='zero')
 
             self.data[i] = (cropped_img, cropped_mask, cropped_box, crop_shape, pad_after_resize)
 
@@ -200,6 +200,8 @@ class MosaicDetector:
         self.stop_requested = False
         self.batch_size = batch_size
         self.use_pt = use_pt
+        self._convert_yolo_mask = convert_yolo_mask_pt if self.use_pt else convert_yolo_mask
+        self._convert_yolo_box = convert_yolo_box_pt if self.use_pt else convert_yolo_box
 
         self.queue_stats = {"frame_detection_queue_wait_time_put": 0, "frame_detection_queue_max_size": 0,
                             "mosaic_clip_queue_wait_time_put": 0, "mosaic_clip_queue_max_size": 0,
@@ -307,12 +309,12 @@ class MosaicDetector:
             return
         for i in range(results_num):
             if self.model.is_segmentation_model:
-                mask = (convert_yolo_mask_pt if self.use_pt else convert_yolo_mask)(results.masks[i], results.orig_shape)
+                mask = self._convert_yolo_mask(results.masks[i], results.orig_shape)
             else:
                 # TODO: we currently don't use mosaic masks in the restoration pipeline, so we could also remove it
-                mask = torch.zeros(results.orig_shape, dtype=torch.uint8) if self.use_pt else np.zeros(results.orig_shape, dtype=np.uint8)
+                mask = torch.zeros(results.orig_shape, dtype=torch.bool) if self.use_pt else np.zeros(results.orig_shape, dtype=np.uint8)
 
-            box = (convert_yolo_box_pt if self.use_pt else convert_yolo_box)(results.boxes[i], results.orig_shape)
+            box = self._convert_yolo_box(results.boxes[i], results.orig_shape)
 
             current_scene = None
             for scene in scenes:

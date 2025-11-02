@@ -116,7 +116,7 @@ class MosaicDetectionModel:
             stride=self.stride
         )
 
-        custom = {"conf": 0.25, "batch": 1, "save": False, "mode": "predict", "device": device}
+        custom = {"conf": 0.25, "batch": 4, "save": False, "mode": "predict", "device": device}
         args = {**yolo_model.overrides, **custom, **kwargs}  # highest priority args on the right
         self.args = get_cfg(DEFAULT_CFG, args)
         self.device = torch.device(device)
@@ -153,7 +153,8 @@ class MosaicDetectionModel:
 
     def inference(self, image_batch: torch.Tensor):
         with self._lock:
-            return self.model(image_batch, augment=False, visualize=False, embed=None)
+            with torch.no_grad():
+                return self.model(image_batch, augment=False, visualize=False, embed=None)
 
     def postprocess(self, inference_results, img: torch.Tensor, orig_image: list[Union[Image, ImagePt]]) -> list[Union[Results, MosaicDetectionResults]]:
         protos = inference_results[1][-1]

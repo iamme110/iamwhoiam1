@@ -103,32 +103,38 @@ def resize(img: torch.Tensor, size: int | tuple[int, int], interpolation='biline
         }
         interpolation = cv2_to_torch_interp.get(interpolation, 'bilinear')
     
-    # Handle uint8 input - torch_functional.interpolate only works with float tensors
-    is_byte = img.dtype == torch.uint8
-    if is_byte:
-        img = img.float() / 255.0
+    # Store original dtype for conversion back
+    original_dtype = img.dtype
     
-    # Handle batch dimension and format conversion
+    # Handle special dtypes that torch_functional.interpolate doesn't support
+    convert_back_to_bool = False
+    convert_back_to_int = False
+    
+    if img.dtype == torch.bool:
+        # For bool, convert to uint8 for nearest interpolation
+        img = img.to(torch.uint8)
+        convert_back_to_bool = True
+        interpolation = 'nearest'
+    elif img.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+        # For integer types, use nearest neighbor without conversion
+        convert_back_to_int = True
+        interpolation = 'nearest'
+    
+    # Get dimensions
     original_shape = img.shape
     if len(original_shape) == 3:  # (H, W, C)
         h, w, c = img.shape
-        # Convert to (C, H, W) then add batch dimension: (1, C, H, W)
-        img = img.permute(2, 0, 1).unsqueeze(0)
-        squeeze_output = True
     else:  # (B, H, W, C)
         b, h, w, c = img.shape
-        # Convert to (B, C, H, W)
-        img = img.permute(0, 3, 1, 2)
-        squeeze_output = False
     
+    # Calculate new size
     if type(size) == int:
         # Keep aspect ratio, resize so max dimension equals size
         if max(w, h) == size:
-            # Convert back to original format
-            if squeeze_output:
-                return img.squeeze(0).permute(1, 2, 0)  # (C, H, W) -> (H, W, C)
-            else:
-                return img.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
+            # No resize needed, convert back to original dtype if needed
+            if convert_back_to_bool:
+                img = img.to(torch.bool)
+            return img
             
         if w >= h:
             scale_factor = size / w
@@ -143,19 +149,29 @@ def resize(img: torch.Tensor, size: int | tuple[int, int], interpolation='biline
         # Exact size
         new_h, new_w = size
         if (h, w) == (new_h, new_w):
-            # Convert back to original format
-            if squeeze_output:
-                return img.squeeze(0).permute(1, 2, 0)  # (C, H, W) -> (H, W, C)
-            else:
-                return img.permute(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
+            # No resize needed, convert back to original dtype if needed
+            if convert_back_to_bool:
+                img = img.to(torch.bool)
+            return img
         new_size = (new_h, new_w)
+    
+    # Handle batch dimension and format conversion for interpolation
+    if len(original_shape) == 3:  # (H, W, C)
+        # Convert to (C, H, W) then add batch dimension: (1, C, H, W)
+        img = img.permute(2, 0, 1).unsqueeze(0)
+        squeeze_output = True
+    else:  # (B, H, W, C)
+        # Convert to (B, C, H, W)
+        img = img.permute(0, 3, 1, 2)
+        squeeze_output = False
     
     # Use torch_functional.interpolate for resizing
     resized_img = torch_functional.interpolate(img, size=new_size, mode=interpolation, align_corners=align_corners if interpolation in ['bilinear', 'bicubic'] else None)
     
     # Convert back to original dtype if needed
-    if is_byte:
-        resized_img = resized_img.mul_(255.0).round_().clamp_(0.0, 255.0).byte()
+    if convert_back_to_bool:
+        # Convert back to bool
+        resized_img = resized_img.to(torch.bool)
     
     # Convert back to original format (H, W, C) or (B, H, W, C)
     if squeeze_output:

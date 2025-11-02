@@ -37,7 +37,7 @@ def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_
     else:
         raise NotImplementedError()
     # setting classes=[0] will consider only for class id = 0 as detections (nsfw mosaics) therefore filtering out sfw mosaics (heads, faces)
-    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, use_pt=use_pt)
+    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, use_pt=use_pt, half=True)
     return mosaic_detection_model, mosaic_restoration_model, pad_mode
 
 class MosaicRestorationModelType(Enum):
@@ -226,13 +226,15 @@ class FrameRestorer:
             np.multiply(temp_buffer, blend_mask[..., None], out=temp_buffer)
             np.add(temp_buffer, frame_roi, out=temp_buffer)
             frame_roi[:] = temp_buffer.astype(np.uint8)
+        return frame
 
-    @staticmethod
-    def _restore_frame_pt(frame:ImagePt, frame_num, restored_clips):
+
+    def _restore_frame_pt(self, frame:ImagePt, frame_num, restored_clips):
         """
         Takes mosaic frame and restored clips and replaces mosaic regions in frame with restored content from the clips starting at the same frame number as mosaic frame.
         Pops starting frame from each restored clip in the process if they actually start at the same frame number as frame.
         """
+        frame = frame.to(self.device)
         for buffered_clip in [c for c in restored_clips if c.frame_start == frame_num]:
             clip_img, clip_mask, clip_box, orig_shape, pad_after_resize = buffered_clip.pop()
             orig_shape = orig_shape[:2]
@@ -247,6 +249,7 @@ class FrameRestorer:
                            .lerp_(clip_img, blend_mask)
                            .mul_(255.0).round_().clamp_(0.0, 255.0))
             frame_clip.copy_(frame_clip_.byte())
+        return frame
 
     def _restore_clip(self, clip: Clip):
         """
@@ -366,7 +369,7 @@ class FrameRestorer:
                     while clips_remaining and not self._contains_at_least_one_clip_starting_after_frame_num(frame_num, clip_buffer):
                         clips_remaining = self._read_next_clip(frame_num, clip_buffer)
 
-                    self.restore_frame(frame, frame_num, clip_buffer)
+                    frame = self.restore_frame(frame, frame_num, clip_buffer)
                     self.queue_stats["frame_restoration_queue_max_size"] = max(self.frame_restoration_queue.qsize()+1, self.queue_stats["frame_restoration_queue_max_size"])
                     s = time.time()
                     self.frame_restoration_queue.put((frame, frame_pts))
