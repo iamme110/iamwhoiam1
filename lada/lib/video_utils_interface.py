@@ -1,7 +1,7 @@
 ﻿import abc
-class VideoReaderPT(abc.ABC):
+class PytorchVideoReader(abc.ABC):
     @abc.abstractmethod
-    def __init__(self, file):
+    def __init__(self, file, device):
         pass
 
     @abc.abstractmethod
@@ -21,9 +21,9 @@ class VideoReaderPT(abc.ABC):
         pass
 
 
-class VideoWriterPT(abc.ABC):
+class PytorchVideoWriter(abc.ABC):
     @abc.abstractmethod
-    def __init__(self, file, width, height, fps, codec, crf=None, preset=None, time_base=None, moov_front=False, custom_encoder_options=None):
+    def __init__(self, file, width, height, fps, codec, device, crf=None, preset=None, time_base=None, moov_front=False, custom_encoder_options=None):
         pass
 
     @abc.abstractmethod
@@ -36,10 +36,6 @@ class VideoWriterPT(abc.ABC):
 
     @abc.abstractmethod
     def write(self, frame, frame_pts=None, bgr2rgb=False):
-        pass
-
-    @abc.abstractmethod
-    def release(self):
         pass
 
     @abc.abstractmethod

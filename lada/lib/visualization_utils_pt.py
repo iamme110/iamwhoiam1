@@ -6,7 +6,7 @@ import numpy as np
 from lada.lib import Box
 from lada.lib.image_utils_pt import unpad_image, resize, pad_image_by_pad
 from lada.lib.mask_utils_pt import dilate_mask
-from lada.lib.mosaic_detector_pt import ClipPt
+from lada.lib.mosaic_detector import Clip
 
 
 def overlay_mask(frame: torch.Tensor, mask: torch.Tensor):
@@ -49,7 +49,7 @@ def draw_text(text: str, position: tuple[int, int], output: torch.Tensor, font_s
     return output_tensor
 
 
-def draw_mosaic_detections(clip:ClipPt, border_color=(255, 0, 255)) -> list[torch.Tensor]:
+def draw_mosaic_detections(clip:Clip, border_color=(255, 0, 255)) -> list[torch.Tensor]:
     """PyTorch version of draw_mosaic_detections. Process clip with PyTorch operations."""
     mosaic_detection_images = []
     box_border_thickness = 2

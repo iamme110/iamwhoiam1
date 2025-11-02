@@ -111,7 +111,7 @@ def create_blend_mask(crop_mask: MaskPt):
     blur_size = border_size
     blend_mask = torch.ones((h_inner, w_inner), dtype=torch.float32, device=crop_mask.device)
     blend_mask = torch_functional.pad(blend_mask, (math.floor(w_outer / 2), math.ceil(w_outer / 2), math.floor(h_outer / 2), math.ceil(h_outer / 2)), mode='constant', value=0)
-    blend_mask = torch.maximum(crop_mask.float(), blend_mask)
+    blend_mask = torch.maximum(crop_mask, blend_mask)
     # Blur approximation using conv with gaussian, but simple average
     kernel = torch.ones(blur_size, blur_size, dtype=torch.float32, device=crop_mask.device) / (blur_size ** 2)
     blend_mask = torch_functional.conv2d(blend_mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=blur_size // 2).squeeze()

@@ -3,13 +3,13 @@ from torchvision.transforms import functional as torch_functional
 from fractions import Fraction
 
 from lada.lib import ImagePt, MaskPt
-from .av_video_utils_pt import AVVideoReaderPT, AVVideoWriterPT
+from .av_video_utils_pt import PytorchPyavVideoReader, PytorchPyavVideoWriter
 
-NowVideoReaderPT = AVVideoReaderPT
-NowVideoWriterPT = AVVideoWriterPT
+PytorchAutoVideoReader = PytorchPyavVideoReader
+PytorchAutoVideoWriter = PytorchPyavVideoWriter
 
 def read_video_frames_pt(path: str, float32: bool = True, start_idx: int = 0, end_idx: int | None = None, normalize_neg1_pos1=False, binary_frames=False) -> list[ImagePt]:
-    with NowVideoReaderPT(path) as video_reader:
+    with PytorchAutoVideoReader(path) as video_reader:
         frames = []
         i = 0
         for frame, pts in video_reader.frames():
@@ -44,7 +44,6 @@ def resize_video_frames_pt(frames: list[ImagePt], size: int | tuple[int, int]) -
             resized.append(resized_frame)
     return resized
 
-
 def pad_to_compatible_size_for_video_codecs_pt(imgs: list[ImagePt]) -> list[ImagePt]:
     # dims need to be divisible by 2 by most codecs. given the chroma / pix format dims must be divisible by 4
     h, w = imgs[0].shape[:2]
@@ -60,19 +59,17 @@ def pad_to_compatible_size_for_video_codecs_pt(imgs: list[ImagePt]) -> list[Imag
             padded.append(padded_img)
         return padded
 
-
 def write_frames_to_video_file_pt(frames: list[ImagePt], output_path, fps: int | float | Fraction, codec='libx264', preset='medium', crf=None):
     width = frames[0].shape[1]
     height = frames[0].shape[0]
-    with NowVideoWriterPT(output_path, width, height, fps, codec, crf=crf, preset=preset) as writer:
+    with PytorchAutoVideoWriter(output_path, width, height, fps, codec, crf=crf, preset=preset) as writer:
         for frame in frames:
             writer.write(frame)
-
 
 def write_masks_to_video_file_pt(frames: list[MaskPt], output_path, fps: int | float | Fraction):
     width = frames[0].shape[1]
     height = frames[0].shape[0]
-    with NowVideoWriterPT(output_path, width, height, fps, 'ffv1', custom_encoder_options='-level 3') as writer:
+    with PytorchAutoVideoWriter(output_path, width, height, fps, 'ffv1', custom_encoder_options='-level 3') as writer:
         for frame in frames:
             if frame.dim() == 3 and frame.shape[2] == 1:
                 frame = frame.squeeze(2)

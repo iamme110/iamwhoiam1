@@ -1,35 +1,35 @@
 import av
 from typing import Iterator, Tuple
 import torch
-from lada.lib.video_utils_interface import VideoReaderPT, VideoWriterPT
+from av.container.output import OutputContainer
+from av.container.input import InputContainer
 
-class AVVideoReaderPT(VideoReaderPT):
-    def __init__(self, file):
+from lada.lib.video_utils_interface import PytorchVideoReader, PytorchVideoWriter
+
+class PytorchPyavVideoReader(PytorchVideoReader):
+    def __init__(self, file, device):
         self.file = file
-        self.container = None
-        self.stream = None
+        self.device = device
+        self.container :None | InputContainer = None
 
     def __enter__(self):
         self.container = av.open(self.file)
-        self.stream = self.container.streams.video[0]
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
 
     def frames(self) -> Iterator[Tuple[torch.Tensor, float]]:
-        for packet in self.container.demux(self.stream):
-            for frame in packet.decode():
-                img = frame.to_ndarray(format='bgr24')
-                tensor = torch.from_numpy(img)
-                pts = frame.pts * frame.time_base if frame.pts is not None else 0
-                yield tensor, pts
+        for frame in self.container.decode(video=0):
+            tensor = torch.from_numpy(frame.to_ndarray(format='bgr24'))
+            yield tensor, frame.pts
 
-    def seek(self, offset_sec: float):
-        self.container.seek(int(offset_sec / self.stream.time_base), stream=self.stream)
+    def seek(self, offset_ns: float):
+        offset = int((offset_ns / 1_000_000_000) * av.time_base)
+        self.container.seek(offset)
 
 
-class AVVideoWriterPT(VideoWriterPT):
+class PytorchPyavVideoWriter(PytorchVideoWriter):
     def get_default_encoder_options(self):
         libx264 = {
             'preset': 'medium',
@@ -43,7 +43,7 @@ class AVVideoWriterPT(VideoWriterPT):
         encoder_defaults = {'libx264': libx264, 'h264': libx264, 'libx265': libx265, 'hevc': libx265}
         return encoder_defaults
 
-    def __init__(self, output_path, width, height, fps, codec, crf=None, preset=None, time_base=None, moov_front=False, custom_encoder_options=None):
+    def __init__(self, output_path, width, height, fps, codec, device, crf=None, preset=None, time_base=None, moov_front=False, custom_encoder_options=None):
         # Note: Using av for VideoWriterPT as torchvision.io.write_video is not stream-based
         container_options = {"movflags": "+frag_keyframe+empty_moov+faststart"} if moov_front else {}
         encoder_defaults = self.get_default_encoder_options()
@@ -61,8 +61,8 @@ class AVVideoWriterPT(VideoWriterPT):
         if custom_encoder_options:
             encoder_options.update(self.parse_custom_options(custom_encoder_options))
 
-        output_container = av.open(output_path, "w", options=container_options)
-        video_stream_out: av.VideoStream = output_container.add_stream(codec, fps)
+        output_container: OutputContainer = av.open(output_path, "w", options=container_options)
+        video_stream_out: av.VideoStream = output_container.add_stream(codec, fps, options=encoder_options)
 
         video_stream_out.width = width
         video_stream_out.height = height
@@ -76,7 +76,6 @@ class AVVideoWriterPT(VideoWriterPT):
         video_stream_out.codec_context.thread_type = 3
         video_stream_out.codec_context.time_base = time_base
 
-        video_stream_out.options = encoder_options
         self.output_container = output_container
         self.video_stream = video_stream_out
 
@@ -90,8 +89,8 @@ class AVVideoWriterPT(VideoWriterPT):
         if bgr2rgb:
             frame = frame[:, :, [2, 1, 0]]
         if frame.dtype != torch.uint8:
-            frame = (frame * 255).byte()
-        out_frame = av.VideoFrame.from_ndarray(frame.numpy(), format=format)
+            frame = frame.mul_(255.0).byte()
+        out_frame = av.VideoFrame.from_ndarray(frame.cpu().numpy(), format=format)
         if frame_pts:
             out_frame.pts = frame_pts
         out_packet = self.video_stream.encode(out_frame)

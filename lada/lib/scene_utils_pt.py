@@ -2,15 +2,6 @@
 
 from lada.lib import Box, MaskPt, ImagePt
 
-def box_overlap(box1: Box, box2: Box):
-    t1, l1, b1, r1 = box1
-    t2, l2, b2, r2 = box2
-    t = max(t1, t2)
-    l = max(l1, l2)
-    b = min(b1, b2)
-    r = min(r1, r2)
-    return r > l and b > t
-
 def crop_to_box_v3_pt(box: Box, img: ImagePt, mask_img: MaskPt, target_size: tuple[int, int], max_box_expansion_factor=1.0, border_size=0):
     """
     Crops Mask and Image by using Box. Will try to grow Box to better fit target size

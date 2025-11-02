@@ -14,7 +14,7 @@ from lada.cli import utils
 from lada.lib import audio_utils
 from lada.lib.frame_restorer import load_models, FrameRestorer
 from lada.lib.video_utils import get_video_meta_data, VideoWriter
-from lada.lib.video_utils_pt import NowVideoWriterPT
+from lada.lib.video_utils_pt import PytorchAutoVideoWriter
 
 
 def setup_argument_parser() -> argparse.ArgumentParser:
@@ -87,10 +87,21 @@ def process_video_file(input_path: str, output_path: str, device, mosaic_restora
     try:
         frame_restorer.start()
 
-        with (NowVideoWriterPT if pure_gpu else VideoWriter)(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
-                         video_metadata.video_fps_exact, codec=codec, crf=crf, moov_front=moov_front,
-                         time_base=video_metadata.time_base, preset=preset,
-                         custom_encoder_options=custom_encoder_options) as video_writer:
+        common_args = (video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height, video_metadata.video_fps_exact)
+        common_kwargs = {
+            'codec': codec,
+            'crf': crf,
+            'moov_front': moov_front,
+            'time_base': video_metadata.time_base,
+            'preset': preset,
+            'custom_encoder_options': custom_encoder_options,
+        }
+        if pure_gpu:
+            common_kwargs['device'] = device
+            video_writer = PytorchAutoVideoWriter(*common_args, **common_kwargs)
+        else:
+            video_writer = VideoWriter(*common_args, **common_kwargs)
+        with video_writer:
             frame_restorer_progressbar = utils.Progressbar(video_metadata, frame_restorer)
             for elem in frame_restorer_progressbar:
                 if elem is None:
