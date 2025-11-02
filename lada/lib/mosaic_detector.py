@@ -1,37 +1,40 @@
-import logging
+﻿import logging
+import math
 import queue
 import threading
 import time
 from pathlib import Path
-
+from typing import Union
 import cv2
 import numpy as np
 import torch
-from ultralytics.engine.results import Results
-from lada.lib import Box, Mask, Image, VideoMetadata, threading_utils
+from lada.lib import Box, Mask, MaskPt, Image, ImagePt, VideoMetadata, threading_utils, image_utils_pt
 from lada.lib import image_utils
-from lada.lib.mosaic_detection_model import MosaicDetectionModel
+from ultralytics.engine.results import Results
+from lada.lib.mosaic_detection_model import MosaicDetectionModel, MosaicDetectionResults
 from lada.lib.scene_utils import crop_to_box_v3
 from lada.lib import video_utils
 from lada import LOG_LEVEL
-from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask
+from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask, convert_yolo_box_pt, convert_yolo_mask_pt
+from lada.lib.video_utils_pt import PytorchAutoVideoReader
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
 class Scene:
-    def __init__(self, file_path: Path, video_meta_data: VideoMetadata):
+    def __init__(self, file_path: Path, video_meta_data: VideoMetadata, use_pt=False):
         self.file_path = file_path
         self.video_meta_data = video_meta_data
         self.data: list = []
         self.frame_start: int | None = None
         self.frame_end: int | None = None
+        self.use_pt = use_pt
         self._index: int = 0
 
     def __len__(self):
         return len(self.data)
 
-    def add_frame(self, frame_num: int, img: Image, mask: Mask, box: Box):
+    def add_frame(self, frame_num: int, img: Union[Image, ImagePt], mask: Union[Mask, MaskPt], box: Box):
         if self.frame_start is None:
             self.frame_start = frame_num
             self.frame_end = frame_num
@@ -41,7 +44,7 @@ class Scene:
             self.frame_end = frame_num
             self.data.append((img, mask, box))
 
-    def merge_mask_box(self, mask: Mask, box: Box):
+    def merge_mask_box(self, mask: Union[Mask, MaskPt], box: Box):
         assert self.belongs(box)
         current_box = self.data[-1][2]
         t = min(current_box[0], box[0])
@@ -51,7 +54,7 @@ class Scene:
         new_box = (t, l, b, r)
 
         current_mask = self.data[-1][1]
-        new_mask = np.maximum(current_mask, mask)
+        new_mask = (torch.maximum if self.use_pt else np.maximum)(current_mask, mask)
 
         self.data[-1] = self.data[-1][0], new_mask, new_box
 
@@ -102,28 +105,30 @@ class Clip:
         scene_images = scene.get_images()
         scene_boxes = scene.get_boxes()
         pad_after_resize = (0, 0, 0, 0)
+        use_pt = scene.use_pt
 
         # crop scene
         for i in range(len(scene)):
             img, mask, box = scene_images[i], scene_masks[i], scene_boxes[i]
             cropped_img, cropped_mask, cropped_box, _ = crop_to_box_v3(box, img, mask, (size, size), max_box_expansion_factor=1., border_size=0.06)
-            self.data.append((cropped_img, cropped_mask, cropped_box, cropped_img.shape, pad_after_resize))
+            self.data.append((cropped_img, cropped_mask, cropped_box, img.shape, pad_after_resize))
 
         # resize crops to out_size
         max_width, max_height = self.get_max_width_height()
         scale_width, scale_height = size/max_width, size/max_height
+        self.use_pt = use_pt
 
         for i, (cropped_img, cropped_mask, cropped_box, _, _) in enumerate(self.data):
             crop_shape = cropped_img.shape
 
             resize_shape = (int(crop_shape[0] * scale_height), int(crop_shape[1] * scale_width))
-            cropped_img = image_utils.resize(cropped_img, resize_shape, interpolation=cv2.INTER_LINEAR)
-            cropped_mask = image_utils.resize(cropped_mask, resize_shape, interpolation=cv2.INTER_NEAREST)
+            cropped_img = (image_utils_pt if self.use_pt else image_utils).resize(cropped_img, resize_shape, interpolation=cv2.INTER_LINEAR)
+            cropped_mask = (image_utils_pt if self.use_pt else image_utils).resize(cropped_mask, resize_shape, interpolation=cv2.INTER_NEAREST)
             assert cropped_mask.shape[:2] == cropped_img.shape[:2], f"{cropped_mask.shape[:2]}, {cropped_img.shape[:2]}"
             assert cropped_img.shape[0] <= size or cropped_img.shape[1] <= size
 
-            cropped_img, pad_after_resize = image_utils.pad_image(cropped_img, size, size, mode=self.pad_mode)
-            cropped_mask, _ = image_utils.pad_image(cropped_mask, size, size, mode='zero')
+            cropped_img, pad_after_resize = (image_utils_pt if self.use_pt else image_utils).pad_image(cropped_img, size, size, mode=self.pad_mode)
+            cropped_mask, _ = (image_utils_pt if self.use_pt else image_utils).pad_image(cropped_mask, size, size, mode='zero')
 
             self.data[i] = (cropped_img, cropped_mask, cropped_box, crop_shape, pad_after_resize)
 
@@ -140,7 +145,7 @@ class Clip:
         return max_width, max_height
 
     def get_clip_images(self):
-        return [clip_img for clip_img, _, _, _, _ in self.data]
+        return [d[0] for d in self.data]
 
     def get_clip_boxes(self):
         return [clip_box for _, _, clip_box, _, _ in self.data]
@@ -170,7 +175,7 @@ class Clip:
         return self.data[item]
 
 class MosaicDetector:
-    def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4):
+    def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4, use_pt=False):
         self.model = model
         self.video_file = video_file
         self.device = torch.device(device) if device is not None else device
@@ -194,18 +199,13 @@ class MosaicDetector:
         self.inference_worker_thread_should_be_running = False
         self.stop_requested = False
         self.batch_size = batch_size
+        self.use_pt = use_pt
 
-        self.queue_stats = {}
-        self.queue_stats["frame_detection_queue_wait_time_put"] = 0
-        self.queue_stats["frame_detection_queue_max_size"] = 0
-        self.queue_stats["mosaic_clip_queue_wait_time_put"] = 0
-        self.queue_stats["mosaic_clip_queue_max_size"] = 0
-        self.queue_stats["frame_feeder_queue_wait_time_put"] = 0
-        self.queue_stats["frame_feeder_queue_wait_time_get"] = 0
-        self.queue_stats["frame_feeder_queue_max_size"] = 0
-        self.queue_stats["inference_queue_wait_time_put"] = 0
-        self.queue_stats["inference_queue_wait_time_get"] = 0
-        self.queue_stats["inference_queue_max_size"] = 0
+        self.queue_stats = {"frame_detection_queue_wait_time_put": 0, "frame_detection_queue_max_size": 0,
+                            "mosaic_clip_queue_wait_time_put": 0, "mosaic_clip_queue_max_size": 0,
+                            "frame_feeder_queue_wait_time_put": 0, "frame_feeder_queue_wait_time_get": 0,
+                            "frame_feeder_queue_max_size": 0, "inference_queue_wait_time_put": 0,
+                            "inference_queue_wait_time_get": 0, "inference_queue_max_size": 0}
 
     def start(self, start_ns):
         assert self.frame_feeder_queue.empty()
@@ -295,8 +295,9 @@ class MosaicDetector:
             scenes.remove(completed_scene)
             self.clip_counter += 1
 
-    def _create_or_append_scenes_based_on_prediction_result(self, results: Results, scenes: list[Scene], frame_num):
-        mosaic_detected = len(results.boxes) > 0
+    def _create_or_append_scenes_based_on_prediction_result(self, results: Union[Results, MosaicDetectionResults], scenes: list[Scene], frame_num):
+        results_num = len(results.boxes)
+        mosaic_detected = results_num > 0
         self.queue_stats["frame_detection_queue_max_size"] = max(self.frame_detection_queue.qsize()+1, self.queue_stats["frame_detection_queue_max_size"])
         s = time.time()
         self.frame_detection_queue.put((frame_num, mosaic_detected))
@@ -304,13 +305,14 @@ class MosaicDetector:
         if self.stop_requested:
             logger.debug("frame detector worker: frame_detection_queue producer unblocked")
             return
-        for i in range(len(results.boxes)):
+        for i in range(results_num):
             if self.model.is_segmentation_model:
-                mask = convert_yolo_mask(results.masks[i], results.orig_shape)
+                mask = (convert_yolo_mask_pt if self.use_pt else convert_yolo_mask)(results.masks[i], results.orig_shape)
             else:
                 # TODO: we currently don't use mosaic masks in the restoration pipeline, so we could also remove it
-                mask = np.zeros(results.orig_shape, dtype=np.uint8)
-            box = convert_yolo_box(results.boxes[i], results.orig_shape)
+                mask = torch.zeros(results.orig_shape, dtype=torch.uint8) if self.use_pt else np.zeros(results.orig_shape, dtype=np.uint8)
+
+            box = (convert_yolo_box_pt if self.use_pt else convert_yolo_box)(results.boxes[i], results.orig_shape)
 
             current_scene = None
             for scene in scenes:
@@ -323,21 +325,22 @@ class MosaicDetector:
                         current_scene.add_frame(frame_num, results.orig_img, mask, box)
                     break
             if current_scene is None:
-                current_scene = Scene(self.video_file, self.video_meta_data)
+                current_scene = Scene(self.video_file, self.video_meta_data, self.use_pt)
                 scenes.append(current_scene)
                 current_scene.add_frame(frame_num, results.orig_img, mask, box)
 
     def _frame_feeder_worker(self):
         logger.debug("frame feeder: started")
-        with video_utils.VideoReader(self.video_file) as video_reader:
+        with (PytorchAutoVideoReader(self.video_file, device=self.device) if self.use_pt
+        else video_utils.VideoReader(self.video_file)) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
             video_frames_generator = video_reader.frames()
             frame_num = self.start_frame
             eof = False
             while self.frame_feeder_thread_should_be_running:
+                frames = []
                 try:
-                    frames = []
                     for i in range(self.batch_size):
                         frame, _ = next(video_frames_generator)
                         frames.append(frame)

@@ -2,6 +2,7 @@
 
 import torch
 from torch.nn import functional as torch_functional
+from torchvision.transforms import GaussianBlur
 
 from lada.lib import Box, MaskPt
 from lada.lib import image_utils_pt
@@ -59,9 +60,9 @@ def extend_mask(mask: MaskPt, value) -> MaskPt:
         return mask
     target_size = 256
     # Resize down, morph, resize back, clean boundaries
-    resized_down = image_utils_pt.resize(mask.float(), target_size, mode='nearest')
+    resized_down = image_utils_pt.resize(mask.float(), target_size, interpolation='nearest')
     morphed = morph(resized_down)
-    resized_back = image_utils_pt.resize(morphed.float(), (int(mask.shape[0]), int(mask.shape[1])), mode='nearest')
+    resized_back = image_utils_pt.resize(morphed.float(), (int(mask.shape[0]), int(mask.shape[1])), interpolation='nearest')
     cleaned = clean_up_boundaries(resized_back > 0)
     return cleaned
 
@@ -100,19 +101,32 @@ def get_mask_area(mask: MaskPt) -> float:
 
 def create_blend_mask(crop_mask: MaskPt):
     """PyTorch version of create_blend_mask. Creates blend mask."""
-    crop_mask = crop_mask.squeeze() > 0
+    crop_mask = torch.squeeze(crop_mask) > 0
     h, w = crop_mask.shape
     border_ratio = 0.05
-    h_inner, w_inner = int(h * (1.0 - border_ratio)), int(w * (1. - border_ratio))
+    h_inner, w_inner = int(h * (1.0-border_ratio)), int(w * (1.-border_ratio))
     h_outer, w_outer = h - h_inner, w - w_inner
     border_size = min(h_outer, w_outer)
     if border_size < 5:
-        return torch.ones_like(crop_mask, dtype=torch.float32)
+        return torch.ones_like(crop_mask, dtype=torch.float32, device=crop_mask.device)
     blur_size = border_size
-    blend_mask = torch.ones((h_inner, w_inner), dtype=torch.float32, device=crop_mask.device)
-    blend_mask = torch_functional.pad(blend_mask, (math.floor(w_outer / 2), math.ceil(w_outer / 2), math.floor(h_outer / 2), math.ceil(h_outer / 2)), mode='constant', value=0)
-    blend_mask = torch.maximum(crop_mask, blend_mask)
-    # Blur approximation using conv with gaussian, but simple average
-    kernel = torch.ones(blur_size, blur_size, dtype=torch.float32, device=crop_mask.device) / (blur_size ** 2)
-    blend_mask = torch_functional.conv2d(blend_mask.unsqueeze(0).unsqueeze(0), kernel.unsqueeze(0).unsqueeze(0), padding=blur_size // 2).squeeze()
+    blend_mask = torch.ones((h_inner, w_inner), device=crop_mask.device, dtype=torch.float32)
+    
+    # PyTorch padding: (left, right, top, bottom)
+    pad_left = math.floor(w_outer / 2)
+    pad_right = math.ceil(w_outer / 2)
+    pad_top = math.floor(h_outer / 2)
+    pad_bottom = math.ceil(h_outer / 2)
+    blend_mask = torch_functional.pad(blend_mask, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
+    
+    blend_mask = torch.maximum(crop_mask.float(), blend_mask)
+    
+    # Apply Gaussian blur using torchvision
+    # GaussianBlur expects (C, H, W) format, so add channel dimension
+    blend_mask = blend_mask.unsqueeze(0)  # Add channel dimension
+    gaussian_blur = GaussianBlur(kernel_size=blur_size if blur_size % 2 == 1 else blur_size + 1, sigma=blur_size/3)
+    blend_mask = gaussian_blur(blend_mask)
+    blend_mask = blend_mask.squeeze(0)  # Remove channel dimension
+    
+    assert blend_mask.shape == crop_mask.shape
     return blend_mask

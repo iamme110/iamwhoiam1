@@ -75,15 +75,9 @@ def inference_pt(model, video: list[ImagePt], device, max_frames=-1):
     if not video:
         raise ValueError("Video list cannot be empty")
 
-    input_frame_count = len(video)
-    input_frame_shape = video[0].shape
-    if device and isinstance(device, str):
-        device = torch.device(device)
-
     with torch.no_grad():
         # Prepare input tensor: stack, normalize, permute to TCHW, add batch dim to BTCHW
-        input_tensor = torch.stack([frame.float() / 255.0 for frame in video], dim=0).permute(0, 3, 1, 2).unsqueeze(0)
-        input_tensor = input_tensor.to(device)  # Move to device once for efficiency
+        input_tensor = torch.stack([frame for frame in video], dim=0).to(device=torch.device(device), dtype=torch.float32).div_(255.0).permute(0, 3, 1, 2).unsqueeze(0)
 
         if max_frames > 0:
             outputs = []
@@ -95,21 +89,7 @@ def inference_pt(model, video: list[ImagePt], device, max_frames=-1):
         else:
             result = model(inputs=input_tensor)
 
-        # Remove batch dim: BTCHW -> TCHW
-        result = result.squeeze(0)
-        # Unbind to list of tensors
-        result_frames = torch.unbind(result, dim=0)
-        # Convert back to uint8 images: HWC
-        output = [
-            (frame * 255.0).round().clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
-            for frame in result_frames
-        ]
-
-        output_frame_count = len(output)
-        output_frame_shape = output[0].shape
-        assert input_frame_count == output_frame_count and input_frame_shape == output_frame_shape, \
-            f"Output shape mismatch: input {input_frame_count}x{input_frame_shape}, output {output_frame_count}x{output_frame_shape}"
-        return output
+        return [frame.permute(1, 2, 0) for frame in result.squeeze(0).unbind(0)]
 
 def test():
     device = "cuda:0"

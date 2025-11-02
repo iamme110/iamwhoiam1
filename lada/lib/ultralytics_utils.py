@@ -46,21 +46,22 @@ def convert_yolo_mask(yolo_mask: ultralytics.engine.results.Masks, img_shape) ->
     mask_img = scale_image(mask_img, img_shape)
     mask_img = np.where(mask_img > 127, 255, 0).astype(np.uint8)
     assert mask_img.ndim == 3 and mask_img.shape[2] == 1
-    return mask_img
-
+    return mask_img # H W C
 
 def _to_mask_img(masks, class_val=0, pixel_val=255) -> Mask:
     masks_tensor = (masks != class_val).int() * pixel_val
     mask_img = masks_tensor.cpu().numpy()[0].astype(np.uint8)
     return mask_img
 
+
 def convert_yolo_mask_pt(yolo_mask: torch.Tensor, img_shape) -> MaskPt:
     if yolo_mask.ndim == 2:
-        yolo_mask = yolo_mask.unsqueeze(0)
+        yolo_mask = yolo_mask.unsqueeze(-1)
     yolo_mask = image_utils_pt.resize(yolo_mask, img_shape)
-    yolo_mask = torch.where(yolo_mask > 0.5, 1.0, 0.0)
-    yolo_mask = yolo_mask.permute(1, 2, 0)
-    return yolo_mask
+    mask_tensor = torch.where(yolo_mask > 0.0, 255, 0).byte()
+    assert mask_tensor.ndim == 3 and mask_tensor.shape[2] == 1
+    return mask_tensor  # H W C
+
 
 def choose_biggest_detection(result: ultralytics.engine.results.Results, tracking_mode=True) -> tuple[
     ultralytics.engine.results.Boxes | None, ultralytics.engine.results.Masks | None]:

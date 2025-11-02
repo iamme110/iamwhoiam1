@@ -10,14 +10,12 @@ import cv2
 import numpy as np
 
 from lada import LOG_LEVEL
-from lada.lib import Image, ImagePt, Mask, MaskPt
+from lada.lib import Image, ImagePt, MaskPt
 from lada.lib import image_utils, video_utils, threading_utils, mask_utils, image_utils_pt, mask_utils_pt, \
     visualization_utils, visualization_utils_pt
-from lada.lib.video_utils_pt import NowVideoReaderPT
+from lada.lib.video_utils_pt import PytorchAutoVideoReader
 from lada.lib.mosaic_detector import MosaicDetector, Clip
-from lada.lib.mosaic_detector_pt import MosaicDetectorPt, ClipPt
 from lada.lib.mosaic_detection_model import MosaicDetectionModel
-from lada.lib.mosaic_detection_model_pt import MosaicDetectionModelPT
 from lada.basicvsrpp.inference import inference as basicvsrpp_inference, inference_pt as basicvsrpp_inference_pt
 
 logger = logging.getLogger(__name__)
@@ -39,7 +37,7 @@ def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_
     else:
         raise NotImplementedError()
     # setting classes=[0] will consider only for class id = 0 as detections (nsfw mosaics) therefore filtering out sfw mosaics (heads, faces)
-    mosaic_detection_model = MosaicDetectionModelPT(mosaic_detection_model_path, device, classes=[0], conf=0.2) if use_pt else MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2)
+    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, use_pt=use_pt)
     return mosaic_detection_model, mosaic_restoration_model, pad_mode
 
 class MosaicRestorationModelType(Enum):
@@ -65,13 +63,16 @@ class FrameRestorer:
         self.stop_requested = False
         self.use_pt = use_pt
 
-        self.mosaic_restoration_model_type: MosaicRestorationModelType = MosaicRestorationModelType.NONE
         if self.mosaic_restoration_model_name.startswith("deepmosaics"):
-            self.mosaic_restoration_model_type = MosaicRestorationModelType.DEEPMOSAICS
+            self._restore_clip_frames = self._restore_clip_frames_deep_mosaics
         elif self.mosaic_restoration_model_name.startswith("basicvsrpp"):
-            self.mosaic_restoration_model_type = MosaicRestorationModelType.BASICVSRPP
+            self._basicvsrpp_inference = basicvsrpp_inference_pt if self.use_pt else basicvsrpp_inference
+            self._restore_clip_frames = self._restore_clip_frames_basicvsrpp
         else:
             raise NotImplementedError()
+
+        self.restore_frame = self._restore_frame_pt if self.use_pt else self._restore_frame
+        self.visualization = visualization_utils_pt if self.use_pt else visualization_utils
 
         # limit queue size to approx 512MB
         self.frame_restoration_queue = queue.Queue()
@@ -91,12 +92,13 @@ class FrameRestorer:
         # no queue size limit needed, elements are tiny
         self.frame_detection_queue = queue.Queue()
 
-        self.mosaic_detector : MosaicDetector| MosaicDetectorPt = (MosaicDetectorPt if self.use_pt else MosaicDetector)(self.mosaic_detection_model, self.video_meta_data.video_file,
+        self.mosaic_detector : MosaicDetector = MosaicDetector(self.mosaic_detection_model, self.video_meta_data.video_file,
                                               frame_detection_queue=self.frame_detection_queue,
                                               mosaic_clip_queue=self.mosaic_clip_queue,
                                               device=self.device,
                                               max_clip_length=self.max_clip_length,
-                                              pad_mode=self.preferred_pad_mode)
+                                              pad_mode=self.preferred_pad_mode,
+                                              use_pt=use_pt)
 
         self.clip_restoration_thread: threading.Thread | None = None
         self.frame_restoration_thread: threading.Thread | None = None
@@ -195,19 +197,14 @@ class FrameRestorer:
                 frame_feeder_queue/max-qsize: {self.mosaic_detector.queue_stats["frame_feeder_queue_max_size"]}/{self.mosaic_detector.frame_feeder_queue.maxsize}"""))
 
 
-    def _restore_clip_frames(self, images: list[Image] | list[ImagePt]) -> list[Image] | list[ImagePt]:
-        if self.mosaic_restoration_model_type == MosaicRestorationModelType.DEEPMOSAICS:
-            from lada.deepmosaics.inference import restore_video_frames
-            from lada.deepmosaics.models import model_util
-            restored_clip_images = restore_video_frames(model_util.device_to_gpu_id(self.device), self.mosaic_restoration_model, images)
-        elif self.mosaic_restoration_model_type == MosaicRestorationModelType.BASICVSRPP:
-            if isinstance(images[0], torch.Tensor):
-                restored_clip_images = basicvsrpp_inference_pt(self.mosaic_restoration_model, images, self.device)
-            else:
-                restored_clip_images = basicvsrpp_inference(self.mosaic_restoration_model, images, self.device)
-        else:
-            raise NotImplementedError()
+    def _restore_clip_frames_deep_mosaics(self, images: list[Image] | list[ImagePt]) -> list[Image] | list[ImagePt]:
+        from lada.deepmosaics.inference import restore_video_frames
+        from lada.deepmosaics.models import model_util
+        restored_clip_images = restore_video_frames(model_util.device_to_gpu_id(self.device), self.mosaic_restoration_model, images)
         return restored_clip_images
+
+    def _restore_clip_frames_basicvsrpp(self, images: list[Image] | list[ImagePt]) -> list[Image] | list[ImagePt]:
+        return self._basicvsrpp_inference(self.mosaic_restoration_model, images, self.device)
 
     @staticmethod
     def _restore_frame(frame:Image, frame_num, restored_clips):
@@ -229,7 +226,7 @@ class FrameRestorer:
             np.multiply(temp_buffer, blend_mask[..., None], out=temp_buffer)
             np.add(temp_buffer, frame_roi, out=temp_buffer)
             frame_roi[:] = temp_buffer.astype(np.uint8)
-            
+
     @staticmethod
     def _restore_frame_pt(frame:ImagePt, frame_num, restored_clips):
         """
@@ -237,16 +234,19 @@ class FrameRestorer:
         Pops starting frame from each restored clip in the process if they actually start at the same frame number as frame.
         """
         for buffered_clip in [c for c in restored_clips if c.frame_start == frame_num]:
-            clip_img, clip_mask, orig_clip_box, orig_crop_shape, pad_after_resize = buffered_clip.pop()
-            clip_img = image_utils_pt.unpad_image(clip_img, pad_after_resize)
-            clip_mask = image_utils_pt.unpad_image(clip_mask, pad_after_resize)
-            clip_img = image_utils_pt.resize(clip_img, orig_crop_shape[:2])
-            clip_mask = image_utils_pt.resize(clip_mask, orig_crop_shape[:2], mode='nearest')
-            t, l, b, r = orig_clip_box
-            blend_mask: MaskPt = mask_utils_pt.create_blend_mask(clip_mask)
-            blended_img = (frame[t:b + 1, l:r + 1, :] * (1 - blend_mask[..., None]) + clip_img * blend_mask[
-                ..., None]).clamp(0, 255).to(torch.uint8)
-            frame[t:b + 1, l:r + 1, :] = blended_img
+            clip_img, clip_mask, clip_box, orig_shape, pad_after_resize = buffered_clip.pop()
+            orig_shape = orig_shape[:2]
+            t, l, b, r = clip_box
+            clip_img = image_utils.unpad_image(clip_img, pad_after_resize)
+            clip_mask = image_utils.unpad_image(clip_mask, pad_after_resize)
+            clip_img = image_utils_pt.resize(clip_img, orig_shape)
+            clip_mask = image_utils_pt.resize(clip_mask, orig_shape, 'nearest')
+            blend_mask = mask_utils_pt.create_blend_mask(clip_mask).unsqueeze(-1)
+            frame_clip = frame[t:b + 1, l:r + 1, :]
+            frame_clip_ = ((frame_clip.float() / 255.0)
+                           .lerp_(clip_img, blend_mask)
+                           .mul_(255.0).round_().clamp_(0.0, 255.0))
+            frame_clip.copy_(frame_clip_.byte())
 
     def _restore_clip(self, clip: Clip):
         """
@@ -254,31 +254,15 @@ class FrameRestorer:
         boundaries on each frame.
         """
         if self.mosaic_detection:
-            restored_clip_images = visualization_utils.draw_mosaic_detections(clip)
+            restored_clip_images = self.visualization.draw_mosaic_detections(clip)
         else:
             images = clip.get_clip_images()
             restored_clip_images = self._restore_clip_frames(images)
         assert len(restored_clip_images) == len(clip.get_clip_images())
 
-        for i in range(len(restored_clip_images)):
-            assert clip.data[i][0].shape == restored_clip_images[i].shape
-            clip.data[i] = restored_clip_images[i], clip.data[i][1], clip.data[i][2], clip.data[i][3], clip.data[i][4]
-
-    def _restore_clip_pt(self, clip :ClipPt):
-        """
-        Restores each contained from of the mosaic clip. If self.mosaic_detection is True will instead draw mosaic detection
-        boundaries on each frame.
-        """
-        if self.mosaic_detection:
-            restored_clip_images = visualization_utils_pt.draw_mosaic_detections(clip)
-        else:
-            images = clip.get_clip_images()
-            restored_clip_images = self._restore_clip_frames(images)
-        assert len(restored_clip_images) == len(clip.get_clip_images())
-
-        for i in range(len(restored_clip_images)):
-            assert clip.data[i][0].shape == restored_clip_images[i].shape
-            clip.data[i] = restored_clip_images[i], clip.data[i][1], clip.data[i][2], clip.data[i][3], clip.data[i][4]
+        for i, (restored_img, orig_data) in enumerate(zip(restored_clip_images, clip.data)):
+            assert orig_data[0].shape == restored_img.shape
+            clip.data[i] = (restored_img, *orig_data[1:])
 
     @staticmethod
     def _collect_garbage(clip_buffer):
@@ -295,7 +279,7 @@ class FrameRestorer:
         eof = False
         while self.clip_restoration_thread_should_be_running:
             s = time.time()
-            clip: None|Clip|ClipPt = self.mosaic_clip_queue.get()
+            clip: None|Clip = self.mosaic_clip_queue.get()
             self.queue_stats["mosaic_clip_queue_wait_time_get"] += time.time() - s
             if self.stop_requested:
                 logger.debug("clip restoration worker: mosaic_clip_queue consumer unblocked")
@@ -309,7 +293,7 @@ class FrameRestorer:
                     self.queue_stats["restored_clip_queue_wait_time_put"] += time.time() -s
                     logger.debug("clip restoration worker: restored_clip_queue producer unblocked")
             else:
-                self._restore_clip_pt(clip) if self.use_pt else self._restore_clip(clip)
+                self._restore_clip(clip)
                 self.queue_stats["restored_clip_queue_max_size"] = max(self.restored_clip_queue.qsize()+1, self.queue_stats["restored_clip_queue_max_size"])
                 s = time.time()
                 self.restored_clip_queue.put(clip)
@@ -355,8 +339,8 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with (NowVideoReaderPT(self.video_meta_data.video_file) if self.use_pt
-              else video_utils.VideoReader(self.video_meta_data.video_file) as video_reader):
+        with (PytorchAutoVideoReader(self.video_meta_data.video_file, device=self.device) if self.use_pt
+        else video_utils.VideoReader(self.video_meta_data.video_file)) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
 
@@ -382,7 +366,7 @@ class FrameRestorer:
                     while clips_remaining and not self._contains_at_least_one_clip_starting_after_frame_num(frame_num, clip_buffer):
                         clips_remaining = self._read_next_clip(frame_num, clip_buffer)
 
-                    (self._restore_frame_pt if self.use_pt else self._restore_frame)(frame, frame_num, clip_buffer)
+                    self.restore_frame(frame, frame_num, clip_buffer)
                     self.queue_stats["frame_restoration_queue_max_size"] = max(self.frame_restoration_queue.qsize()+1, self.queue_stats["frame_restoration_queue_max_size"])
                     s = time.time()
                     self.frame_restoration_queue.put((frame, frame_pts))
