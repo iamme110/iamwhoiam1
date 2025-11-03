@@ -31,15 +31,16 @@ def draw_mosaic_detections(clip, border_color = (255, 0, 255)) -> list[Image]:
     box_border_thickness = 2
     border_thickness_half = box_border_thickness // 2
     for (cropped_img, cropped_mask, _, orig_crop_shape, pad_after_resize) in clip:
-        mosaic_detection_img = cropped_img.copy()
+        cropped_img = cropped_img.cpu().numpy()
+        cropped_mask = cropped_mask.cpu().numpy()
 
-        draw_text(f"c:{clip.id},f_start:{clip.frame_start}",(25, cropped_img.shape[1] // 2), mosaic_detection_img)
+        draw_text(f"c:{clip.id},f_start:{clip.frame_start}",(25, cropped_img.shape[1] // 2), cropped_img)
 
-        mosaic_detection_img = image_utils.unpad_image(mosaic_detection_img, pad_after_resize)
-        shape_before_resize = mosaic_detection_img.shape
-        mosaic_detection_img = image_utils.resize(mosaic_detection_img, orig_crop_shape[:2])
+        cropped_img = image_utils.unpad_image(cropped_img, pad_after_resize)
+        shape_before_resize = cropped_img.shape
+        cropped_img = image_utils.resize(cropped_img, orig_crop_shape[:2])
 
-        t, l, b, r = 0, 0, mosaic_detection_img.shape[0] - 1, mosaic_detection_img.shape[1] - 1
+        t, l, b, r = 0, 0, cropped_img.shape[0] - 1, cropped_img.shape[1] - 1
         border_box = t + border_thickness_half, l + border_thickness_half, b - border_thickness_half, r - border_thickness_half
 
         draw_box(mosaic_detection_img, border_box, color=border_color, thickness=box_border_thickness)
