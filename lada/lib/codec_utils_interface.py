@@ -1,4 +1,4 @@
-﻿import abc
+import abc
 class PytorchVideoReader(abc.ABC):
     @abc.abstractmethod
     def __init__(self, file, device):

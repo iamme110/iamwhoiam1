@@ -4,7 +4,7 @@ import torch
 from av.container.output import OutputContainer
 from av.container.input import InputContainer
 
-from lada.lib.video_utils_interface import PytorchVideoReader, PytorchVideoWriter
+from lada.lib.codec_utils_interface import PytorchVideoReader, PytorchVideoWriter
 
 class PytorchPyavVideoReader(PytorchVideoReader):
     def __init__(self, file, device):

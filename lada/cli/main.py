@@ -11,7 +11,7 @@ from lada.cli import utils
 from lada.lib import audio_utils
 from lada.lib.frame_restorer import load_models, FrameRestorer
 from lada.lib.video_utils import get_video_meta_data, VideoWriter
-from lada.lib.video_utils_pt import PytorchAutoVideoWriter
+from lada.lib.codec_utils import PytorchAutoVideoWriter
 
 
 def setup_argument_parser() -> argparse.ArgumentParser:

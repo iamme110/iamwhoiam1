@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import math
 import queue
 import threading
@@ -18,7 +18,7 @@ from lada.lib.scene_utils import crop_to_box_v3
 from lada.lib import video_utils
 from lada import LOG_LEVEL
 from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask, convert_yolo_box_torch, convert_yolo_mask_torch
-from lada.lib.video_utils_pt import PytorchAutoVideoReader
+from lada.lib.codec_utils import PytorchAutoVideoReader
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)

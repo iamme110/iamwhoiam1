@@ -13,7 +13,7 @@ import lada.lib.image_utils
 from lada import LOG_LEVEL
 from lada.lib import Image, ImagePt, MaskPt
 from lada.lib import image_utils, video_utils, threading_utils, mask_utils, visualization_utils
-from lada.lib.video_utils_pt import PytorchAutoVideoReader
+from lada.lib.codec_utils import PytorchAutoVideoReader
 from lada.lib.mosaic_detector import MosaicDetector, Clip
 from lada.lib.mosaic_detection_model import MosaicDetectionModel
 from lada.basicvsrpp.inference import inference as basicvsrpp_inference, inference_pt as basicvsrpp_inference_pt

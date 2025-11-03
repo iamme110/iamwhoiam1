@@ -1,0 +1,4 @@
+from .codec_utils_pyav import PytorchPyavVideoReader, PytorchPyavVideoWriter
+
+PytorchAutoVideoReader = PytorchPyavVideoReader
+PytorchAutoVideoWriter = PytorchPyavVideoWriter
