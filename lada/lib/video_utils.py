@@ -4,10 +4,11 @@ import re
 import subprocess
 from contextlib import contextmanager
 from fractions import Fraction
-from typing import Callable
+from typing import Callable, Iterator, Tuple, Optional, Union
 
 import av
 import cv2
+import torch
 import numpy as np
 
 from lada.lib import Image, Mask, VideoMetadata, os_utils
@@ -66,9 +67,13 @@ def VideoReaderOpenCV(*args, **kwargs):
         cap.release()
 
 class VideoReader:
-    def __init__(self, file):
+    def __init__(self, file, device: Optional[Union[str, torch.device]] = None):
         self.file = file
         self.container = None
+        if device is None:
+            self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        else:
+            self.device = torch.device(device)
 
     def __enter__(self):
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
@@ -80,10 +85,12 @@ class VideoReader:
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
 
-    def frames(self):
+    def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
         for frame in self.container.decode(video=0):
-            frame_img = frame.to_ndarray(format='bgr24')
-            yield frame_img, frame.pts
+            nd_frame = frame.to_ndarray(format='bgr24')
+            torch_frame = torch.from_numpy(nd_frame)
+            torch_frame = torch_frame.to(device=self.device, non_blocking=False)
+            yield torch_frame, frame.pts
 
     def seek(self, offset_ns):
         offset = int((offset_ns / 1_000_000_000) * av.time_base)
@@ -294,6 +301,8 @@ class VideoWriter:
         self.release()
 
     def write(self, frame, frame_pts=None, bgr2rgb=False):
+        if isinstance(frame, torch.Tensor):
+            frame = frame.cpu().numpy()
         if bgr2rgb:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         out_frame = av.VideoFrame.from_ndarray(frame, format='rgb24')

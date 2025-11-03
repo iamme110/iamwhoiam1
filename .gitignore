@@ -1,5 +1,6 @@
 .venv/
 experiments/
+.vscode/
 *.egg-info/
 *.pth
 *.pt
