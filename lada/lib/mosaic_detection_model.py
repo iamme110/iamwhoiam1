@@ -98,18 +98,18 @@ class PytorchLetterBox:
         return image.permute(1, 2, 0)
 
 class MosaicDetectionModel:
-    def __init__(self, model_path: str, device, imgsz=640, use_pt=False, **kwargs):
+    def __init__(self, model_path: str, device, imgsz=640, use_torch=False, **kwargs):
         yolo_model = YOLO(model_path)
         assert yolo_model.task == 'segment'
         self.stride = 32
-        self.use_pt = use_pt
+        self.use_torch = use_torch
         imgsz_list = check_imgsz(imgsz, stride=self.stride, min_dim=2)
         self.letterbox = PytorchLetterBox(
             (imgsz_list[0], imgsz_list[1]),
             scaleup=True,
             stride=self.stride,
             padding_value=0.447
-        ) if use_pt \
+        ) if use_torch \
         else LetterBox(
             (imgsz_list[0], imgsz_list[1]),
             auto=True,
@@ -138,7 +138,7 @@ class MosaicDetectionModel:
         self._lock = threading.Lock()
 
     def preprocess(self, imgs: list[Union[Image, ImagePt]]):
-        if self.use_pt:
+        if self.use_torch:
             processed_images = torch.stack([self.letterbox(img) for img in imgs])  # B H W C
             return processed_images.to(self.device, torch.float32).div_(255.0).permute(0, 3, 1, 2)  # permute to B C H W
         else:
@@ -180,4 +180,4 @@ class MosaicDetectionModel:
         if masks is not None:
             keep = masks.sum((-2, -1)) > 0  # only keep predictions with masks
             inference_result, masks = inference_result[keep], masks[keep]
-        return (MosaicDetectionResults if self.use_pt else Results)(orig_img=orig_img, path='', names=self.model.names, boxes=inference_result[:, :6], masks=masks)
+        return (MosaicDetectionResults if self.use_torch else Results)(orig_img=orig_img, path='', names=self.model.names, boxes=inference_result[:, :6], masks=masks)

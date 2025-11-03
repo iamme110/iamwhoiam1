@@ -16,12 +16,12 @@ from lada.lib import image_utils, video_utils, threading_utils, mask_utils, visu
 from lada.lib.codec_utils import PytorchAutoVideoReader
 from lada.lib.mosaic_detector import MosaicDetector, Clip
 from lada.lib.mosaic_detection_model import MosaicDetectionModel
-from lada.basicvsrpp.inference import inference as basicvsrpp_inference, inference_pt as basicvsrpp_inference_pt
+from lada.basicvsrpp.inference import inference as basicvsrpp_inference, inference_torch as basicvsrpp_inference_pt
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_path, mosaic_restoration_config_path, mosaic_detection_model_path, use_pt=False):
+def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_path, mosaic_restoration_config_path, mosaic_detection_model_path, use_torch=False):
     if mosaic_restoration_model_name.startswith("deepmosaics"):
         from lada.deepmosaics.models import loadmodel, model_util
         mosaic_restoration_model = loadmodel.video(model_util.device_to_gpu_id(device), mosaic_restoration_model_path)
@@ -37,13 +37,13 @@ def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_
     else:
         raise NotImplementedError()
     # setting classes=[0] will consider only for class id = 0 as detections (nsfw mosaics) therefore filtering out sfw mosaics (heads, faces)
-    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, use_pt=use_pt, half=True)
+    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, use_torch=use_torch, half=True)
     return mosaic_detection_model, mosaic_restoration_model, pad_mode
 
 class FrameRestorer:
     def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode,
-                 mosaic_detection=False, use_pt=False):
+                 mosaic_detection=False, use_torch=False):
         self.device = device
         self.mosaic_restoration_model_name = mosaic_restoration_model_name
         self.max_clip_length = max_clip_length
@@ -56,17 +56,17 @@ class FrameRestorer:
         self.mosaic_detection = mosaic_detection
         self.eof = False
         self.stop_requested = False
-        self.use_pt = use_pt
+        self.use_torch = use_torch
 
         if self.mosaic_restoration_model_name.startswith("deepmosaics"):
             self._restore_clip_frames = self._restore_clip_frames_deep_mosaics
         elif self.mosaic_restoration_model_name.startswith("basicvsrpp"):
-            self._basicvsrpp_inference = basicvsrpp_inference_pt if self.use_pt else basicvsrpp_inference
+            self._basicvsrpp_inference = basicvsrpp_inference_pt if self.use_torch else basicvsrpp_inference
             self._restore_clip_frames = self._restore_clip_frames_basicvsrpp
         else:
             raise NotImplementedError()
 
-        self.restore_frame = self._restore_frame_pt if self.use_pt else self._restore_frame
+        self.restore_frame = self._restore_frame_pt if self.use_torch else self._restore_frame
 
         # limit queue size to approx 512MB
         self.frame_restoration_queue = queue.Queue()
@@ -87,12 +87,12 @@ class FrameRestorer:
         self.frame_detection_queue = queue.Queue()
 
         self.mosaic_detector : MosaicDetector = MosaicDetector(self.mosaic_detection_model, self.video_meta_data.video_file,
-                                              frame_detection_queue=self.frame_detection_queue,
-                                              mosaic_clip_queue=self.mosaic_clip_queue,
-                                              device=self.device,
-                                              max_clip_length=self.max_clip_length,
-                                              pad_mode=self.preferred_pad_mode,
-                                              use_pt=use_pt)
+                                                               frame_detection_queue=self.frame_detection_queue,
+                                                               mosaic_clip_queue=self.mosaic_clip_queue,
+                                                               device=self.device,
+                                                               max_clip_length=self.max_clip_length,
+                                                               pad_mode=self.preferred_pad_mode,
+                                                               use_torch=use_torch)
 
         self.clip_restoration_thread: threading.Thread | None = None
         self.frame_restoration_thread: threading.Thread | None = None
@@ -336,7 +336,7 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with (PytorchAutoVideoReader(self.video_meta_data.video_file, device=self.device) if self.use_pt
+        with (PytorchAutoVideoReader(self.video_meta_data.video_file, device=self.device) if self.use_torch
         else video_utils.VideoReader(self.video_meta_data.video_file)) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)

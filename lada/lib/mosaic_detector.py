@@ -24,15 +24,15 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
 class Scene:
-    def __init__(self, file_path: Path, video_meta_data: VideoMetadata, use_pt=False):
+    def __init__(self, file_path: Path, video_meta_data: VideoMetadata, use_torch=False):
         self.file_path = file_path
         self.video_meta_data = video_meta_data
         self.data: list = []
         self.frame_start: int | None = None
         self.frame_end: int | None = None
-        self.use_pt = use_pt
+        self.use_torch = use_torch
         self._index: int = 0
-        self.maximum = torch.maximum if self.use_pt else np.maximum
+        self.maximum = torch.maximum if self.use_torch else np.maximum
 
     def __len__(self):
         return len(self.data)
@@ -108,8 +108,8 @@ class Clip:
         scene_images = scene.get_images()
         scene_boxes = scene.get_boxes()
         pad_after_resize = (0, 0, 0, 0)
-        _pad_image = image_utils.pad_image_torch if scene.use_pt else image_utils.pad_image
-        _resize_func = image_utils.resize_torch if scene.use_pt else image_utils.resize
+        _pad_image = image_utils.pad_image_torch if scene.use_torch else image_utils.pad_image
+        _resize_func = image_utils.resize_torch if scene.use_torch else image_utils.resize
 
         # crop scene
         for i in range(len(scene)):
@@ -178,7 +178,7 @@ class Clip:
         return self.data[item]
 
 class MosaicDetector:
-    def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4, use_pt=False):
+    def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4, use_torch=False):
         self.model = model
         self.video_file = video_file
         self.device = torch.device(device) if device is not None else device
@@ -202,9 +202,9 @@ class MosaicDetector:
         self.inference_worker_thread_should_be_running = False
         self.stop_requested = False
         self.batch_size = batch_size
-        self.use_pt = use_pt
-        self._convert_yolo_mask = convert_yolo_mask_torch if self.use_pt else convert_yolo_mask
-        self._convert_yolo_box = convert_yolo_box_torch if self.use_pt else convert_yolo_box
+        self.use_torch = use_torch
+        self._convert_yolo_mask = convert_yolo_mask_torch if self.use_torch else convert_yolo_mask
+        self._convert_yolo_box = convert_yolo_box_torch if self.use_torch else convert_yolo_box
 
         self.queue_stats = {"frame_detection_queue_wait_time_put": 0, "frame_detection_queue_max_size": 0,
                             "mosaic_clip_queue_wait_time_put": 0, "mosaic_clip_queue_max_size": 0,
@@ -315,7 +315,7 @@ class MosaicDetector:
                 mask = self._convert_yolo_mask(results.masks[i], results.orig_shape)
             else:
                 # TODO: we currently don't use mosaic masks in the restoration pipeline, so we could also remove it
-                mask = torch.zeros(results.orig_shape, dtype=torch.bool) if self.use_pt else np.zeros(results.orig_shape, dtype=np.uint8)
+                mask = torch.zeros(results.orig_shape, dtype=torch.bool) if self.use_torch else np.zeros(results.orig_shape, dtype=np.uint8)
 
             box = self._convert_yolo_box(results.boxes[i], results.orig_shape)
 
@@ -330,13 +330,13 @@ class MosaicDetector:
                         current_scene.add_frame(frame_num, results.orig_img, mask, box)
                     break
             if current_scene is None:
-                current_scene = Scene(self.video_file, self.video_meta_data, self.use_pt)
+                current_scene = Scene(self.video_file, self.video_meta_data, self.use_torch)
                 scenes.append(current_scene)
                 current_scene.add_frame(frame_num, results.orig_img, mask, box)
 
     def _frame_feeder_worker(self):
         logger.debug("frame feeder: started")
-        with (PytorchAutoVideoReader(self.video_file, device=self.device) if self.use_pt
+        with (PytorchAutoVideoReader(self.video_file, device=self.device) if self.use_torch
         else video_utils.VideoReader(self.video_file)) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)

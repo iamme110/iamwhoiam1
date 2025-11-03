@@ -47,7 +47,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     group_general.add_argument('--output-file-pattern', type=str, default="{orig_file_name}.restored.mp4", help=_("Pattern used to determine output file name(s). Used when input is a directory or a file with no output path specified"))
     group_general.add_argument('--device', type=str, default="cuda:0", help=_('Device used for running Restoration and Detection models. Use "cpu" or "cuda". If you have multiple GPUs you can select a specific one via index e.g. "cuda:0" (default: %(default)s)'))
     group_general.add_argument('--list-devices', action='store_true', help=_("List available devices and exit"))
-    group_general.add_argument('--pure-gpu', default=False, action=argparse.BooleanOptionalAction, help=_("Use pure GPU mode for all operations (default: %(default)s)"))
+    group_general.add_argument('--use-torch', default=False, action=argparse.BooleanOptionalAction, help=_("Use pure torch mode for all operations (default: %(default)s)"))
     group_general.add_argument('--version', action='store_true', help=_("Display version and exit"))
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
 
@@ -73,11 +73,11 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 def process_video_file(input_path: str, output_path: str, device, mosaic_restoration_model, mosaic_detection_model,
-                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, moov_front, preset, custom_encoder_options, pure_gpu):
+                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, moov_front, preset, custom_encoder_options, use_torch):
     video_metadata = get_video_meta_data(input_path)
 
     frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
-                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode, use_pt=pure_gpu)
+                                   mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode, use_torch=use_torch)
     success = True
     video_tmp_file_output_path = os.path.join(tempfile.gettempdir(), f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
     pathlib.Path(output_path).parent.mkdir(exist_ok=True, parents=True)
@@ -93,7 +93,7 @@ def process_video_file(input_path: str, output_path: str, device, mosaic_restora
             'preset': preset,
             'custom_encoder_options': custom_encoder_options,
         }
-        if pure_gpu:
+        if use_torch:
             common_kwargs['device'] = device
             video_writer = PytorchAutoVideoWriter(*common_args, **common_kwargs)
         else:
@@ -161,7 +161,7 @@ def main():
 
     mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode = load_models(
         args.device, args.mosaic_restoration_model, args.mosaic_restoration_model_path, args.mosaic_restoration_config_path,
-        args.mosaic_detection_model_path, use_pt=args.pure_gpu
+        args.mosaic_detection_model_path, use_torch=args.use_torch
     )
 
     input_files, output_files = utils.setup_input_and_output_paths(args.input, args.output, args.output_file_pattern)
@@ -174,7 +174,7 @@ def main():
         try:
             process_video_file(input_path=input_path, output_path=output_path, device=args.device, mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
                                mosaic_restoration_model_name=args.mosaic_restoration_model, preferred_pad_mode=preferred_pad_mode, max_clip_length=args.max_clip_length,
-                               codec=args.codec, crf=args.crf, moov_front=args.moov_front, preset=args.preset, custom_encoder_options=args.custom_encoder_options, pure_gpu=args.pure_gpu)
+                               codec=args.codec, crf=args.crf, moov_front=args.moov_front, preset=args.preset, custom_encoder_options=args.custom_encoder_options, use_torch=args.use_torch)
         except KeyboardInterrupt:
             print(_("Received Ctrl-C, stopping restoration."))
             break
