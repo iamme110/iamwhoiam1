@@ -52,7 +52,7 @@ def scale_and_unpad_image(masks, im0_shape):
     b, r = h1 - round(ph + 0.1), w1 - round(pw + 0.1)
     x = masks[t:b, l:r].permute(2, 0, 1).unsqueeze(0).float()
     y = F.interpolate(x, size=(h0, w0), mode='bilinear', align_corners=False)
-    return y.squeeze(0).permute(1, 2, 0).round_().to(masks.dtype)
+    return y.squeeze(0).permute(1, 2, 0).round().clamp(0, 255).to(masks.dtype)
 
 def convert_yolo_mask_tensor(yolo_mask: ultralytics.engine.results.Masks, img_shape) -> torch.Tensor:
     mask_img = _to_mask_img_tensor(yolo_mask.data)

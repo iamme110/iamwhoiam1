@@ -55,7 +55,7 @@ def inference(model, video: list[torch.Tensor], max_frames=-1):
 
         # (H, W, C[BGR]) uint8 images to (B, T, C, H, W) float in [0,1]
         input = torch.stack([x.permute(2, 0, 1).float().div(255.0) for x in video])
-        input.unsqueeze_(0)
+        input =     input.unsqueeze(0)
         if max_frames > 0:
             for i in range(0, input.shape[1], max_frames):
                 output = model(inputs=input[:, i:i + max_frames])
