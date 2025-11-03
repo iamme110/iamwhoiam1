@@ -10,10 +10,10 @@ from ultralytics.nn.autobackend import AutoBackend
 from ultralytics.cfg import get_cfg
 from ultralytics.utils import DEFAULT_CFG
 from ultralytics import YOLO
-from lada.lib import Image, ImagePt
+from lada.lib import Image, ImageTorch
 from ultralytics.engine.results import Results
 class MosaicDetectionResults:
-    def __init__(self, orig_img: ImagePt, path, names, boxes, masks):
+    def __init__(self, orig_img: ImageTorch, path, names, boxes, masks):
         self.orig_img = orig_img
         self.orig_shape = orig_img.shape[:2]
         self.path = path
@@ -137,7 +137,7 @@ class MosaicDetectionModel:
         self.is_segmentation_model = yolo_model.task == 'segment'
         self._lock = threading.Lock()
 
-    def preprocess(self, imgs: list[Union[Image, ImagePt]]):
+    def preprocess(self, imgs: list[Union[Image, ImageTorch]]):
         if self.use_torch:
             processed_images = torch.stack([self.letterbox(img) for img in imgs])  # B H W C
             return processed_images.to(self.device, torch.float32).div_(255.0).permute(0, 3, 1, 2)  # permute to B C H W
@@ -156,7 +156,7 @@ class MosaicDetectionModel:
             with torch.no_grad():
                 return self.model(image_batch, augment=False, visualize=False, embed=None)
 
-    def postprocess(self, inference_results, img: torch.Tensor, orig_image: list[Union[Image, ImagePt]]) -> list[Union[Results, MosaicDetectionResults]]:
+    def postprocess(self, inference_results, img: torch.Tensor, orig_image: list[Union[Image, ImageTorch]]) -> list[Union[Results, MosaicDetectionResults]]:
         protos = inference_results[1][-1]
         inference_results = nms.non_max_suppression(
             inference_results,
@@ -171,7 +171,7 @@ class MosaicDetectionModel:
         return [self.construct_result(inference_result, img, orig_img, proto)
                 for inference_result, orig_img, proto in zip(inference_results, orig_image, protos)]
     
-    def construct_result(self, inference_result: torch.Tensor, img: torch.Tensor, orig_img: Union[Image, ImagePt], proto: torch.Tensor) -> Union[Results, MosaicDetectionResults]:
+    def construct_result(self, inference_result: torch.Tensor, img: torch.Tensor, orig_img: Union[Image, ImageTorch], proto: torch.Tensor) -> Union[Results, MosaicDetectionResults]:
         if not len(inference_result):  # save empty boxes
             masks = None
         else:

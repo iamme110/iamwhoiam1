@@ -7,7 +7,7 @@ from lada.basicvsrpp import register_all_modules
 from mmengine.config import Config
 from mmengine.runner import load_checkpoint
 
-from lada.lib import Image, ImagePt
+from lada.lib import Image, ImageTorch
 from lada.lib.image_utils import img2tensor, tensor2img
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ def inference(model, video: list, device, max_frames=-1):
         assert input_frame_count == output_frame_count and input_frame_shape == output_frame_shape
         return output
 
-def inference_torch(model, video: list[ImagePt], device, max_frames=-1):
+def inference_torch(model, video: list[ImageTorch], device, max_frames=-1):
     if not video:
         raise ValueError("Video list cannot be empty")
 

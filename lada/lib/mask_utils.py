@@ -5,7 +5,7 @@ import torch
 from torch.nn import functional as torch_functional
 from torchvision.transforms import GaussianBlur
 
-from lada.lib import Box, Mask, MaskPt
+from lada.lib import Box, Mask, MaskTorch
 from lada.lib import image_utils
 
 
@@ -79,7 +79,7 @@ def apply_random_mask_extensions(mask: Mask) -> Mask:
     return extend_mask(mask, value)
 
 
-def create_blend_mask_torch(crop_mask: MaskPt):
+def create_blend_mask_torch(crop_mask: MaskTorch):
     """PyTorch version of create_blend_mask. Creates blend mask."""
     crop_mask = torch.squeeze(crop_mask)  # Remove squeeze > 0 since it's already bool
     h, w = crop_mask.shape
@@ -118,7 +118,7 @@ def create_blend_mask_torch(crop_mask: MaskPt):
     return blend_mask
 
 
-def get_mask_area_torch(mask: MaskPt) -> float:
+def get_mask_area_torch(mask: MaskTorch) -> float:
     """PyTorch version of get_mask_area. Calculates mask area ratio."""
     pixels = torch.sum(mask > 0).item()
     return pixels / (mask.shape[0] * mask.shape[1])

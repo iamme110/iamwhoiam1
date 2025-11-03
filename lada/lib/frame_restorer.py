@@ -11,7 +11,7 @@ import numpy as np
 
 import lada.lib.image_utils
 from lada import LOG_LEVEL
-from lada.lib import Image, ImagePt, MaskPt
+from lada.lib import Image, ImageTorch, MaskTorch
 from lada.lib import image_utils, video_utils, threading_utils, mask_utils, visualization_utils
 from lada.lib.codec_utils import PytorchAutoVideoReader
 from lada.lib.mosaic_detector import MosaicDetector, Clip
@@ -191,13 +191,13 @@ class FrameRestorer:
                 frame_feeder_queue/max-qsize: {self.mosaic_detector.queue_stats["frame_feeder_queue_max_size"]}/{self.mosaic_detector.frame_feeder_queue.maxsize}"""))
 
 
-    def _restore_clip_frames_deep_mosaics(self, images: list[Image] | list[ImagePt]) -> list[Image] | list[ImagePt]:
+    def _restore_clip_frames_deep_mosaics(self, images: list[Image] | list[ImageTorch]) -> list[Image] | list[ImageTorch]:
         from lada.deepmosaics.inference import restore_video_frames
         from lada.deepmosaics.models import model_util
         restored_clip_images = restore_video_frames(model_util.device_to_gpu_id(self.device), self.mosaic_restoration_model, images)
         return restored_clip_images
 
-    def _restore_clip_frames_basicvsrpp(self, images: list[Image] | list[ImagePt]) -> list[Image] | list[ImagePt]:
+    def _restore_clip_frames_basicvsrpp(self, images: list[Image] | list[ImageTorch]) -> list[Image] | list[ImageTorch]:
         return self._basicvsrpp_inference(self.mosaic_restoration_model, images, self.device)
 
     @staticmethod
@@ -223,7 +223,7 @@ class FrameRestorer:
         return frame
 
 
-    def _restore_frame_pt(self, frame:ImagePt, frame_num, restored_clips):
+    def _restore_frame_pt(self, frame:ImageTorch, frame_num, restored_clips):
         """
         Takes mosaic frame and restored clips and replaces mosaic regions in frame with restored content from the clips starting at the same frame number as mosaic frame.
         Pops starting frame from each restored clip in the process if they actually start at the same frame number as frame.

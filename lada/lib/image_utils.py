@@ -7,7 +7,7 @@ import torch
 from torch.nn import functional as F, functional as torch_functional
 from torchvision.utils import make_grid
 
-from lada.lib import Image, Pad, ImagePt
+from lada.lib import Image, Pad, ImageTorch
 
 
 def pad_image(img, max_height, max_width, mode='zero'):
@@ -65,7 +65,7 @@ def scale_pad(pad: Pad, scale_h: float, scale_w: float):
     scaled_pad = (math.ceil(pad_h_t/scale_h), math.ceil(pad_h_b/scale_h), math.ceil(pad_w_l/scale_w), math.ceil(pad_w_r/scale_w))
     return scaled_pad
 
-def unpad_image(img: Union[Image, ImagePt], pad: Pad):
+def unpad_image(img: Union[Image, ImageTorch], pad: Pad):
     if Pad == (0,0,0,0):
         return img
     (pad_h_t, pad_h_b, pad_w_l, pad_w_r) = pad

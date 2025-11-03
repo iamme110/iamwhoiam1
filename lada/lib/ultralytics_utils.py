@@ -8,7 +8,7 @@ from ultralytics import settings
 from ultralytics.utils.ops import scale_image
 
 import lada.lib.image_utils
-from lada.lib import Box, Mask, MaskPt, mask_utils
+from lada.lib import Box, Mask, MaskTorch, mask_utils
 
 def set_default_settings():
     settings.update({'runs_dir': './experiments/yolo', 'datasets_dir': './datasets', 'tensorboard': True})
@@ -55,7 +55,7 @@ def _to_mask_img(masks, class_val=0, pixel_val=255) -> Mask:
     return mask_img
 
 
-def convert_yolo_mask_torch(yolo_mask: torch.Tensor, img_shape) -> MaskPt:
+def convert_yolo_mask_torch(yolo_mask: torch.Tensor, img_shape) -> MaskTorch:
     if yolo_mask.ndim == 2:
         yolo_mask = yolo_mask.unsqueeze(-1)
     yolo_mask = lada.lib.image_utils.resize_torch(yolo_mask, img_shape)

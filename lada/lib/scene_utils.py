@@ -1,6 +1,6 @@
 import math
 from typing import Union
-from lada.lib import Box, Mask, MaskPt, Image, ImagePt
+from lada.lib import Box, Mask, MaskTorch, Image, ImageTorch
 
 def box_overlap(box1: Box, box2: Box):
     t1, l1, b1, r1 = box1
@@ -11,7 +11,7 @@ def box_overlap(box1: Box, box2: Box):
     r = min(r1, r2)
     return r > l and b > t
 
-def crop_to_box_v3(box: Box, img: Union[Image, ImagePt], mask_img: Union[Mask, MaskPt], target_size: tuple[int, int], max_box_expansion_factor=1.0, border_size=0):
+def crop_to_box_v3(box: Box, img: Union[Image, ImageTorch], mask_img: Union[Mask, MaskTorch], target_size: tuple[int, int], max_box_expansion_factor=1.0, border_size=0):
     """
     Crops Mask and Image by using Box. Will try to grow Box to better fit target size
     Parameters

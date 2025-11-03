@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 import lada.lib.image_utils
-from lada.lib import Box, Mask, MaskPt, Image, ImagePt, VideoMetadata, threading_utils
+from lada.lib import Box, Mask, MaskTorch, Image, ImageTorch, VideoMetadata, threading_utils
 from lada.lib import image_utils
 from ultralytics.engine.results import Results
 from lada.lib.mosaic_detection_model import MosaicDetectionModel, MosaicDetectionResults
@@ -37,7 +37,7 @@ class Scene:
     def __len__(self):
         return len(self.data)
 
-    def add_frame(self, frame_num: int, img: Union[Image, ImagePt], mask: Union[Mask, MaskPt], box: Box):
+    def add_frame(self, frame_num: int, img: Union[Image, ImageTorch], mask: Union[Mask, MaskTorch], box: Box):
         if self.frame_start is None:
             self.frame_start = frame_num
             self.frame_end = frame_num
@@ -47,7 +47,7 @@ class Scene:
             self.frame_end = frame_num
             self.data.append((img, mask, box))
 
-    def merge_mask_box(self, mask: Union[Mask, MaskPt], box: Box):
+    def merge_mask_box(self, mask: Union[Mask, MaskTorch], box: Box):
         assert self.belongs(box)
         current_box = self.data[-1][2]
         t = min(current_box[0], box[0])

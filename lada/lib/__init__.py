@@ -15,7 +15,7 @@ A segmentation mask of a detected object. Pixel values of 0 indicate that the pi
 Shape: (H, W, 1)
 """
 type Mask = np.ndarray[np.uint8]
-type MaskPt = torch.Tensor
+type MaskTorch = torch.Tensor
 
 """
 Color Image
@@ -23,7 +23,7 @@ Shape: (H, W, C)
 H, W, C stand for image height, width and color channels respectively. C is always 3 and must be in BGR instead of RGB order 
 """
 type Image = np.ndarray[np.uint8]
-type ImagePt = torch.Tensor
+type ImageTorch = torch.Tensor
 
 """
 Padding of an Image or Mask represented as tuple padding values (number of black pixels) added to each image edge:
