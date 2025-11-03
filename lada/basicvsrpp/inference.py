@@ -42,7 +42,6 @@ def load_model(config: str | dict | None, checkpoint_path, device, fp16):
     model = MODELS.build(config)
     load_checkpoint(model, checkpoint_path, map_location='cpu', logger=logger)
     model.cfg = config
-    model.device = device
     model = model.to(device).eval()
     if fp16:
         model.dtype = torch.float16

@@ -45,7 +45,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general.add_argument('--output', type=str, help=_('Path used to save output file(s). If path is a directory then file name will be chosen automatically (see --output-file-pattern). If no output path was given then the directory of the input file will be used'))
     group_general.add_argument('--output-file-pattern', type=str, default="{orig_file_name}.restored.mp4", help=_("Pattern used to determine output file name(s). Used when input is a directory or a file with no output path specified"))
     group_general.add_argument('--device', type=str, default="cuda:0", help=_('Device used for running Restoration and Detection models. Use "cpu" or "cuda". If you have multiple GPUs you can select a specific one via index e.g. "cuda:0" (default: %(default)s)'))
-    group_general.add_argument('--fp16', action=argparse.BooleanOptionalAction, default=torch.cuda.is_available(), help=_("Use FP16 precision for restoration and detection models"))
+    group_general.add_argument('--fp16', action=argparse.BooleanOptionalAction, default=torch.cuda.is_available(), help=_("Use FP16 precision for restoration and detection models. Reduces memory usage, defaults to true if CUDA is available"))
     group_general.add_argument('--list-devices', action='store_true', help=_("List available devices and exit"))
     group_general.add_argument('--version', action='store_true', help=_("Display version and exit"))
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
