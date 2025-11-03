@@ -1,8 +1,11 @@
 import cv2
 import math
 import numpy as np
+import torch
+from torch.nn import functional as torch_functional
+from torchvision.transforms import GaussianBlur
 
-from lada.lib import Box, Mask
+from lada.lib import Box, Mask, MaskPt
 from lada.lib import image_utils
 
 
@@ -74,3 +77,48 @@ def create_blend_mask(crop_mask):
 def apply_random_mask_extensions(mask: Mask) -> Mask:
     value = np.random.choice([0, 0, 1, 1, 2])
     return extend_mask(mask, value)
+
+
+def create_blend_mask_torch(crop_mask: MaskPt):
+    """PyTorch version of create_blend_mask. Creates blend mask."""
+    crop_mask = torch.squeeze(crop_mask)  # Remove squeeze > 0 since it's already bool
+    h, w = crop_mask.shape
+    border_ratio = 0.05
+    h_inner, w_inner = int(h * (1.0-border_ratio)), int(w * (1.-border_ratio))
+    h_outer, w_outer = h - h_inner, w - w_inner
+    border_size = min(h_outer, w_outer)
+    if border_size < 5:
+        return torch.ones_like(crop_mask, dtype=torch.float32, device=crop_mask.device)
+
+    # Use integer division for better performance
+    pad_left = w_outer // 2
+    pad_right = w_outer - pad_left
+    pad_top = h_outer // 2
+    pad_bottom = h_outer - pad_top
+
+    # Create blend mask directly with padding instead of creating inner mask first
+    blend_mask = torch_functional.pad(
+        torch.ones((h_inner, w_inner), device=crop_mask.device, dtype=torch.float32),
+        (pad_left, pad_right, pad_top, pad_bottom),
+        mode='constant',
+        value=0
+    )
+
+    # Use logical_or for better performance with bool mask
+    blend_mask = torch.logical_or(crop_mask, blend_mask).float()
+
+    # Apply Gaussian blur using torchvision
+    # GaussianBlur expects (C, H, W) format, so add channel dimension
+    blur_size = border_size
+    kernel_size = blur_size if blur_size % 2 == 1 else blur_size + 1
+    gaussian_blur = GaussianBlur(kernel_size=kernel_size, sigma=blur_size/3)
+    blend_mask = gaussian_blur(blend_mask.unsqueeze(0)).squeeze(0)
+
+    assert blend_mask.shape == crop_mask.shape
+    return blend_mask
+
+
+def get_mask_area_torch(mask: MaskPt) -> float:
+    """PyTorch version of get_mask_area. Calculates mask area ratio."""
+    pixels = torch.sum(mask > 0).item()
+    return pixels / (mask.shape[0] * mask.shape[1])

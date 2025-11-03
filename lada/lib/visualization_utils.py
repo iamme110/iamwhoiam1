@@ -1,4 +1,6 @@
 import cv2
+import torch
+import numpy as np
 from lada.lib import image_utils
 from lada.lib import Image
 
@@ -31,6 +33,10 @@ def draw_mosaic_detections(clip, border_color = (255, 0, 255)) -> list[Image]:
     box_border_thickness = 2
     border_thickness_half = box_border_thickness // 2
     for (cropped_img, cropped_mask, _, orig_crop_shape, pad_after_resize) in clip:
+        if isinstance(cropped_img, torch.Tensor):
+            cropped_img = image_utils.tensor2img(cropped_img)
+        if isinstance(cropped_mask, torch.Tensor):
+            cropped_mask = image_utils.tensor2img(cropped_mask, out_type=np.uint8)
         mosaic_detection_img = cropped_img.copy()
 
         draw_text(f"c:{clip.id},f_start:{clip.frame_start}",(25, cropped_img.shape[1] // 2), mosaic_detection_img)

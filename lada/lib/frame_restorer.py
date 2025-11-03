@@ -9,10 +9,10 @@ import torch
 import cv2
 import numpy as np
 
+import lada.lib.image_utils
 from lada import LOG_LEVEL
 from lada.lib import Image, ImagePt, MaskPt
-from lada.lib import image_utils, video_utils, threading_utils, mask_utils, image_utils_pt, mask_utils_pt, \
-    visualization_utils, visualization_utils_pt
+from lada.lib import image_utils, video_utils, threading_utils, mask_utils, visualization_utils
 from lada.lib.video_utils_pt import PytorchAutoVideoReader
 from lada.lib.mosaic_detector import MosaicDetector, Clip
 from lada.lib.mosaic_detection_model import MosaicDetectionModel
@@ -39,11 +39,6 @@ def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_
     # setting classes=[0] will consider only for class id = 0 as detections (nsfw mosaics) therefore filtering out sfw mosaics (heads, faces)
     mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, use_pt=use_pt, half=True)
     return mosaic_detection_model, mosaic_restoration_model, pad_mode
-
-class MosaicRestorationModelType(Enum):
-    NONE = auto()
-    DEEPMOSAICS = auto()
-    BASICVSRPP = auto()
 
 class FrameRestorer:
     def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
@@ -72,7 +67,6 @@ class FrameRestorer:
             raise NotImplementedError()
 
         self.restore_frame = self._restore_frame_pt if self.use_pt else self._restore_frame
-        self.visualization = visualization_utils_pt if self.use_pt else visualization_utils
 
         # limit queue size to approx 512MB
         self.frame_restoration_queue = queue.Queue()
@@ -241,9 +235,9 @@ class FrameRestorer:
             t, l, b, r = clip_box
             clip_img = image_utils.unpad_image(clip_img, pad_after_resize)
             clip_mask = image_utils.unpad_image(clip_mask, pad_after_resize)
-            clip_img = image_utils_pt.resize(clip_img, orig_shape)
-            clip_mask = image_utils_pt.resize(clip_mask, orig_shape, 'nearest')
-            blend_mask = mask_utils_pt.create_blend_mask(clip_mask).unsqueeze(-1)
+            clip_img = lada.lib.image_utils.resize_torch(clip_img, orig_shape)
+            clip_mask = lada.lib.image_utils.resize_torch(clip_mask, orig_shape, 'nearest')
+            blend_mask = mask_utils.create_blend_mask_torch(clip_mask).unsqueeze(-1)
             frame_clip = frame[t:b + 1, l:r + 1, :]
             frame_clip_ = ((frame_clip.float() / 255.0)
                            .lerp_(clip_img, blend_mask)
@@ -257,7 +251,7 @@ class FrameRestorer:
         boundaries on each frame.
         """
         if self.mosaic_detection:
-            restored_clip_images = self.visualization.draw_mosaic_detections(clip)
+            restored_clip_images = visualization_utils.draw_mosaic_detections(clip)
         else:
             images = clip.get_clip_images()
             restored_clip_images = self._restore_clip_frames(images)

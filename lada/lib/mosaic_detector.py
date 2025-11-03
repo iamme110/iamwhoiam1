@@ -8,14 +8,16 @@ from typing import Union
 import cv2
 import numpy as np
 import torch
-from lada.lib import Box, Mask, MaskPt, Image, ImagePt, VideoMetadata, threading_utils, image_utils_pt
+
+import lada.lib.image_utils
+from lada.lib import Box, Mask, MaskPt, Image, ImagePt, VideoMetadata, threading_utils
 from lada.lib import image_utils
 from ultralytics.engine.results import Results
 from lada.lib.mosaic_detection_model import MosaicDetectionModel, MosaicDetectionResults
 from lada.lib.scene_utils import crop_to_box_v3
 from lada.lib import video_utils
 from lada import LOG_LEVEL
-from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask, convert_yolo_box_pt, convert_yolo_mask_pt
+from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask, convert_yolo_box_torch, convert_yolo_mask_torch
 from lada.lib.video_utils_pt import PytorchAutoVideoReader
 
 logger = logging.getLogger(__name__)
@@ -106,7 +108,8 @@ class Clip:
         scene_images = scene.get_images()
         scene_boxes = scene.get_boxes()
         pad_after_resize = (0, 0, 0, 0)
-        _image_utils = image_utils_pt if scene.use_pt else image_utils
+        _pad_image = image_utils.pad_image_torch if scene.use_pt else image_utils.pad_image
+        _resize_func = image_utils.resize_torch if scene.use_pt else image_utils.resize
 
         # crop scene
         for i in range(len(scene)):
@@ -122,13 +125,13 @@ class Clip:
             crop_shape = cropped_img.shape
 
             resize_shape = (int(crop_shape[0] * scale_height), int(crop_shape[1] * scale_width))
-            cropped_img = _image_utils.resize(cropped_img, resize_shape, interpolation=cv2.INTER_LINEAR)
-            cropped_mask = _image_utils.resize(cropped_mask, resize_shape, interpolation=cv2.INTER_NEAREST)
+            cropped_img = _resize_func(cropped_img, resize_shape, interpolation=cv2.INTER_LINEAR)
+            cropped_mask = _resize_func(cropped_mask, resize_shape, interpolation=cv2.INTER_NEAREST)
             assert cropped_mask.shape[:2] == cropped_img.shape[:2], f"{cropped_mask.shape[:2]}, {cropped_img.shape[:2]}"
             assert cropped_img.shape[0] <= size or cropped_img.shape[1] <= size
 
-            cropped_img, pad_after_resize = _image_utils.pad_image(cropped_img, size, size, mode=self.pad_mode)
-            cropped_mask, _ = _image_utils.pad_image(cropped_mask, size, size, mode='zero')
+            cropped_img, pad_after_resize = _pad_image(cropped_img, size, size, mode=self.pad_mode)
+            cropped_mask, _ = _pad_image(cropped_mask, size, size, mode='zero')
 
             self.data[i] = (cropped_img, cropped_mask, cropped_box, crop_shape, pad_after_resize)
 
@@ -200,8 +203,8 @@ class MosaicDetector:
         self.stop_requested = False
         self.batch_size = batch_size
         self.use_pt = use_pt
-        self._convert_yolo_mask = convert_yolo_mask_pt if self.use_pt else convert_yolo_mask
-        self._convert_yolo_box = convert_yolo_box_pt if self.use_pt else convert_yolo_box
+        self._convert_yolo_mask = convert_yolo_mask_torch if self.use_pt else convert_yolo_mask
+        self._convert_yolo_box = convert_yolo_box_torch if self.use_pt else convert_yolo_box
 
         self.queue_stats = {"frame_detection_queue_wait_time_put": 0, "frame_detection_queue_max_size": 0,
                             "mosaic_clip_queue_wait_time_put": 0, "mosaic_clip_queue_max_size": 0,

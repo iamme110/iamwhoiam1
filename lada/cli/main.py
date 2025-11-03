@@ -4,10 +4,7 @@ import pathlib
 import sys
 import tempfile
 import textwrap
-from gettext import gettext as _
-
 import torch
-from sympy.core.evalf import pure_complex
 
 from lada import MODEL_WEIGHTS_DIR, VERSION
 from lada.cli import utils
