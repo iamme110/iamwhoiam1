@@ -9,3 +9,6 @@ experiments/
 .idea
 .flatpak-builder
 __pycache__
+build/
+*.ep
+torch_compile_debug/
