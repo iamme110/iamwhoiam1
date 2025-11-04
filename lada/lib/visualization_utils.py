@@ -1,4 +1,5 @@
 import cv2
+import torch
 from lada.lib import image_utils
 from lada.lib import Image
 
@@ -26,21 +27,26 @@ def draw_text(text, position, output, font_scale=0.5):
     cv2.putText(output, text, position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 2,
                 cv2.LINE_AA)
 
-def draw_mosaic_detections(clip, border_color = (255, 0, 255)) -> list[Image]:
+def draw_mosaic_detections(clip, border_color = (255, 0, 255)) -> list[torch.Tensor]:
+    if len(clip) == 0:
+        return []
+
     mosaic_detection_images = []
     box_border_thickness = 2
     border_thickness_half = box_border_thickness // 2
+    device = clip.data[0][0].device
+
     for (cropped_img, cropped_mask, _, orig_crop_shape, pad_after_resize) in clip:
-        cropped_img = cropped_img.cpu().numpy()
-        cropped_mask = cropped_mask.cpu().numpy()
+        mosaic_detection_img = cropped_img.to(device='cpu', memory_format=torch.contiguous_format).numpy()
+        cropped_mask = cropped_mask.to(device='cpu', memory_format=torch.contiguous_format).numpy()
 
-        draw_text(f"c:{clip.id},f_start:{clip.frame_start}",(25, cropped_img.shape[1] // 2), cropped_img)
+        draw_text(f"c:{clip.id},f_start:{clip.frame_start}",(25, cropped_img.shape[1] // 2), mosaic_detection_img)
 
-        cropped_img = image_utils.unpad_image(cropped_img, pad_after_resize)
-        shape_before_resize = cropped_img.shape
-        cropped_img = image_utils.resize(cropped_img, orig_crop_shape[:2])
+        mosaic_detection_img = image_utils.unpad_image(mosaic_detection_img, pad_after_resize)
+        shape_before_resize = mosaic_detection_img.shape
+        mosaic_detection_img = image_utils.resize(mosaic_detection_img, orig_crop_shape[:2])
 
-        t, l, b, r = 0, 0, cropped_img.shape[0] - 1, cropped_img.shape[1] - 1
+        t, l, b, r = 0, 0, mosaic_detection_img.shape[0] - 1, mosaic_detection_img.shape[1] - 1
         border_box = t + border_thickness_half, l + border_thickness_half, b - border_thickness_half, r - border_thickness_half
 
         draw_box(mosaic_detection_img, border_box, color=border_color, thickness=box_border_thickness)
@@ -53,4 +59,9 @@ def draw_mosaic_detections(clip, border_color = (255, 0, 255)) -> list[Image]:
         mosaic_detection_img = overlay_mask_boundary(mosaic_detection_img, cropped_mask)
 
         mosaic_detection_images.append(mosaic_detection_img)
+
+    mosaic_detection_images = [torch.from_numpy(x) for x in mosaic_detection_images]
+    if device.type == 'cuda':
+        mosaic_detection_images = torch.stack(mosaic_detection_images, dim=0).to(device=device)
+        return torch.unbind(mosaic_detection_images, dim=0)
     return mosaic_detection_images
