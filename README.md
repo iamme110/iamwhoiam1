@@ -142,6 +142,11 @@ docker pull ladaapp/lada:latest
 > docker run --rm --gpus all --mount type=bind,src=<input video path>,dst=/mnt ladaapp/lada:latest --input "/mnt/<input video file>"
 > ```
 
+> [!TIP]
+> If you want to use hardware encoders like `hevc_nvenc` you have to provide the container with `video` capability.
+> 
+> With docker run you can use `--gpus 'all,"capabilities=compute,video"'`. Learn more [here](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html).
+
 ### Using Windows
 
 For Windows users, the app (CLI and GUI) is packaged as a standalone .7z archive file.
@@ -188,6 +193,10 @@ For instructions on training your own models and datasets, refer to [Training an
 ## Translations
 
 If you want to help translating the app you can contribute to existing translations or set up a new language over at [Codeberg Translate](https://translate.codeberg.org/projects/lada/lada/).
+
+## License
+
+Source code and models are licensed under AGPL-3.0. See the [LICENSE.md](LICENSE.md) file for full details.
 
 ## Acknowledgement
 This project builds upon work done by these fantastic individuals and projects:

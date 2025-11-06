@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Lada Authors
+# SPDX-License-Identifier: AGPL-3.0
 
 import torch
 from ultralytics.utils.checks import check_imgsz
