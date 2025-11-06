@@ -39,6 +39,7 @@ class Config(GObject.Object):
         'post_export_custom_command': '',
         'preview_buffer_duration': 0,
         'show_mosaic_detections': False,
+        'temp_directory': None,
     }
 
     def __init__(self, style_manager: Adw.StyleManager):
@@ -59,6 +60,7 @@ class Config(GObject.Object):
         self._show_mosaic_detections = self._defaults['show_mosaic_detections']
         self._post_export_action = self._defaults['post_export_action']
         self._post_export_custom_command = self._defaults['post_export_custom_command']
+        self._temp_directory = self._defaults['temp_directory']
 
         self.save_lock = threading.Lock()
         self._style_manager = style_manager
@@ -240,6 +242,17 @@ class Config(GObject.Object):
         self._post_export_custom_command = value
         self.save()
 
+    @GObject.Property()
+    def temp_directory(self):
+        return self._temp_directory
+
+    @temp_directory.setter
+    def temp_directory(self, value):
+        if value == self._temp_directory:
+            return
+        self._temp_directory = value
+        self.save()
+
     def save(self):
         self.save_lock.acquire_lock()
         config_file_path = self.get_config_file_path()
@@ -292,6 +305,7 @@ class Config(GObject.Object):
         self.post_export_custom_command = self._defaults['post_export_custom_command']
         self.preview_buffer_duration = self._defaults['preview_buffer_duration']
         self.show_mosaic_detections = self._defaults['show_mosaic_detections']
+        self.temp_directory = self._defaults['temp_directory']
         self.validate_and_set_device(self._defaults['device'])
         self.save()
 
@@ -320,6 +334,7 @@ class Config(GObject.Object):
             'post_export_custom_command': self._post_export_custom_command,
             'preview_buffer_duration': self._preview_buffer_duration,
             'show_mosaic_detections': self._show_mosaic_detections,
+            'temp_directory': self._temp_directory,
         }
 
     def get_default_value(self, key):
@@ -340,6 +355,8 @@ class Config(GObject.Object):
                     self.validate_and_set_export_codec(dict[key])
                 elif key == 'export_directory':
                     self.validate_and_set_export_directory(dict[key])
+                elif key == 'temp_directory':
+                    self.validate_and_set_temp_directory(dict[key])
                 elif key == 'file_name_pattern':
                     self.validate_and_set_file_name_pattern(dict[key])
                 elif key == 'initial_view':
@@ -417,6 +434,17 @@ class Config(GObject.Object):
             else:
                 self._export_directory = None
                 logger.warning(f"Configured export directory '{export_directory}' does not exist or is not a directory on the filesystem, falling back to '{self._export_directory}'")
+
+    def validate_and_set_temp_directory(self, temp_directory: str | None):
+        if temp_directory is None:
+            self._temp_directory = None
+        else:
+            path = Path(temp_directory)
+            if path.is_dir():
+                self._temp_directory = temp_directory
+            else:
+                self._temp_directory = None
+                logger.warning(f"Configured temp directory '{temp_directory}' does not exist or is not a directory on the filesystem, falling back to '{self._temp_directory}'")
 
     def validate_and_set_file_name_pattern(self, file_name_pattern: str):
         if utils.validate_file_name_pattern(file_name_pattern):
