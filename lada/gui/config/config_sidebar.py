@@ -35,6 +35,9 @@ class ConfigSidebar(Gtk.Box):
     action_row_export_directory: Adw.ActionRow = Gtk.Template.Child()
     check_button_export_directory_alwaysask: Gtk.CheckButton = Gtk.Template.Child()
     check_button_export_directory_defaultdir: Gtk.CheckButton = Gtk.Template.Child()
+    action_row_temp_directory: Adw.ActionRow = Gtk.Template.Child()
+    check_button_temp_directory_system: Gtk.CheckButton = Gtk.Template.Child()
+    check_button_temp_directory_custom: Gtk.CheckButton = Gtk.Template.Child()
     entry_row_file_name_pattern: Adw.EntryRow = Gtk.Template.Child()
     toggle_button_initial_view_preview: Gtk.ToggleButton = Gtk.Template.Child()
     toggle_button_initial_view_export: Gtk.ToggleButton = Gtk.Template.Child()
@@ -114,6 +117,14 @@ class ConfigSidebar(Gtk.Box):
             self.check_button_export_directory_alwaysask.set_active(True)
 
         self.entry_row_file_name_pattern.set_text(config.file_name_pattern)
+
+        # init temp directory
+        if config.temp_directory:
+            self.action_row_temp_directory.set_subtitle(config.temp_directory)
+            self.check_button_temp_directory_custom.set_active(True)
+        else:
+            self.action_row_temp_directory.set_subtitle(_("Use system temp directory"))
+            self.check_button_temp_directory_system.set_active(True)
 
         self.toggle_button_initial_view_preview.set_active(config.initial_view == "preview")
         self.toggle_button_initial_view_export.set_active(config.initial_view == "export")
@@ -251,6 +262,24 @@ class ConfigSidebar(Gtk.Box):
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
+    def check_button_temp_directory_system_callback(self, button_clicked):
+        if self.check_button_temp_directory_system.get_active():
+            self._config.temp_directory = None
+            self.action_row_temp_directory.set_subtitle(_("Use system temp directory"))
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def check_button_temp_directory_custom_callback(self, button_clicked):
+        if self.check_button_temp_directory_custom.get_active() and not self._config.temp_directory:
+            self.show_select_temp_folder()
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def toggle_button_temp_directory_filepicker_callback(self, button_clicked):
+        self.show_select_temp_folder()
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
     def entry_row_file_name_pattern_changed_callback(self, entry_row):
         self.set_file_name_pattern_row_styles()
         if validate_file_name_pattern(self.entry_row_file_name_pattern.get_text()):
@@ -337,3 +366,24 @@ class ConfigSidebar(Gtk.Box):
     def entry_row_post_export_custom_command_changed_callback(self, entry_row):
         self._config.post_export_custom_command = self.entry_row_post_export_custom_command.get_text()
         file_dialog.select_folder(callback=on_select_folder)
+
+    def show_select_temp_folder(self):
+        file_dialog = Gtk.FileDialog()
+        file_dialog.set_title(_("Select a folder for temporary files"))
+        def on_select_temp_folder(_file_dialog, result):
+            try:
+                selected_folder: Gio.File = _file_dialog.select_folder_finish(result)
+                selected_folder_path = selected_folder.get_path()
+                self._config.temp_directory = selected_folder_path
+                self.action_row_temp_directory.set_subtitle(selected_folder_path)
+                if not self.check_button_temp_directory_custom.get_active():
+                    self.check_button_temp_directory_custom.set_active(True)
+            except GLib.Error as error:
+                if error.message == "Dismissed by user":
+                    logger.debug("FileDialog cancelled: Dismissed by user")
+                else:
+                    logger.error(f"Error selecting folder: {error.message}")
+                    raise error
+                if self.check_button_temp_directory_custom and not self._config.temp_directory:
+                    self.check_button_temp_directory_system.set_active(True)
+        file_dialog.select_folder(callback=on_select_temp_folder)
