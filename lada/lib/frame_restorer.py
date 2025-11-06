@@ -24,7 +24,7 @@ from lada.basicvsrpp.inference import inference as basicvsrpp_inference, inferen
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_path, mosaic_restoration_config_path, mosaic_detection_model_path, use_torch=False):
+def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_path, mosaic_restoration_config_path, mosaic_detection_model_path, half=True, use_torch=False):
     if mosaic_restoration_model_name.startswith("deepmosaics"):
         from lada.deepmosaics.models import loadmodel, model_util
         mosaic_restoration_model = loadmodel.video(model_util.device_to_gpu_id(device), mosaic_restoration_model_path)
@@ -35,12 +35,12 @@ def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_
             config = mosaic_restoration_config_path
         else:
             config = get_default_gan_inference_config()
-        mosaic_restoration_model = load_model(config, mosaic_restoration_model_path, device)
+        mosaic_restoration_model = load_model(config, mosaic_restoration_model_path, device, half)
         pad_mode = 'zero'
     else:
         raise NotImplementedError()
     # setting classes=[0] will consider only for class id = 0 as detections (nsfw mosaics) therefore filtering out sfw mosaics (heads, faces)
-    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, use_torch=use_torch, half=True)
+    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, use_torch=use_torch, half=half)
     return mosaic_detection_model, mosaic_restoration_model, pad_mode
 
 class FrameRestorer:
@@ -239,10 +239,10 @@ class FrameRestorer:
             clip_img = image_utils.unpad_image(clip_img, pad_after_resize)
             clip_mask = image_utils.unpad_image(clip_mask, pad_after_resize)
             clip_img = lada.lib.image_utils.resize_torch(clip_img, orig_shape)
-            clip_mask = lada.lib.image_utils.resize_torch(clip_mask, orig_shape, 'nearest')
-            blend_mask = mask_utils.create_blend_mask_torch(clip_mask).unsqueeze(-1)
+            clip_mask = lada.lib.image_utils.resize_torch(clip_mask, orig_shape)
+            blend_mask = mask_utils.create_blend_mask_torch(clip_mask, clip_img.dtype).unsqueeze(-1)
             frame_clip = frame[t:b + 1, l:r + 1, :]
-            frame_clip_ = ((frame_clip.float() / 255.0)
+            frame_clip_ = ((frame_clip.to(dtype=clip_img.dtype) / 255.0)
                            .lerp_(clip_img, blend_mask)
                            .mul_(255.0).round_().clamp_(0.0, 255.0))
             frame_clip.copy_(frame_clip_.byte())

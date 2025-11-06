@@ -21,7 +21,7 @@ class PytorchPyavVideoReader(PytorchVideoReader):
 
     def frames(self) -> Iterator[Tuple[torch.Tensor, float]]:
         for frame in self.container.decode(video=0):
-            tensor = torch.from_numpy(frame.to_ndarray(format='bgr24'))
+            tensor = torch.from_numpy(frame.to_ndarray(format='bgr24')).to(self.device)
             yield tensor, frame.pts
 
     def seek(self, offset_ns: float):

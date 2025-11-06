@@ -32,7 +32,7 @@ def get_default_gan_inference_config() -> dict:
         ))
 
 
-def load_model(config: str | dict | None, checkpoint_path, device):
+def load_model(config: str | dict | None, checkpoint_path, device, half=False):
     register_all_modules()
     if type(config) == str:
         config = Config.fromfile(config).model
@@ -43,8 +43,12 @@ def load_model(config: str | dict | None, checkpoint_path, device):
     model = MODELS.build(config)
     load_checkpoint(model, checkpoint_path, map_location=device, logger=logger)
     model.cfg = config
-    model.to(torch.device(device) if type(device) == str else device)
-    model.eval()
+    model.to(torch.device(device) if type(device) == str else device).eval()
+    if half:
+        model.dtype = torch.float16
+        model = model.half()
+    else:
+        model.dtype = torch.float32
     return model
 
 
@@ -76,9 +80,10 @@ def inference_torch(model, video: list[ImageTorch], device, max_frames=-1):
     if not video:
         raise ValueError("Video list cannot be empty")
 
-    with torch.no_grad():
-        # Prepare input tensor: stack, normalize, permute to TCHW, add batch dim to BTCHW
-        input_tensor = torch.stack([frame for frame in video], dim=0).to(device=torch.device(device), dtype=torch.float32).div_(255.0).permute(0, 3, 1, 2).unsqueeze(0)
+    with torch.inference_mode():
+        input_tensor = torch.stack([frame for frame in video])\
+            .to(dtype=model.dtype, memory_format=torch.channels_last)\
+            .div_(255.0).permute(0, 3, 1, 2).unsqueeze(0)
 
         if max_frames > 0:
             outputs = []

@@ -82,16 +82,16 @@ def apply_random_mask_extensions(mask: Mask) -> Mask:
     return extend_mask(mask, value)
 
 
-def create_blend_mask_torch(crop_mask: MaskTorch):
+def create_blend_mask_torch(crop_mask: MaskTorch, dtype=torch.float32):
     """PyTorch version of create_blend_mask. Creates blend mask."""
-    crop_mask = torch.squeeze(crop_mask)  # Remove squeeze > 0 since it's already bool
+    crop_mask = torch.squeeze(crop_mask)
     h, w = crop_mask.shape
     border_ratio = 0.05
     h_inner, w_inner = int(h * (1.0-border_ratio)), int(w * (1.-border_ratio))
     h_outer, w_outer = h - h_inner, w - w_inner
     border_size = min(h_outer, w_outer)
     if border_size < 5:
-        return torch.ones_like(crop_mask, dtype=torch.float32, device=crop_mask.device)
+        return torch.ones_like(crop_mask, device=crop_mask.device, dtype=dtype)
 
     # Use integer division for better performance
     pad_left = w_outer // 2
@@ -101,14 +101,14 @@ def create_blend_mask_torch(crop_mask: MaskTorch):
 
     # Create blend mask directly with padding instead of creating inner mask first
     blend_mask = torch_functional.pad(
-        torch.ones((h_inner, w_inner), device=crop_mask.device, dtype=torch.float32),
+        torch.ones((h_inner, w_inner), device=crop_mask.device, dtype=dtype),
         (pad_left, pad_right, pad_top, pad_bottom),
         mode='constant',
         value=0
     )
 
     # Use logical_or for better performance with bool mask
-    blend_mask = torch.logical_or(crop_mask, blend_mask).float()
+    blend_mask = torch.logical_or(crop_mask, blend_mask).to(dtype=dtype)
 
     # Apply Gaussian blur using torchvision
     # GaussianBlur expects (C, H, W) format, so add channel dimension
