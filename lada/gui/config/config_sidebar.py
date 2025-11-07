@@ -321,6 +321,7 @@ class ConfigSidebar(Gtk.Box):
                     raise error
                 if self.check_button_export_directory_defaultdir and not self._config.export_directory:
                     self.check_button_export_directory_alwaysask.set_active(True)
+        file_dialog.select_folder(callback=on_select_folder)
     def update_custom_command_visibility(self, action):
         self.entry_row_post_export_custom_command.set_visible(action == "custom_command")
 
