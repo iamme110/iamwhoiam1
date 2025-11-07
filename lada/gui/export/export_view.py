@@ -291,6 +291,10 @@ class ExportView(Gtk.Widget):
 
         self.continue_next_file()
 
+        # Execute post-export action after all files are finished
+        if self.get_next_queued_item_idx() is None:  # All files finished
+            self.execute_post_export_action()
+
     def on_video_export_progress(self, obj, progress: ExportItemDataProgress):
         if self.in_progress_idx is None:
             return
@@ -526,6 +530,80 @@ class ExportView(Gtk.Widget):
         orig_file_name = os.path.splitext(original_file.get_basename())[0]
         restored_file_name = self._config.file_name_pattern.replace("{orig_file_name}", orig_file_name)
         return Gio.File.new_build_filenamev([output_dir, restored_file_name])
+
+    def execute_post_export_action(self):
+        from lada.gui.config.config import PostExportAction
+        action = self._config.post_export_action
+        if action == PostExportAction.NONE.value:
+            return
+        elif action == PostExportAction.SHUTDOWN.value:
+            logger.info("Post-export action: Shutting down PC - showing confirmation dialog")
+            self.show_shutdown_confirmation_dialog()
+        elif action == PostExportAction.CUSTOM_COMMAND.value:
+            command = self._config.post_export_custom_command.strip()
+            if command:
+                logger.info(f"Post-export action: Executing custom command: {command}")
+                import subprocess
+                try:
+                    subprocess.run(command, shell=True, check=False)
+                except Exception as e:
+                    logger.error(f"Failed to execute custom command '{command}': {e}")
+
+    def show_shutdown_confirmation_dialog(self):
+        dialog = Adw.AlertDialog(
+            heading=_("Shutdown System"),
+            body=_("Export has finished. The system will shutdown in 30 seconds."),
+        )
+
+        timeout_id = None
+        cancelled = False
+        responded = False
+
+        def execute_shutdown():
+            nonlocal cancelled, responded
+            if cancelled or responded:
+                return
+            logger.info("Timeout reached - proceeding with automatic shutdown")
+            import subprocess
+            import sys
+            try:
+                if sys.platform == "win32":
+                    # Windows shutdown immediately
+                    subprocess.run(["shutdown", "/s", "/t", "0"], check=True)
+                else:
+                    # Linux/Mac shutdown immediately
+                    subprocess.run(["shutdown", "now"], check=True)
+                logger.info("Shutdown command executed successfully")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Failed to initiate shutdown: {e}")
+                # Show error dialog
+                error_dialog = Adw.AlertDialog(
+                    heading=_("Shutdown Failed"),
+                    body=_("Failed to initiate system shutdown. Please check system permissions."),
+                )
+                error_dialog.add_response("ok", _("OK"))
+                error_dialog.choose(self, None, lambda *_: None)
+
+        def on_response_selected(_dialog, response):
+            nonlocal timeout_id, cancelled, responded
+            responded = True
+            if timeout_id:
+                GLib.source_remove(timeout_id)
+
+            if response == "shutdown":
+                logger.info("User confirmed shutdown - proceeding with system shutdown")
+                execute_shutdown()
+            else:
+                logger.info("User cancelled shutdown")
+
+        # Set up 30-second timeout for automatic shutdown
+        timeout_id = GLib.timeout_add_seconds(30, lambda: execute_shutdown() or True)
+
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("shutdown", _("Shutdown now"))
+        dialog.set_response_appearance("shutdown", Adw.ResponseAppearance.DESTRUCTIVE)
+
+        dialog.choose(self, None, on_response_selected)
 
     def close(self):
         self.stop_requested = True
