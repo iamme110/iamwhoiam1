@@ -21,6 +21,11 @@ class ColorScheme(Enum):
     LIGHT = 'light'
     DARK = 'dark'
 
+class PostExportAction(Enum):
+    NONE = 'none'
+    SHUTDOWN = 'shutdown'
+    CUSTOM_COMMAND = 'custom_command'
+
 class Config(GObject.Object):
     _defaults = {
         'color_scheme': ColorScheme.SYSTEM,
@@ -35,7 +40,7 @@ class Config(GObject.Object):
         'mosaic_detection_model': 'v3.1-fast',
         'mosaic_restoration_model': 'basicvsrpp-v1.2',
         'mute_audio': False,
-        'post_export_action': 'none',
+        'post_export_action': PostExportAction.NONE.value,
         'post_export_custom_command': '',
         'preview_buffer_duration': 0,
         'show_mosaic_detections': False,
@@ -57,7 +62,7 @@ class Config(GObject.Object):
         self._mute_audio = self._defaults['mute_audio']
         self._preview_buffer_duration = self._defaults['preview_buffer_duration']
         self._show_mosaic_detections = self._defaults['show_mosaic_detections']
-        self._post_export_action = self._defaults['post_export_action']
+        self._post_export_action = PostExportAction.NONE
         self._post_export_custom_command = self._defaults['post_export_custom_command']
 
         self.save_lock = threading.Lock()
@@ -267,7 +272,7 @@ class Config(GObject.Object):
                 logger.info(f"Loaded config file {config_file_path}: {config_dict}")
                 # Set defaults for new config keys if not present
                 if 'post_export_action' not in config_dict:
-                    self.post_export_action = self._defaults['post_export_action']
+                    self.post_export_action = PostExportAction.NONE.value
                 if 'post_export_custom_command' not in config_dict:
                     self.post_export_custom_command = self._defaults['post_export_custom_command']
         except Exception as e:
@@ -336,6 +341,18 @@ class Config(GObject.Object):
                     self.validate_and_set_detection_model(dict[key])
                 elif key == 'color_scheme':
                     self._color_scheme = ColorScheme(dict[key])
+                elif key == 'post_export_action':
+                    # Handle both old string values and new enum values
+                    if isinstance(dict[key], str):
+                        # Convert old string to enum
+                        for enum_value in PostExportAction:
+                            if enum_value.value == dict[key]:
+                                self._post_export_action = enum_value.value
+                                break
+                        else:
+                            self._post_export_action = PostExportAction.NONE.value
+                    else:
+                        self._post_export_action = PostExportAction.NONE.value
                 elif key == 'export_codec':
                     self.validate_and_set_export_codec(dict[key])
                 elif key == 'export_directory':
