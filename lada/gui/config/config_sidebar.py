@@ -42,7 +42,9 @@ class ConfigSidebar(Gtk.Box):
     toggle_button_initial_view_preview: Gtk.ToggleButton = Gtk.Template.Child()
     toggle_button_initial_view_export: Gtk.ToggleButton = Gtk.Template.Child()
     entry_row_custom_ffmpeg_encoder_options: Adw.EntryRow = Gtk.Template.Child()
-    combo_row_post_export_action: Adw.ComboRow = Gtk.Template.Child()
+    check_button_post_export_none: Gtk.CheckButton = Gtk.Template.Child()
+    check_button_post_export_shutdown: Gtk.CheckButton = Gtk.Template.Child()
+    check_button_post_export_custom_command: Gtk.CheckButton = Gtk.Template.Child()
     entry_row_post_export_custom_command: Adw.EntryRow = Gtk.Template.Child()
     check_button_show_mosaic_detections: Gtk.CheckButton = Gtk.Template.Child()
 
@@ -132,12 +134,11 @@ class ConfigSidebar(Gtk.Box):
         self.entry_row_custom_ffmpeg_encoder_options.set_text(config.custom_ffmpeg_encoder_options)
 
         # init post-export action
-        actions = ["none", "close_app", "shutdown", "custom_command"]
-        if config.post_export_action in actions:
-            idx = actions.index(config.post_export_action)
-        else:
-            idx = 0  # default to "none"
-        self.combo_row_post_export_action.set_selected(idx)
+        from lada.gui.config.config import PostExportAction
+        self.check_button_post_export_shutdown.set_active(config.post_export_action == PostExportAction.SHUTDOWN.value)
+        self.check_button_post_export_custom_command.set_active(config.post_export_action == PostExportAction.CUSTOM_COMMAND.value)
+        # Set none as active if neither shutdown nor custom command is selected
+        self.check_button_post_export_none.set_active(config.post_export_action not in [PostExportAction.SHUTDOWN.value, PostExportAction.CUSTOM_COMMAND.value])
         self.entry_row_post_export_custom_command.set_text(config.post_export_custom_command)
         self.update_custom_command_visibility(config.post_export_action)
 
@@ -349,22 +350,6 @@ class ConfigSidebar(Gtk.Box):
                     raise error
                 if self.check_button_export_directory_defaultdir and not self._config.export_directory:
                     self.check_button_export_directory_alwaysask.set_active(True)
-    def update_custom_command_visibility(self, action):
-        self.entry_row_post_export_custom_command.set_visible(action == "custom_command")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def combo_row_post_export_action_selected_callback(self, combo_row, value):
-        actions = ["none", "close_app", "shutdown", "custom_command"]
-        selected_idx = combo_row.get_selected()
-        action = actions[selected_idx] if selected_idx < len(actions) else "none"
-        self._config.post_export_action = action
-        self.update_custom_command_visibility(action)
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def entry_row_post_export_custom_command_changed_callback(self, entry_row):
-        self._config.post_export_custom_command = self.entry_row_post_export_custom_command.get_text()
         file_dialog.select_folder(callback=on_select_folder)
 
     def show_select_temp_folder(self):
@@ -387,3 +372,37 @@ class ConfigSidebar(Gtk.Box):
                 if self.check_button_temp_directory_custom and not self._config.temp_directory:
                     self.check_button_temp_directory_system.set_active(True)
         file_dialog.select_folder(callback=on_select_temp_folder)
+
+    def update_custom_command_visibility(self, action):
+        self.entry_row_post_export_custom_command.set_visible(action == "custom_command")
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def check_button_post_export_none_callback(self, check_button):
+        from lada.gui.config.config import PostExportAction
+        if check_button.get_active():
+            self._config.post_export_action = PostExportAction.NONE.value
+        self.update_custom_command_visibility(self._config.post_export_action)
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def check_button_post_export_shutdown_callback(self, check_button):
+        from lada.gui.config.config import PostExportAction
+        if check_button.get_active():
+            self._config.post_export_action = PostExportAction.SHUTDOWN.value
+        self.update_custom_command_visibility(self._config.post_export_action)
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def check_button_post_export_custom_command_callback(self, check_button):
+        from lada.gui.config.config import PostExportAction
+        if check_button.get_active():
+            self._config.post_export_action = PostExportAction.CUSTOM_COMMAND.value
+        else:
+            self._config.post_export_action = PostExportAction.NONE.value
+        self.update_custom_command_visibility(self._config.post_export_action)
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def entry_row_post_export_custom_command_changed_callback(self, entry_row):
+        self._config.post_export_custom_command = self.entry_row_post_export_custom_command.get_text()
