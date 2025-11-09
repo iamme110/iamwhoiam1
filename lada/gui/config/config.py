@@ -3,6 +3,7 @@
 
 import json
 import logging
+import tempfile
 import threading
 from enum import Enum
 from pathlib import Path
@@ -44,7 +45,7 @@ class Config(GObject.Object):
         'post_export_custom_command': '',
         'preview_buffer_duration': 0,
         'show_mosaic_detections': False,
-        'temp_directory': None,
+        'temp_directory': tempfile.gettempdir(),
     }
 
     def __init__(self, style_manager: Adw.StyleManager):
@@ -452,16 +453,13 @@ class Config(GObject.Object):
                 self._export_directory = None
                 logger.warning(f"Configured export directory '{export_directory}' does not exist or is not a directory on the filesystem, falling back to '{self._export_directory}'")
 
-    def validate_and_set_temp_directory(self, temp_directory: str | None):
-        if temp_directory is None:
-            self._temp_directory = None
+    def validate_and_set_temp_directory(self, temp_directory: str):
+        path = Path(temp_directory)
+        if path.is_dir():
+            self._temp_directory = temp_directory
         else:
-            path = Path(temp_directory)
-            if path.is_dir():
-                self._temp_directory = temp_directory
-            else:
-                self._temp_directory = None
-                logger.warning(f"Configured temp directory '{temp_directory}' does not exist or is not a directory on the filesystem, falling back to '{self._temp_directory}'")
+            self._temp_directory = self.get_default_value('temp_directory')
+            logger.warning(f"Configured temp directory '{temp_directory}' does not exist or is not a directory on the filesystem, falling back to '{self._temp_directory}'")
 
     def validate_and_set_file_name_pattern(self, file_name_pattern: str):
         if utils.validate_file_name_pattern(file_name_pattern):
