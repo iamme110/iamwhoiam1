@@ -232,21 +232,39 @@ SPDX-License-Identifier: AGPL-3.0
                                          <property name="show-enable-switch">false</property>
                                          <property name="expanded">true</property>
                                          <child>
-                                             <object class="AdwComboRow" id="combo_row_post_export_action">
-                                                 <property name="title" translatable="true">Action after export</property>
-                                                 <property name="subtitle" translatable="true">Choose what to do when export is completed.</property>
-                                                 <signal name="notify::selected"
-                                                         handler="combo_row_post_export_action_selected_callback"/>
-                                                 <property name="model">
-                                                     <object class="GtkStringList">
-                                                         <items>
-                                                             <item translatable="true">No action</item>
-                                                             <item translatable="true">Close application</item>
-                                                             <item translatable="true">Shutdown PC</item>
-                                                             <item translatable="true">Execute custom command</item>
-                                                         </items>
+                                             <object class="AdwActionRow">
+                                                 <property name="title" translatable="true">No action</property>
+                                                 <property name="subtitle" translatable="true">Do nothing after export is completed.</property>
+                                                 <child type="prefix">
+                                                     <object class="GtkCheckButton" id="check_button_post_export_none">
+                                                         <property name="active">true</property>
+                                                         <signal name="toggled" handler="check_button_post_export_none_callback"/>
                                                      </object>
-                                                 </property>
+                                                 </child>
+                                             </object>
+                                         </child>
+                                         <child>
+                                             <object class="AdwActionRow">
+                                                 <property name="title" translatable="true">Shutdown system</property>
+                                                 <property name="subtitle" translatable="true">Automatically shutdown the system after export is completed.</property>
+                                                 <child type="prefix">
+                                                     <object class="GtkCheckButton" id="check_button_post_export_shutdown">
+                                                         <property name="group">check_button_post_export_none</property>
+                                                         <signal name="toggled" handler="check_button_post_export_shutdown_callback"/>
+                                                     </object>
+                                                 </child>
+                                             </object>
+                                         </child>
+                                         <child>
+                                             <object class="AdwActionRow">
+                                                 <property name="title" translatable="true">Execute custom command</property>
+                                                 <property name="subtitle" translatable="true">Run a custom shell command after export is completed.</property>
+                                                 <child type="prefix">
+                                                     <object class="GtkCheckButton" id="check_button_post_export_custom_command">
+                                                         <property name="group">check_button_post_export_none</property>
+                                                         <signal name="toggled" handler="check_button_post_export_custom_command_callback"/>
+                                                     </object>
+                                                 </child>
                                              </object>
                                          </child>
                                          <child>
