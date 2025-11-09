@@ -256,6 +256,7 @@ class ExportView(Gtk.Widget):
             self.config_sidebar.set_property("disabled", False)
             self.in_progress_idx = None
             self.update_export_buttons()
+            self.execute_post_export_action()
         else:
             # continue, queued items remaining
             self._start_export(self.model[next_idx].original_file, self.model[next_idx].restored_file)
@@ -479,7 +480,6 @@ class ExportView(Gtk.Widget):
                         progress.complete()
                         self.emit('video-export-progress', progress)
                         self.emit('video-export-finished')
-                        self.execute_post_export_action()
                     GLib.idle_add(on_success)
                 else:
                     if os.path.exists(video_tmp_file_output_path):
@@ -530,29 +530,27 @@ class ExportView(Gtk.Widget):
         return Gio.File.new_build_filenamev([output_dir, restored_file_name])
 
     def execute_post_export_action(self):
+        from lada.gui.config.config import PostExportAction
         action = self._config.post_export_action
-        if action == "none":
+        if action == PostExportAction.NONE.value:
             return
-        elif action == "close_app":
-            logger.info("Post-export action: Closing application")
-            GLib.idle_add(lambda: Gio.Application.get_default().quit())
-        elif action == "shutdown":
+        elif action == PostExportAction.SHUTDOWN.value:
             logger.info("Post-export action: Shutting down PC - showing confirmation dialog")
             self.show_shutdown_confirmation_dialog()
-        elif action == "custom_command":
+        elif action == PostExportAction.CUSTOM_COMMAND.value:
             command = self._config.post_export_custom_command.strip()
             if command:
                 logger.info(f"Post-export action: Executing custom command: {command}")
                 import subprocess
                 try:
-                    subprocess.run(command, shell=True, check=False)
+                    subprocess.Popen(command, shell=True)
                 except Exception as e:
                     logger.error(f"Failed to execute custom command '{command}': {e}")
 
     def show_shutdown_confirmation_dialog(self):
         dialog = Adw.AlertDialog(
             heading=_("Shutdown System"),
-            body=_("The system will shutdown in 30 seconds. Do you want to proceed with the shutdown?"),
+            body=_("Export has finished. The system will shutdown in 30 seconds."),
         )
 
         timeout_id = None
@@ -600,7 +598,7 @@ class ExportView(Gtk.Widget):
         timeout_id = GLib.timeout_add_seconds(30, lambda: execute_shutdown() or True)
 
         dialog.add_response("cancel", _("Cancel"))
-        dialog.add_response("shutdown", _("Shutdown"))
+        dialog.add_response("shutdown", _("Shutdown now"))
         dialog.set_response_appearance("shutdown", Adw.ResponseAppearance.DESTRUCTIVE)
 
         dialog.choose(self, None, on_response_selected)
