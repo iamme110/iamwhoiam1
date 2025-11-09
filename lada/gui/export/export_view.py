@@ -256,6 +256,7 @@ class ExportView(Gtk.Widget):
             self.config_sidebar.set_property("disabled", False)
             self.in_progress_idx = None
             self.update_export_buttons()
+            self.execute_post_export_action()
         else:
             # continue, queued items remaining
             self._start_export(self.model[next_idx].original_file, self.model[next_idx].restored_file)
@@ -290,10 +291,6 @@ class ExportView(Gtk.Widget):
         self.multiple_files_page.on_video_export_finished(self.in_progress_idx)
 
         self.continue_next_file()
-
-        # Execute post-export action after all files are finished
-        if self.get_next_queued_item_idx() is None:  # All files finished
-            self.execute_post_export_action()
 
     def on_video_export_progress(self, obj, progress: ExportItemDataProgress):
         if self.in_progress_idx is None:
@@ -545,7 +542,7 @@ class ExportView(Gtk.Widget):
                 logger.info(f"Post-export action: Executing custom command: {command}")
                 import subprocess
                 try:
-                    subprocess.run(command, shell=True, check=False)
+                    subprocess.Popen(command, shell=True)
                 except Exception as e:
                     logger.error(f"Failed to execute custom command '{command}': {e}")
 
