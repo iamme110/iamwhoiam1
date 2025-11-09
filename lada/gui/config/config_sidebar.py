@@ -36,8 +36,6 @@ class ConfigSidebar(Gtk.Box):
     check_button_export_directory_alwaysask: Gtk.CheckButton = Gtk.Template.Child()
     check_button_export_directory_defaultdir: Gtk.CheckButton = Gtk.Template.Child()
     action_row_temp_directory: Adw.ActionRow = Gtk.Template.Child()
-    check_button_temp_directory_system: Gtk.CheckButton = Gtk.Template.Child()
-    check_button_temp_directory_custom: Gtk.CheckButton = Gtk.Template.Child()
     entry_row_file_name_pattern: Adw.EntryRow = Gtk.Template.Child()
     toggle_button_initial_view_preview: Gtk.ToggleButton = Gtk.Template.Child()
     toggle_button_initial_view_export: Gtk.ToggleButton = Gtk.Template.Child()
@@ -121,12 +119,7 @@ class ConfigSidebar(Gtk.Box):
         self.entry_row_file_name_pattern.set_text(config.file_name_pattern)
 
         # init temp directory
-        if config.temp_directory:
-            self.action_row_temp_directory.set_subtitle(config.temp_directory)
-            self.check_button_temp_directory_custom.set_active(True)
-        else:
-            self.action_row_temp_directory.set_subtitle(_("Use system temp directory"))
-            self.check_button_temp_directory_system.set_active(True)
+        self.action_row_temp_directory.set_subtitle(config.temp_directory)
 
         self.toggle_button_initial_view_preview.set_active(config.initial_view == "preview")
         self.toggle_button_initial_view_export.set_active(config.initial_view == "export")
@@ -263,19 +256,6 @@ class ConfigSidebar(Gtk.Box):
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
-    def check_button_temp_directory_system_callback(self, button_clicked):
-        if self.check_button_temp_directory_system.get_active():
-            self._config.temp_directory = None
-            self.action_row_temp_directory.set_subtitle(_("Use system temp directory"))
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def check_button_temp_directory_custom_callback(self, button_clicked):
-        if self.check_button_temp_directory_custom.get_active() and not self._config.temp_directory:
-            self.show_select_temp_folder()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
     def toggle_button_temp_directory_filepicker_callback(self, button_clicked):
         self.show_select_temp_folder()
 
@@ -355,22 +335,19 @@ class ConfigSidebar(Gtk.Box):
     def show_select_temp_folder(self):
         file_dialog = Gtk.FileDialog()
         file_dialog.set_title(_("Select a folder for temporary files"))
+        file_dialog.set_initial_folder(Gio.File.new_for_path(self._config.temp_directory))
         def on_select_temp_folder(_file_dialog, result):
             try:
                 selected_folder: Gio.File = _file_dialog.select_folder_finish(result)
                 selected_folder_path = selected_folder.get_path()
                 self._config.temp_directory = selected_folder_path
                 self.action_row_temp_directory.set_subtitle(selected_folder_path)
-                if not self.check_button_temp_directory_custom.get_active():
-                    self.check_button_temp_directory_custom.set_active(True)
             except GLib.Error as error:
                 if error.message == "Dismissed by user":
                     logger.debug("FileDialog cancelled: Dismissed by user")
                 else:
                     logger.error(f"Error selecting folder: {error.message}")
                     raise error
-                if self.check_button_temp_directory_custom and not self._config.temp_directory:
-                    self.check_button_temp_directory_system.set_active(True)
         file_dialog.select_folder(callback=on_select_temp_folder)
 
     def update_custom_command_visibility(self, action):
