@@ -408,7 +408,7 @@ class ExportView(Gtk.Widget):
 
             progress_update_step_size = 100
             success = True
-            temp_dir = self._config.temp_directory if self._config.temp_directory else tempfile.gettempdir()
+            temp_dir = self._config.temp_directory
             video_tmp_file_output_path = os.path.join(temp_dir, f"{os.path.basename(os.path.splitext(restore_file_path)[0])}.tmp{os.path.splitext(restore_file_path)[1]}")
             try:
                 if self.resume_info:
