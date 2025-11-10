@@ -210,11 +210,11 @@ class FrameRestorer:
             clip_img = image_utils.resize(clip_img, orig_crop_shape[:2])
             clip_mask = image_utils.resize(clip_mask, orig_crop_shape[:2],interpolation=cv2.INTER_NEAREST)
             t, l, b, r = orig_clip_box
-            blend_mask = mask_utils.create_blend_mask(clip_mask)
+            blend_mask = mask_utils.create_blend_mask(clip_mask).to(device=frame.device)
 
             frame_roi = frame[t:b + 1, l:r + 1, :]
-            roi_f = frame_roi.to(self.mosaic_restoration_model.dtype)
-            temp = clip_img.to(self.mosaic_restoration_model.dtype)
+            roi_f = frame_roi.to(dtype=self.mosaic_restoration_model.dtype)
+            temp = clip_img.to(dtype=self.mosaic_restoration_model.dtype, device=frame_roi.device)
             temp.sub_(roi_f)
             temp.mul_(blend_mask.unsqueeze(-1))
             temp.add_(roi_f)
@@ -313,7 +313,7 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with video_utils.VideoReader(self.video_meta_data.video_file, device=self.device) as video_reader:
+        with video_utils.VideoReader(self.video_meta_data.video_file) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
 
