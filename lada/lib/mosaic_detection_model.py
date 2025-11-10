@@ -29,11 +29,12 @@ class PytorchLetterBox:
             self,
             new_shape: tuple[int, int] = (640, 640),
             stride: int = 32,
-            auto:bool = True,
+            auto:bool = False,
             padding_value: float = 114.0/255.0,
     ):
         self.new_shape = new_shape
         self.stride = stride
+        self.auto = auto
         self.padding_value = padding_value
 
     def __call__(self, image: torch.Tensor) -> torch.Tensor:
@@ -53,8 +54,8 @@ class PytorchLetterBox:
         resized_unpad_w = int(round(w * proportion))
         resized_unpad_h = int(round(h * proportion))
 
-        dw = (resized_w - resized_unpad_w) % self.stride
-        dh = (resized_h - resized_unpad_h) % self.stride
+        dw = (resized_w - resized_unpad_w) % self.stride if self.auto else resized_w - resized_unpad_w
+        dh = (resized_h - resized_unpad_h) % self.stride if self.auto else resized_h - resized_unpad_h
 
         if (h, w) != (resized_unpad_h, resized_unpad_w):
             image = torch_functional.interpolate(
@@ -71,17 +72,14 @@ class PytorchLetterBox:
 class MosaicDetectionModel:
     def __init__(self, model_path: str, device, imgsz=640, half=False, use_torch=False, **kwargs):
         yolo_model = YOLO(model_path)
-        assert yolo_model.task == 'segment'
         self.stride = 32
         self.use_torch = use_torch
-        imgsz_list = check_imgsz(imgsz, stride=self.stride, min_dim=2)
-        self.letterbox = (PytorchLetterBox if use_torch else LetterBox)((imgsz_list[0], imgsz_list[1]), stride=self.stride)
 
-        custom = {"conf": 0.25, "batch": 4, "save": False, "mode": "predict", "device": device}
+        custom = {"conf": 0.25, "save": False, "mode": "predict", "device": device}
         args = {**yolo_model.overrides, **custom, **kwargs}  # highest priority args on the right
         self.args = get_cfg(DEFAULT_CFG, args)
         self.device = torch.device(device)
-
+        self.args.fp16 = half
         self.model = AutoBackend(
             model=yolo_model.model,
             device=self.device,
@@ -92,19 +90,31 @@ class MosaicDetectionModel:
             verbose=False,
         )
         self.model.eval()
-        self.model.warmup(imgsz=(1, 3, imgsz_list[0], imgsz_list[1]))
+        self.batch_size:int = self.model.batch if self.model.engine else 8
         self.dtype = torch.float16 if half else torch.float32
-        self.is_segmentation_model = yolo_model.task == 'segment'
+        self.is_segmentation_model = (self.model.task if self.model.engine else yolo_model.task) == 'segment'
+        imgsz_list = check_imgsz(imgsz, stride=self.stride, min_dim=2)
+        self.letterbox = ((PytorchLetterBox if use_torch else LetterBox)
+                          ((imgsz_list[0], imgsz_list[1]), stride=self.stride, auto=False if self.model.engine else True))
         self._lock = threading.Lock()
 
     def preprocess(self, imgs: list[Union[Image, ImageTorch]]):
         if self.use_torch:
-            return self.letterbox(torch.stack([x for x in imgs])
-                                  .to(self.dtype, memory_format=torch.channels_last)
-                                  .div_(255.0)
-                                  .permute(0, 3, 1, 2))
+            batch_imgs = torch.stack([x for x in imgs])\
+                .to(self.dtype, memory_format=torch.channels_last)\
+                .div_(255.0)
+            if len(imgs) != self.batch_size:
+                # pad batch
+                padding_imgs = torch.zeros(self.batch_size - len(imgs), *batch_imgs.shape[1:], device=batch_imgs.device, dtype=batch_imgs.dtype)
+                batch_imgs = torch.cat((batch_imgs, padding_imgs), dim=0)
+
+            return self.letterbox(batch_imgs.permute(0, 3, 1, 2))
         else:
             im = np.stack([self.letterbox(image=x) for x in imgs])
+            if len(imgs) != self.batch_size:
+                # pad batch
+                padding_im = np.zeros((self.batch_size - len(imgs), *im.shape[1:]), dtype=im.dtype)
+                im = np.concatenate((im, padding_im), axis=0)
             im = im.transpose((0, 3, 1, 2))  # BHWC to BCHW, (n, 3, h, w)
             im = np.ascontiguousarray(im)  # contiguous
             im = torch.from_numpy(im)
@@ -118,10 +128,10 @@ class MosaicDetectionModel:
             with torch.no_grad():
                 return self.model(image_batch, augment=False, visualize=False, embed=None)
 
-    def postprocess(self, inference_results, img: torch.Tensor, orig_image: list[Union[Image, ImageTorch]]) -> list[Union[Results, MosaicDetectionResults]]:
-        protos = inference_results[1][-1]
-        inference_results = nms.non_max_suppression(
-            inference_results,
+    def postprocess(self, prediction, img: torch.Tensor, orig_image: list[Union[Image, ImageTorch]]) -> list[Union[Results, MosaicDetectionResults]]:
+        protos = prediction[1] if self.model.engine else prediction[1][-1]
+        nms_results = nms.non_max_suppression(
+            prediction,
             self.args.conf,
             self.args.iou,
             self.args.classes,
@@ -130,16 +140,16 @@ class MosaicDetectionModel:
             nc=len(self.model.names),
             end2end=getattr(self.model, "end2end", False),
         )
-        return [self.construct_result(inference_result, img, orig_img, proto)
-                for inference_result, orig_img, proto in zip(inference_results, orig_image, protos)]
+        return [self.construct_result(nms_result, img, orig_img, proto)
+                for nms_result, orig_img, proto in zip(nms_results, orig_image, protos)]
 
-    def construct_result(self, inference_result: torch.Tensor, img: torch.Tensor, orig_img: Union[Image, ImageTorch], proto: torch.Tensor) -> Union[Results, MosaicDetectionResults]:
-        if not len(inference_result):  # save empty boxes
+    def construct_result(self, nms_result: torch.Tensor, img: torch.Tensor, orig_img: Union[Image, ImageTorch], proto: torch.Tensor) -> Union[Results, MosaicDetectionResults]:
+        if not len(nms_result):  # save empty boxes
             masks = None
         else:
-            masks = ops.process_mask(proto, inference_result[:, 6:], inference_result[:, :4], img.shape[2:], upsample=True)  # HWC
-            inference_result[:, :4] = ops.scale_boxes(img.shape[2:], inference_result[:, :4], orig_img.shape)
+            masks = ops.process_mask(proto, nms_result[:, 6:], nms_result[:, :4], img.shape[2:], upsample=True)  # HWC
+            nms_result[:, :4] = ops.scale_boxes(img.shape[2:], nms_result[:, :4], orig_img.shape)
         if masks is not None:
             keep = masks.sum((-2, -1)) > 0  # only keep predictions with masks
-            inference_result, masks = inference_result[keep], masks[keep]
-        return (MosaicDetectionResults if self.use_torch else Results)(orig_img=orig_img, path='', names=self.model.names, boxes=inference_result[:, :6], masks=masks)
+            nms_result, masks = nms_result[keep], masks[keep]
+        return (MosaicDetectionResults if self.use_torch else Results)(orig_img=orig_img, path='', names=self.model.names, boxes=nms_result[:, :6], masks=masks)

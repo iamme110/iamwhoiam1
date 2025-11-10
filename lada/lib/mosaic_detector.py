@@ -437,8 +437,7 @@ class MosaicDetector:
             else:
                 inference_results, preprocessed_frames, orig_frames, _frame_num = inference_data
                 assert frame_num == _frame_num, "frame detector worker out of sync with frame reader"
-                batch_prediction_results = self.model.postprocess(inference_results, preprocessed_frames, orig_frames)
-                assert preprocessed_frames.shape[0] == len(batch_prediction_results)
+                batch_prediction_results = self.model.postprocess(inference_results, preprocessed_frames, orig_frames)[:len(orig_frames)]
                 for i, results in enumerate(batch_prediction_results):
                     self._create_or_append_scenes_based_on_prediction_result(results, scenes, frame_num)
                     self._create_clips_for_completed_scenes(scenes, frame_num, eof=False)
