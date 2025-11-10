@@ -63,11 +63,11 @@ def inference(model, video: list, device, max_frames=-1):
         input = torch.unsqueeze(input, dim=0)  # TCHW -> BTCHW
         if max_frames > 0:
             for i in range(0, input.shape[1], max_frames):
-                output = model(inputs=input[:, i:i + max_frames].to(device))
+                output = model(inputs=input[:, i:i + max_frames].to(device, model.dtype))
                 result.append(output)
             result = torch.cat(result, dim=1)
         else:
-            result = model(inputs=input.to(device))
+            result = model(inputs=input.to(device, model.dtype))
         result = torch.squeeze(result, dim=0)  # BTCHW -> TCHW
         result = list(torch.unbind(result, 0))
         output = tensor2img(result, rgb2bgr=False, out_type=np.uint8, min_max=(0, 1))
