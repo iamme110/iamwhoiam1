@@ -29,9 +29,11 @@ class PostExportAction(Enum):
 
 class Config(GObject.Object):
     _defaults = {
+        'adjust_video_size_to_resolution': False,  # Add this if not present
         'color_scheme': ColorScheme.SYSTEM,
         'custom_ffmpeg_encoder_options': '',
         'device': 'cuda:0',
+        'enable_window_centering': False,  # NEW: Enable/disable window centering
         'export_codec': 'libx264',
         'export_crf': 20,
         'export_directory': None,
@@ -53,6 +55,7 @@ class Config(GObject.Object):
         self._color_scheme = self._defaults['color_scheme']
         self._custom_ffmpeg_encoder_options = self._defaults['custom_ffmpeg_encoder_options']
         self._device = self._defaults['device']
+        self._enable_window_centering = self._defaults['enable_window_centering']  # NEW
         self._export_codec = self._defaults['export_codec']
         self._export_crf = self._defaults['export_crf']
         self._export_directory = self._defaults['export_directory']
@@ -259,6 +262,17 @@ class Config(GObject.Object):
         self._temp_directory = value
         self.save()
 
+    @GObject.Property()
+    def enable_window_centering(self):
+        return self._enable_window_centering
+
+    @enable_window_centering.setter
+    def enable_window_centering(self, value):
+        if value == self._enable_window_centering:
+            return
+        self._enable_window_centering = value
+        self.save()
+
     def save(self):
         self.save_lock.acquire_lock()
         config_file_path = self.get_config_file_path()
@@ -298,6 +312,7 @@ class Config(GObject.Object):
     def reset_to_default_values(self):
         self.color_scheme = self._defaults['color_scheme']
         self.custom_ffmpeg_encoder_options = self._defaults['custom_ffmpeg_encoder_options']
+        self.enable_window_centering = self._defaults['enable_window_centering']  # NEW
         self.export_codec = self._defaults['export_codec']
         self.export_crf = self._defaults['export_crf']
         self.export_directory = self._defaults['export_directory']
@@ -327,6 +342,7 @@ class Config(GObject.Object):
             'color_scheme': self._color_scheme.value,
             'custom_ffmpeg_encoder_options': self._custom_ffmpeg_encoder_options,
             'device': self._device,
+            'enable_window_centering': self._enable_window_centering,  # NEW
             'export_codec': self._export_codec,
             'export_crf': self._export_crf,
             'export_directory': self._export_directory,
@@ -379,6 +395,8 @@ class Config(GObject.Object):
                     self.validate_and_set_file_name_pattern(dict[key])
                 elif key == 'initial_view':
                     self.validate_and_set_initial_view(dict[key])
+                elif key == 'enable_window_centering':
+                    self._enable_window_centering = dict[key]  # NEW
                 else:
                     setattr(self, f"_{key}", dict[key])
 
