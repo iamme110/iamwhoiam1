@@ -1,423 +1,383 @@
-# SPDX-FileCopyrightText: Lada Authors
-# SPDX-License-Identifier: AGPL-3.0
-
-import logging
-import pathlib
-
-from gi.repository import Gtk, GObject, Adw, Gio, GLib, Gdk
-
-from lada import get_available_restoration_models, get_available_detection_models, LOG_LEVEL
-from lada.gui import utils
-from lada.gui.config.config import Config, ColorScheme
-from lada.gui.utils import skip_if_uninitialized, get_available_video_codecs, validate_file_name_pattern
-
-here = pathlib.Path(__file__).parent.resolve()
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=LOG_LEVEL)
-
-@Gtk.Template(string=utils.translate_ui_xml(here / 'config_sidebar.ui'))
-class ConfigSidebar(Gtk.Box):
-    __gtype_name__ = 'ConfigSidebar'
-
-    combo_row_gpu = Gtk.Template.Child()
-    combo_row_mosaic_removal_models = Gtk.Template.Child()
-    combo_row_mosaic_detection_models = Gtk.Template.Child()
-    spin_row_export_crf = Gtk.Template.Child()
-    combo_row_export_codec = Gtk.Template.Child()
-    spin_row_preview_buffer_duration = Gtk.Template.Child()
-    spin_row_clip_max_duration = Gtk.Template.Child()
-    switch_row_mute_audio = Gtk.Template.Child()
-    switch_row_enable_window_centering = Gtk.Template.Child()  # NEW
-    preferences_page = Gtk.Template.Child()
-    light_color_scheme_button = Gtk.Template.Child()
-    dark_color_scheme_button = Gtk.Template.Child()
-    system_color_scheme_button = Gtk.Template.Child()
-    action_row_export_directory: Adw.ActionRow = Gtk.Template.Child()
-    check_button_export_directory_alwaysask: Gtk.CheckButton = Gtk.Template.Child()
-    check_button_export_directory_defaultdir: Gtk.CheckButton = Gtk.Template.Child()
-    action_row_temp_directory: Adw.ActionRow = Gtk.Template.Child()
-    entry_row_file_name_pattern: Adw.EntryRow = Gtk.Template.Child()
-    toggle_button_initial_view_preview: Gtk.ToggleButton = Gtk.Template.Child()
-    toggle_button_initial_view_export: Gtk.ToggleButton = Gtk.Template.Child()
-    entry_row_custom_ffmpeg_encoder_options: Adw.EntryRow = Gtk.Template.Child()
-    check_button_post_export_none: Gtk.CheckButton = Gtk.Template.Child()
-    check_button_post_export_shutdown: Gtk.CheckButton = Gtk.Template.Child()
-    check_button_post_export_custom_command: Gtk.CheckButton = Gtk.Template.Child()
-    entry_row_post_export_custom_command: Adw.EntryRow = Gtk.Template.Child()
-    check_button_show_mosaic_detections: Gtk.CheckButton = Gtk.Template.Child()
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._config: Config | None = None
-        self.init_done = False
-        self._show_playback_section = True
-        self._show_export_section = True
-
-    def init_sidebar_from_config(self, config: Config):
-        self.init_done = False
-
-        self.check_button_show_mosaic_detections.props.active = config.show_mosaic_detections
-
-        # init device
-        combo_row_gpu_list = Gtk.StringList.new([])
-        available_gpus = utils.get_available_gpus()
-        configured_gpu_selection_idx = None
-        for gpu_selection_idx, (device_id, device_name) in enumerate(available_gpus):
-            combo_row_gpu_list.append(device_name)
-            if config.device and utils.device_to_gpu_id(config.device) == device_id:
-                configured_gpu_selection_idx = gpu_selection_idx
-        self.combo_row_gpu.set_model(combo_row_gpu_list)
-        if configured_gpu_selection_idx:
-            self.combo_row_gpu.set_selected(configured_gpu_selection_idx)
-
-        # init restoration model
-        combo_row_models_list = Gtk.StringList.new([])
-        available_models = get_available_restoration_models()
-        for model_name in available_models:
-            combo_row_models_list.append(model_name)
-        self.combo_row_mosaic_removal_models.set_model(combo_row_models_list)
-        idx = available_models.index(config.get_property("mosaic_restoration_model"))
-        self.combo_row_mosaic_removal_models.set_selected(idx)
-
-        # init detection model
-        combo_row_detection_models_list = Gtk.StringList.new([])
-        available_detection_models = get_available_detection_models()
-        for model_name in available_detection_models:
-            combo_row_detection_models_list.append(model_name)
-        self.combo_row_mosaic_detection_models.set_model(combo_row_detection_models_list)
-        idx = available_detection_models.index(config.mosaic_detection_model)
-        self.combo_row_mosaic_detection_models.set_selected(idx)
-
-        # init codec
-        combo_row_export_codec_models_list = Gtk.StringList.new([])
-        codecs = get_available_video_codecs()
-        for codec_name in codecs:
-            combo_row_export_codec_models_list.append(codec_name)
-        self.combo_row_export_codec.set_model(combo_row_export_codec_models_list)
-        idx = codecs.index(config.export_codec)
-        self.combo_row_export_codec.set_selected(idx)
-
-        self.spin_row_export_crf.set_property('value', config.export_crf)
-
-        self.spin_row_preview_buffer_duration.set_value(config.preview_buffer_duration)
-        self.spin_row_clip_max_duration.set_value(config.max_clip_duration)
-        self.switch_row_mute_audio.set_active(config.mute_audio)
-        self.switch_row_enable_window_centering.set_active(config.enable_window_centering)  # NEW
-
-        # init color scheme
-        if config.color_scheme == ColorScheme.LIGHT: self.light_color_scheme_button.set_property("active", True)
-        elif config.color_scheme == ColorScheme.DARK: self.dark_color_scheme_button.set_property("active", True)
-        else: self.system_color_scheme_button.set_property("active", True)
-
-        # init export directory
-        if config.export_directory:
-            self.action_row_export_directory.set_subtitle(config.export_directory)
-            self.check_button_export_directory_defaultdir.set_active(True)
-        else:
-            self.action_row_export_directory.set_subtitle(_("Click the folder button to choose a default"))
-            self.check_button_export_directory_alwaysask.set_active(True)
-
-        self.entry_row_file_name_pattern.set_text(config.file_name_pattern)
-
-        # init temp directory
-        self.action_row_temp_directory.set_subtitle(config.temp_directory)
-
-        self.toggle_button_initial_view_preview.set_active(config.initial_view == "preview")
-        self.toggle_button_initial_view_export.set_active(config.initial_view == "export")
-
-        self.entry_row_custom_ffmpeg_encoder_options.set_text(config.custom_ffmpeg_encoder_options)
-
-        # init post-export action
-        from lada.gui.config.config import PostExportAction
-        self.check_button_post_export_shutdown.set_active(config.post_export_action == PostExportAction.SHUTDOWN.value)
-        self.check_button_post_export_custom_command.set_active(config.post_export_action == PostExportAction.CUSTOM_COMMAND.value)
-        # Set none as active if neither shutdown nor custom command is selected
-        self.check_button_post_export_none.set_active(config.post_export_action not in [PostExportAction.SHUTDOWN.value, PostExportAction.CUSTOM_COMMAND.value])
-        self.entry_row_post_export_custom_command.set_text(config.post_export_custom_command)
-        self.update_custom_command_visibility(config.post_export_action)
-
-        self.init_done = True
-
-    @GObject.Property(type=Config)
-    def config(self):
-        return self._config
-
-    @config.setter
-    def config(self, value: Config):
-        self._config = value
-        self.init_sidebar_from_config(value)
-
-    @GObject.Property()
-    def disabled(self):
-        return self.get_property("sensitive")
-
-    @disabled.setter
-    def disabled(self, value):
-        self.set_property("sensitive", not value)
-
-    @GObject.Property(type=bool, default=True)
-    def show_playback_section(self):
-        return self._show_playback_section
-
-    @show_playback_section.setter
-    def show_playback_section(self, value):
-        self._show_playback_section = value
-
-    @GObject.Property(type=bool, default=True)
-    def show_export_section(self):
-        return self._show_export_section
-
-    @show_export_section.setter
-    def show_export_section(self, value):
-        self._show_export_section = value
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def combo_row_mosaic_removal_models_selected_callback(self, combo_row, value):
-        self._config.mosaic_restoration_model = combo_row.get_property("selected_item").get_string()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def combo_row_mosaic_detection_models_selected_callback(self, combo_row, value):
-        self._config.mosaic_detection_model = combo_row.get_property("selected_item").get_string()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def combo_row_mosaic_export_codec_selected_callback(self, combo_row, value):
-        self._config.export_codec = combo_row.get_property("selected_item").get_string()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def spin_row_preview_export_crf_selected_callback(self, spin_row, value):
-        self._config.export_crf = spin_row.get_property("value")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def combo_row_gpu_selected_callback(self, combo_row, value):
-        selected_gpu_name = combo_row.get_property("selected_item").get_string()
-        for id, name in utils.get_available_gpus():
-            if name == selected_gpu_name:
-                self._config.device = f"cuda:{id}"
-                break
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def spin_row_preview_buffer_duration_selected_callback(self, spin_row, value):
-        self._config.preview_buffer_duration = spin_row.get_property("value")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def spin_row_clip_max_duration_selected_callback(self, spin_row, value):
-        self._config.max_clip_duration = spin_row.get_property("value")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def switch_row_mute_audio_active_callback(self, switch_row, active):
-        self._config.mute_audio = switch_row.get_property("active")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def switch_row_enable_window_centering_active_callback(self, switch_row, active):
-        logger.debug(f"Window centering toggle changed to: {active}")
-        self._config.enable_window_centering = switch_row.get_property("active")  # NEW
-        # Trigger immediate window resize - use GTK's application framework to get main window
-        # Use the simplest approach: get toplevel window from any widget
-        toplevel = self.get_root()
-        logger.debug(f"Toplevel: {toplevel}, type: {type(toplevel)}")
-
-        if toplevel and hasattr(toplevel, 'preview_view'):
-            preview_view = toplevel.preview_view
-            logger.debug(f"PreviewView from toplevel: {preview_view}, type: {type(preview_view)}")
-
-            if hasattr(toplevel, 'view_stack') and toplevel.view_stack.props.visible_child_name == "preview":
-                logger.debug("Currently in preview mode")
-                # Always trigger window resize when toggle changes
-                logger.debug("Triggering window resize for toggle change")
-                if toplevel and hasattr(toplevel, 'on_window_resize_requested'):
-                    # Try to get current paintable if available, otherwise pass None
-                    paintable = None
-                    playback_controls = None
-                    header_bar = None
-                    if hasattr(preview_view, 'pipeline_manager') and preview_view.pipeline_manager and hasattr(preview_view.pipeline_manager, 'paintable'):
-                        paintable = preview_view.pipeline_manager.paintable
-                        playback_controls = preview_view.box_playback_controls
-                        header_bar = preview_view.header_bar
-                    logger.debug(f"Calling window resize with paintable: {paintable is not None}")
-                    toplevel.on_window_resize_requested(None, paintable, playback_controls, header_bar)
-                else:
-                    logger.debug("Toplevel does not have on_window_resize_requested method")
-            else:
-                logger.debug("Not in preview mode")
-        else:
-            logger.debug("Could not find preview_view on toplevel")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def button_config_reset_callback(self, button_clicked):
-        self.init_done = False
-        self._config.reset_to_default_values()
-        self.init_sidebar_from_config(self._config)
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def toggle_button_system_color_scheme_callback(self, button_clicked):
-        self._config.color_scheme = ColorScheme.SYSTEM
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def toggle_button_light_color_scheme_callback(self, button_clicked):
-        self._config.color_scheme = ColorScheme.LIGHT
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def toggle_button_dark_color_scheme_callback(self, button_clicked):
-        self._config.color_scheme = ColorScheme.DARK
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def check_button_export_directory_alwaysask_callback(self, button_clicked):
-        if self.check_button_export_directory_alwaysask.get_active():
-            self._config.export_directory = None
-            self.action_row_export_directory.set_subtitle(_("Click the folder button to choose a default"))
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def check_button_export_directory_defaultdir_callback(self, button_clicked):
-        if self.check_button_export_directory_defaultdir.get_active() and not self._config.export_directory:
-            self.show_select_folder()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def toggle_button_export_directory_filepicker_callback(self, button_clicked):
-        self.show_select_folder()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def toggle_button_temp_directory_filepicker_callback(self, button_clicked):
-        self.show_select_temp_folder()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def entry_row_file_name_pattern_changed_callback(self, entry_row):
-        self.set_file_name_pattern_row_styles()
-        if validate_file_name_pattern(self.entry_row_file_name_pattern.get_text()):
-            self._config.file_name_pattern = self.entry_row_file_name_pattern.get_text()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def entry_row_file_name_pattern_focused_callback(self, row_entry, param_spec):
-        self.set_file_name_pattern_row_styles()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def toggle_button_initial_view_preview_callback(self, button_clicked):
-        self._config.initial_view = "preview"
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def toggle_button_initial_view_export_callback(self, button_clicked):
-        self._config.initial_view = "export"
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def entry_row_custom_ffmpeg_encoder_options_changed_callback(self, entry_row):
-        self._config.custom_ffmpeg_encoder_options = self.entry_row_custom_ffmpeg_encoder_options.get_text()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def check_button_show_mosaic_detections_callback(self, check_button):
-        self._config.show_mosaic_detections = self.check_button_show_mosaic_detections.props.active
-
-    def set_file_name_pattern_row_styles(self):
-        is_valid = validate_file_name_pattern(self.entry_row_file_name_pattern.get_text())
-        focused = "focused" in self.entry_row_file_name_pattern.get_css_classes()
-        all_classes = {"success", "warning", "error"}
-        def add_if_not_present(class_name):
-            if class_name not in self.entry_row_file_name_pattern.get_css_classes():
-                for other_class_names in all_classes.difference({class_name}):
-                    self.entry_row_file_name_pattern.remove_css_class(other_class_names)
-                if class_name:
-                    self.entry_row_file_name_pattern.add_css_class(class_name)
-        if is_valid:
-            if focused:
-                add_if_not_present("success")
-            else:
-                add_if_not_present(None)
-        else:
-            if focused:
-                add_if_not_present("warning")
-            else:
-                add_if_not_present("error")
-
-    def show_select_folder(self):
-        file_dialog = Gtk.FileDialog()
-        file_dialog.set_title(_("Select a folder where restored videos should be saved"))
-        def on_select_folder(_file_dialog, result):
-            try:
-                selected_folder: Gio.File = _file_dialog.select_folder_finish(result)
-                selected_folder_path = selected_folder.get_path()
-                self._config.export_directory = selected_folder_path
-                self.action_row_export_directory.set_subtitle(selected_folder_path)
-                if not self.check_button_export_directory_defaultdir.get_active(): self.check_button_export_directory_defaultdir.set_active(True)
-            except GLib.Error as error:
-                if error.message == "Dismissed by user":
-                    logger.debug("FileDialog cancelled: Dismissed by user")
-                else:
-                    logger.error(f"Error selecting folder: {error.message}")
-                    raise error
-                if self.check_button_export_directory_defaultdir and not self._config.export_directory:
-                    self.check_button_export_directory_alwaysask.set_active(True)
-        file_dialog.select_folder(callback=on_select_folder)
-
-    def show_select_temp_folder(self):
-        file_dialog = Gtk.FileDialog()
-        file_dialog.set_title(_("Select a folder for temporary files"))
-        file_dialog.set_initial_folder(Gio.File.new_for_path(self._config.temp_directory))
-        def on_select_temp_folder(_file_dialog, result):
-            try:
-                selected_folder: Gio.File = _file_dialog.select_folder_finish(result)
-                selected_folder_path = selected_folder.get_path()
-                self._config.temp_directory = selected_folder_path
-                self.action_row_temp_directory.set_subtitle(selected_folder_path)
-            except GLib.Error as error:
-                if error.message == "Dismissed by user":
-                    logger.debug("FileDialog cancelled: Dismissed by user")
-                else:
-                    logger.error(f"Error selecting folder: {error.message}")
-                    raise error
-        file_dialog.select_folder(callback=on_select_temp_folder)
-
-    def update_custom_command_visibility(self, action):
-        self.entry_row_post_export_custom_command.set_visible(action == "custom_command")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def check_button_post_export_none_callback(self, check_button):
-        from lada.gui.config.config import PostExportAction
-        if check_button.get_active():
-            self._config.post_export_action = PostExportAction.NONE.value
-        self.update_custom_command_visibility(self._config.post_export_action)
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def check_button_post_export_shutdown_callback(self, check_button):
-        from lada.gui.config.config import PostExportAction
-        if check_button.get_active():
-            self._config.post_export_action = PostExportAction.SHUTDOWN.value
-        self.update_custom_command_visibility(self._config.post_export_action)
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def check_button_post_export_custom_command_callback(self, check_button):
-        from lada.gui.config.config import PostExportAction
-        if check_button.get_active():
-            self._config.post_export_action = PostExportAction.CUSTOM_COMMAND.value
-        else:
-            self._config.post_export_action = PostExportAction.NONE.value
-        self.update_custom_command_visibility(self._config.post_export_action)
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def entry_row_post_export_custom_command_changed_callback(self, entry_row):
-        self._config.post_export_custom_command = self.entry_row_post_export_custom_command.get_text()
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+SPDX-FileCopyrightText: Lada Authors
+SPDX-License-Identifier: AGPL-3.0
+-->
+
+<interface>
+    <requires lib="gtk" version="4.0"/>
+    <requires lib="Adw" version="1.0"/>
+
+    <template class="ConfigSidebar" parent="GtkBox">
+        <property name="orientation">vertical</property>
+        <child>
+            <object class="GtkScrolledWindow">
+                <property name="vexpand">True</property>
+                <child>
+                    <object class="AdwPreferencesPage" id="preferences_page">
+                        <property name="sensitive">true</property>
+                        <child>
+                            <object class="AdwPreferencesGroup">
+                                <property name="title" translatable="true">Mosaic Removal</property>
+                                <child>
+                                    <object class="AdwComboRow" id="combo_row_mosaic_detection_models">
+                                        <property name="title" translatable="true">Detection model</property>
+                                        <property name="subtitle" translatable="true">Model used for detecting mosaic areas.</property>
+                                        <signal name="notify::selected"
+                                                handler="combo_row_mosaic_detection_models_selected_callback"/>
+                                        <property name="model">
+                                            <object class="GtkStringList"/>
+                                        </property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwComboRow" id="combo_row_mosaic_removal_models">
+                                        <property name="title" translatable="true">Restoration model</property>
+                                        <property name="subtitle" translatable="true">Model used for restoring mosaic areas.</property>
+                                        <signal name="notify::selected"
+                                                handler="combo_row_mosaic_removal_models_selected_callback"/>
+                                        <property name="model">
+                                            <object class="GtkStringList"/>
+                                        </property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwSpinRow" id="spin_row_clip_max_duration">
+                                        <property name="title" translatable="true">Maximum clip duration</property>
+                                        <property name="subtitle" translatable="true">Maximum number of frames for restoration. Higher values improve temporal stability. Lower values reduce memory footprint.</property>
+                                        <signal name="notify::value"
+                                                handler="spin_row_clip_max_duration_selected_callback"/>
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">20</property>
+                                                <property name="upper">400</property>
+                                                <property name="value">180</property>
+                                                <property name="step-increment">10</property>
+                                            </object>
+                                        </property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwComboRow" id="combo_row_gpu">
+                                        <property name="title" translatable="true">GPU</property>
+                                        <property name="subtitle" translatable="true">Selected GPU for model processing.</property>
+                                        <property name="model">
+                                            <object class="GtkStringList">
+                                                <items>
+                                                </items>
+                                            </object>
+                                        </property>
+                                        <signal name="notify::selected"
+                                                handler="combo_row_gpu_selected_callback"/>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="AdwPreferencesGroup">
+                                <property name="title" translatable="true">Playback</property>
+                                <property name="visible" bind-source="ConfigSidebar" bind-property="show-playback-section"/>
+                                <child>
+                                    <object class="AdwSpinRow" id="spin_row_preview_buffer_duration">
+                                        <property name="title" translatable="true">Buffer duration</property>
+                                        <property name="subtitle" translatable="true">How much video is pre-loaded for playback, measured in seconds. If set to 0 this value will be chosen automatically.</property>
+                                        <signal name="notify::value"
+                                                handler="spin_row_preview_buffer_duration_selected_callback"/>
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">0</property>
+                                                <property name="upper">30</property>
+                                                <property name="step-increment">2</property>
+                                            </object>
+                                        </property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwSwitchRow" id="switch_row_mute_audio">
+                                        <property name="title" translatable="true">Mute audio by default</property>
+                                        <property name="subtitle" translatable="true">When enabled, audio will be muted automatically when a new file is opened.</property>
+                                        <signal name="notify::active"
+                                                handler="switch_row_mute_audio_active_callback"/>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwSwitchRow" id="switch_row_enable_window_centering">
+                                        <property name="title" translatable="true">Adjust window size to real video resolution</property>
+                                        <property name="subtitle" translatable="true">Display videos at their exact resolution instead of scaling to fit screen. Maximizes window if video exceeds screen size.</property>
+                                        <signal name="notify::active"
+                                                handler="switch_row_enable_window_centering_active_callback"/>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="AdwPreferencesGroup">
+                                <property name="title" translatable="true">Export</property>
+                                <property name="visible" bind-source="ConfigSidebar" bind-property="show-export-section"/>
+                                <child>
+                                    <object class="AdwComboRow" id="combo_row_export_codec">
+                                        <property name="title" translatable="true">Codec</property>
+                                        <property name="subtitle" translatable="true">Video Codec used for encoding the restored video.</property>
+                                        <signal name="notify::selected"
+                                                handler="combo_row_mosaic_export_codec_selected_callback"/>
+                                        <property name="model">
+                                            <object class="GtkStringList">
+                                                <items></items>
+                                            </object>
+                                        </property>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwSpinRow" id="spin_row_export_crf">
+                                        <property name="title" translatable="true">CRF (Constant Rate Factor)</property>
+                                        <property name="subtitle" translatable="true">Quality setting of the video encoder. Lower values will result in higher quality but larger file sizes.</property>
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">0</property>
+                                                <property name="upper">40</property>
+                                                <property name="step-increment">1</property>
+                                            </object>
+                                        </property>
+                                        <signal name="notify::value"
+                                                handler="spin_row_preview_export_crf_selected_callback"/>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwEntryRow" id="entry_row_custom_ffmpeg_encoder_options">
+                                        <property name="title" translatable="true">Custom FFmpeg encoder options (Optional).&#xA;Example: &lt;span background=&quot;#D3D3D350&quot;&gt;&lt;tt&gt;-rc-lookahead 32 -rc vbr_hq&lt;/tt&gt;&lt;/span&gt;</property>
+                                        <property name="tooltip-text" translatable="true">FFmpeg Codecs Documentation:&#xA;https://ffmpeg.org/ffmpeg-codecs.html</property>
+                                        <signal name="changed" handler="entry_row_custom_ffmpeg_encoder_options_changed_callback"/>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwExpanderRow">
+                                        <property name="title" translatable="true">Output Directory</property>
+                                        <property name="show-enable-switch">false</property>
+                                        <property name="expanded">true</property>
+                                        <child>
+                                            <object class="AdwActionRow">
+                                                <property name="title" translatable="true">Always ask</property>
+                                                <child type="prefix">
+                                                    <object class="GtkCheckButton" id="check_button_export_directory_alwaysask">
+                                                        <property name="active">true</property>
+                                                        <signal name="toggled" handler="check_button_export_directory_alwaysask_callback"/>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="AdwActionRow" id="action_row_export_directory">
+                                                <property name="title" translatable="true">Use this folder</property>
+                                                <property name="subtitle" translatable="true">Click the folder button to choose a default</property>
+                                                <child type="prefix">
+                                                    <object class="GtkCheckButton" id="check_button_export_directory_defaultdir">
+                                                        <property name="group">check_button_export_directory_alwaysask</property>
+                                                        <property name="active">false</property>
+                                                        <signal name="toggled" handler="check_button_export_directory_defaultdir_callback"/>
+                                                    </object>
+                                                </child>
+                                                <child type="suffix">
+                                                    <object class="GtkButton">
+                                                        <property name="icon-name">folder-open-symbolic</property>
+                                                        <property name="valign">3</property>
+                                                        <signal name="clicked" handler="toggle_button_export_directory_filepicker_callback"/>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwActionRow" id="action_row_temp_directory">
+                                        <property name="title" translatable="true">Temporary Directory</property>
+                                        <property name="tooltip-text" translatable="true">Directory for temporary video files during restoration process</property>
+                                        <child type="suffix">
+                                            <object class="GtkButton">
+                                                <property name="icon-name">folder-open-symbolic</property>
+                                                <property name="valign">3</property>
+                                                <signal name="clicked" handler="toggle_button_temp_directory_filepicker_callback"/>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwEntryRow" id="entry_row_file_name_pattern">
+                                        <property name="title" translatable="true">File name pattern for restored files.&#xA;Must include placeholder &lt;span background=&quot;#D3D3D350&quot;&gt;&lt;tt&gt;{orig_file_name}&lt;/tt&gt;&lt;/span&gt;.</property>
+                                        <signal name="changed" handler="entry_row_file_name_pattern_changed_callback"/>
+                                        <!-- I could not find any other way to check if the row is focused except checking for focused css class. has-focus is never true -->
+                                        <signal name="notify::css-classes" handler="entry_row_file_name_pattern_focused_callback"/>
+                                    </object>
+                                </child>
+                                 <child>
+                                     <object class="AdwExpanderRow">
+                                         <property name="title" translatable="true">Post-Export Action</property>
+                                       <property name="tooltip-text" translatable="true">Action to be run after all queued files have been restored</property>
+                                         <property name="show-enable-switch">false</property>
+                                         <property name="expanded">true</property>
+                                         <child>
+                                             <object class="AdwActionRow">
+                                                 <property name="title" translatable="true">No action</property>
+                                                 <property name="subtitle" translatable="true">Do nothing after export is completed.</property>
+                                                 <child type="prefix">
+                                                     <object class="GtkCheckButton" id="check_button_post_export_none">
+                                                         <property name="active">true</property>
+                                                         <signal name="toggled" handler="check_button_post_export_none_callback"/>
+                                                     </object>
+                                                 </child>
+                                             </object>
+                                         </child>
+                                         <child>
+                                             <object class="AdwActionRow">
+                                                 <property name="title" translatable="true">Shutdown system</property>
+                                                 <property name="subtitle" translatable="true">Automatically shutdown the system after export is completed.</property>
+                                                 <child type="prefix">
+                                                     <object class="GtkCheckButton" id="check_button_post_export_shutdown">
+                                                         <property name="group">check_button_post_export_none</property>
+                                                         <signal name="toggled" handler="check_button_post_export_shutdown_callback"/>
+                                                     </object>
+                                                 </child>
+                                             </object>
+                                         </child>
+                                         <child>
+                                             <object class="AdwActionRow">
+                                                 <property name="title" translatable="true">Execute custom command</property>
+                                                 <property name="subtitle" translatable="true">Run a custom shell command after export is completed.</property>
+                                                 <child type="prefix">
+                                                     <object class="GtkCheckButton" id="check_button_post_export_custom_command">
+                                                         <property name="group">check_button_post_export_none</property>
+                                                         <signal name="toggled" handler="check_button_post_export_custom_command_callback"/>
+                                                     </object>
+                                                 </child>
+                                             </object>
+                                         </child>
+                                         <child>
+                                             <object class="AdwEntryRow" id="entry_row_post_export_custom_command">
+                                                 <property name="title" translatable="true">Custom command</property>
+                                                 <property name="visible">false</property>
+                                                 <signal name="changed" handler="entry_row_post_export_custom_command_changed_callback"/>
+                                             </object>
+                                         </child>
+                                     </object>
+                                 </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="AdwPreferencesGroup">
+                                <property name="title" translatable="true">Troubleshooting</property>
+                                <property name="visible" bind-source="ConfigSidebar" bind-property="show-playback-section"/>
+                                <child>
+                                    <object class="AdwActionRow">
+                                        <property name="title" translatable="true">Show mosaic detections</property>
+                                        <property name="subtitle" translatable="true">Show detected mosaic areas. Useful to evaluate quality of detection model.</property>
+                                        <child type="prefix">
+                                            <object class="GtkCheckButton" id="check_button_show_mosaic_detections">
+                                                <property name="active">true</property>
+                                                <signal name="toggled" handler="check_button_show_mosaic_detections_callback"/>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                        <child>
+                            <object class="AdwPreferencesGroup">
+                                <property name="title" translatable="true">UI</property>
+                                <child>
+                                    <object class="AdwComboRow">
+                                        <property name="title" translatable="true">Color Scheme</property>
+                                        <child>
+                                            <object class="GtkToggleButton" id="system_color_scheme_button">
+                                                <property name="sensitive">True</property>
+                                                <property name="tooltip-text" translatable="true">Follow System style</property>
+                                                <property name="icon-name">color-scheme-system</property>
+                                                <signal name="clicked" handler="toggle_button_system_color_scheme_callback"/>
+                                                <style>
+                                                    <class name="flat"/>
+                                                </style>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="GtkToggleButton" id="light_color_scheme_button">
+                                                <property name="sensitive">True</property>
+                                                <property name="group">system_color_scheme_button</property>
+                                                <property name="tooltip-text" translatable="true">Light style</property>
+                                                <property name="icon-name">color-scheme-light</property>
+                                                <signal name="clicked" handler="toggle_button_light_color_scheme_callback"/>
+                                                <style>
+                                                    <class name="flat"/>
+                                                </style>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="GtkToggleButton" id="dark_color_scheme_button">
+                                                <property name="sensitive">True</property>
+                                                <property name="group">system_color_scheme_button</property>
+                                                <property name="tooltip-text" translatable="true">Dark style</property>
+                                                <property name="icon-name">color-scheme-dark</property>
+                                                <signal name="clicked" handler="toggle_button_dark_color_scheme_callback"/>
+                                                <style>
+                                                    <class name="flat"/>
+                                                </style>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="AdwActionRow">
+                                        <property name="title" translatable="true">Default View</property>
+                                        <property name="subtitle" translatable="true">View shown after opening files</property>
+                                        <child>
+                                            <object class="GtkToggleButton" id="toggle_button_initial_view_preview">
+                                                <property name="sensitive">True</property>
+                                                <property name="child">
+                                                    <object class="AdwButtonContent">
+                                                        <property name="icon-name">playback-symbolic</property>
+                                                        <property name="label" translatable="true">Watch</property>
+                                                    </object>
+                                                </property>
+                                                <signal name="clicked" handler="toggle_button_initial_view_preview_callback"/>
+                                                <style>
+                                                    <class name="flat"/>
+                                                </style>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="GtkToggleButton" id="toggle_button_initial_view_export">
+                                                <property name="group">toggle_button_initial_view_preview</property>
+                                                <property name="child">
+                                                    <object class="AdwButtonContent">
+                                                        <property name="icon-name">arrow-pointing-away-from-line-right-symbolic</property>
+                                                        <property name="label" translatable="true">Export</property>
+                                                    </object>
+                                                </property>
+                                                <property name="sensitive">True</property>
+                                                <property name="active">True</property>
+                                                <signal name="clicked" handler="toggle_button_initial_view_export_callback"/>
+                                                <style>
+                                                    <class name="flat"/>
+                                                </style>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+            </object>
+        </child>
+        <child>
+            <object class="GtkActionBar">
+                <property name="revealed">true</property>
+                <child type="center">
+                    <object class="GtkButton">
+                        <property name="label" translatable="true">Reset to factory settings</property>
+                        <property name="sensitive">True</property>
+                        <signal name="clicked" handler="button_config_reset_callback"/>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </template>
+</interface>
