@@ -265,6 +265,9 @@ class PipelineManager(GObject.Object):
         else:
             self.pipeline_remove_audio()
 
+        # Force a paintable size change event to trigger window resizing for the new video
+        GLib.idle_add(lambda: self.emit("paintable-size-changed"))
+
     def reinit_appsrc(self):
         self.frame_restorer_app_src.reinit(self.video_metadata)
 
