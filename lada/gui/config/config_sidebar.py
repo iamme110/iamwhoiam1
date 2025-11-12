@@ -4,7 +4,7 @@
 import logging
 import pathlib
 
-from gi.repository import Gtk, GObject, Adw, Gio, GLib
+from gi.repository import Gtk, GObject, Adw, Gio, GLib, Gdk
 
 from lada import get_available_restoration_models, get_available_detection_models, LOG_LEVEL
 from lada.gui import utils
@@ -28,6 +28,7 @@ class ConfigSidebar(Gtk.Box):
     spin_row_preview_buffer_duration = Gtk.Template.Child()
     spin_row_clip_max_duration = Gtk.Template.Child()
     switch_row_mute_audio = Gtk.Template.Child()
+    switch_row_enable_window_centering = Gtk.Template.Child()  # NEW
     preferences_page = Gtk.Template.Child()
     light_color_scheme_button = Gtk.Template.Child()
     dark_color_scheme_button = Gtk.Template.Child()
@@ -102,6 +103,7 @@ class ConfigSidebar(Gtk.Box):
         self.spin_row_preview_buffer_duration.set_value(config.preview_buffer_duration)
         self.spin_row_clip_max_duration.set_value(config.max_clip_duration)
         self.switch_row_mute_audio.set_active(config.mute_audio)
+        self.switch_row_enable_window_centering.set_active(config.enable_window_centering)  # NEW
 
         # init color scheme
         if config.color_scheme == ColorScheme.LIGHT: self.light_color_scheme_button.set_property("active", True)
@@ -213,6 +215,42 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def switch_row_mute_audio_active_callback(self, switch_row, active):
         self._config.mute_audio = switch_row.get_property("active")
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def switch_row_enable_window_centering_active_callback(self, switch_row, active):
+        logger.debug(f"Window centering toggle changed to: {active}")
+        self._config.enable_window_centering = switch_row.get_property("active")  # NEW
+        # Trigger immediate window resize - use GTK's application framework to get main window
+        # Use the simplest approach: get toplevel window from any widget
+        toplevel = self.get_root()
+        logger.debug(f"Toplevel: {toplevel}, type: {type(toplevel)}")
+
+        if toplevel and hasattr(toplevel, 'preview_view'):
+            preview_view = toplevel.preview_view
+            logger.debug(f"PreviewView from toplevel: {preview_view}, type: {type(preview_view)}")
+
+            if hasattr(toplevel, 'view_stack') and toplevel.view_stack.props.visible_child_name == "preview":
+                logger.debug("Currently in preview mode")
+                # Always trigger window resize when toggle changes
+                logger.debug("Triggering window resize for toggle change")
+                if toplevel and hasattr(toplevel, 'on_window_resize_requested'):
+                    # Try to get current paintable if available, otherwise pass None
+                    paintable = None
+                    playback_controls = None
+                    header_bar = None
+                    if hasattr(preview_view, 'pipeline_manager') and preview_view.pipeline_manager and hasattr(preview_view.pipeline_manager, 'paintable'):
+                        paintable = preview_view.pipeline_manager.paintable
+                        playback_controls = preview_view.box_playback_controls
+                        header_bar = preview_view.header_bar
+                    logger.debug(f"Calling window resize with paintable: {paintable is not None}")
+                    toplevel.on_window_resize_requested(None, paintable, playback_controls, header_bar)
+                else:
+                    logger.debug("Toplevel does not have on_window_resize_requested method")
+            else:
+                logger.debug("Not in preview mode")
+        else:
+            logger.debug("Could not find preview_view on toplevel")
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
