@@ -165,8 +165,8 @@ class PreviewView(Gtk.Widget):
     def files_opened_signal(self, files: list[Gio.File]):
         pass
 
-    @GObject.Signal(name="window-resize-requested", arg_types=(Gdk.Paintable, Gtk.Widget, Gtk.Widget))
-    def video_size_changed(self, paintable: Gdk.Paintable, playback_controls: Gtk.Widget, headerbar: Gtk.Widget):
+    @GObject.Signal(name="window-resize-requested", arg_types=(Gdk.Paintable, Gtk.Widget, Gtk.Widget, int, int))
+    def video_size_changed(self, paintable: Gdk.Paintable, playback_controls: Gtk.Widget, headerbar: Gtk.Widget, video_width: int, video_height: int):
         pass
 
     @Gtk.Template.Callback()
@@ -360,7 +360,7 @@ class PreviewView(Gtk.Widget):
             self.pipeline_manager = PipelineManager(self.frame_restorer_provider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, self.config.mute_audio)
             self.pipeline_manager.init_pipeline(self.video_metadata)
             self.picture_video_preview.set_paintable(self.pipeline_manager.paintable)
-            self.pipeline_manager.connect("paintable-size-changed", lambda obj: self.emit("window-resize-requested", self.pipeline_manager.paintable, self.box_playback_controls, self.header_bar))
+            self.pipeline_manager.connect("paintable-size-changed", lambda obj: self.emit("window-resize-requested", self.pipeline_manager.paintable, self.box_playback_controls, self.header_bar, self.video_metadata.video_width if self.video_metadata else 0, self.video_metadata.video_height if self.video_metadata else 0))
             self.pipeline_manager.connect("eos", self.on_eos)
             self.pipeline_manager.connect("waiting-for-data", lambda obj, waiting_for_data: self.on_waiting_for_data(waiting_for_data))
             self.pipeline_manager.connect("notify::state", lambda obj, spec: GLib.idle_add(lambda: self.on_pipeline_state(obj.get_property(spec.name))))
