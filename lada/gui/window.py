@@ -98,7 +98,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self.is_visible():
             self._resize_window(paintable, playback_controls, header_bar, video_width=video_width, video_height=video_height)
         else:
-            self.connect("map", self._resize_window, paintable, playback_controls, header_bar, True, video_width=video_width, video_height=video_height)
+            self.connect("map", lambda widget: self._resize_window(paintable, playback_controls, header_bar, True, video_width, video_height))
 
     def _setup_shortcuts(self):
         self._shortcuts_manager.register_group("ui", "UI")
