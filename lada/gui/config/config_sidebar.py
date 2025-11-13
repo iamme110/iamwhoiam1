@@ -244,7 +244,13 @@ class ConfigSidebar(Gtk.Box):
                         playback_controls = preview_view.box_playback_controls
                         header_bar = preview_view.header_bar
                     logger.debug(f"Calling window resize with paintable: {paintable is not None}")
-                    toplevel.on_window_resize_requested(None, paintable, playback_controls, header_bar)
+                    if hasattr(preview_view, 'video_metadata') and preview_view.video_metadata:
+                        video_width = preview_view.video_metadata.video_width
+                        video_height = preview_view.video_metadata.video_height
+                    else:
+                        video_width = 0
+                        video_height = 0
+                    toplevel.on_window_resize_requested(None, paintable, playback_controls, header_bar, video_width, video_height)
                 else:
                     logger.debug("Toplevel does not have on_window_resize_requested method")
             else:
