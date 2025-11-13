@@ -22,7 +22,7 @@ from lada.lib.mosaic_detector import Clip
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_path, mosaic_restoration_config_path, mosaic_detection_model_path, fp16):
+def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_path, mosaic_restoration_config_path, mosaic_detection_model_path, fp16, clip_length):
     if mosaic_restoration_model_name.startswith("deepmosaics"):
         from lada.deepmosaics.models import loadmodel, model_util
         mosaic_restoration_model = loadmodel.video(model_util.device_to_gpu_id(device), mosaic_restoration_model_path)
@@ -33,7 +33,7 @@ def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_
             config = mosaic_restoration_config_path
         else:
             config = get_default_gan_inference_config()
-        mosaic_restoration_model = load_model(config, mosaic_restoration_model_path, device, fp16)
+        mosaic_restoration_model = load_model(config, mosaic_restoration_model_path, device, fp16, clip_length)
         pad_mode = 'zero'
     else:
         raise NotImplementedError()

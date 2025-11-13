@@ -11,8 +11,6 @@ from lada.basicvsrpp import register_all_modules
 from mmengine.config import Config
 from mmengine.runner import load_checkpoint
 
-from lada.lib.image_utils import img2tensor, tensor2img
-
 logger = logging.getLogger(__name__)
 
 def get_default_gan_inference_config() -> dict:
@@ -32,7 +30,7 @@ def get_default_gan_inference_config() -> dict:
         ))
 
 
-def load_model(config: str | dict | None, checkpoint_path, device, fp16):
+def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_length):
     register_all_modules()
     if device and type(device) == str:
         device = torch.device(device)
@@ -47,14 +45,14 @@ def load_model(config: str | dict | None, checkpoint_path, device, fp16):
     model.cfg = config
     model = model.to(device).eval()
     model.device = device
-    model.cpu_buffer = torch.empty(1, 180, 3, 256, 256, dtype=torch.uint8, device='cpu', pin_memory=True)
+    model.cpu_buffer = torch.empty(1, clip_length, 3, 256, 256, dtype=torch.uint8, device='cpu', pin_memory=True)
     if fp16:
         model.dtype = torch.float16
         model = model.half()
     else:
         model.dtype = torch.float32
 
-    model.inference_buffer = torch.empty(1, 180, 3, 256, 256, dtype=model.dtype, device=device, memory_format=torch.channels_last_3d)
+    model.inference_buffer = torch.empty(1, clip_length, 3, 256, 256, dtype=model.dtype, device=device, memory_format=torch.channels_last_3d)
     return model
 
 
@@ -91,13 +89,14 @@ def inference(model, video: list[torch.Tensor], max_frames=-1):
 def test():
     device = "cuda:0"
 
+    clip_length = 255
     model = load_model("configs/basicvsrpp/mosaic_restoration_generic_stage2.py",
-                       "experiments/basicvsrpp/mosaic_restoration_generic_stage2/iter_100000.pth", device)
+                       "experiments/basicvsrpp/mosaic_restoration_generic_stage2/iter_100000.pth", device, clip_length=clip_length)
 
-    frame1 = torch.randint(0, 255, (256, 256, 3), dtype=torch.uint8, device=device)
-    frame2 = torch.randint(0, 255, (256, 256, 3), dtype=torch.uint8, device=device)
-    frame3 = torch.randint(0, 255, (256, 256, 3), dtype=torch.uint8, device=device)
-    frame4 = torch.randint(0, 255, (256, 256, 3), dtype=torch.uint8, device=device)
+    frame1 = torch.randint(0, clip_length, (256, 256, 3), dtype=torch.uint8, device=device)
+    frame2 = torch.randint(0, clip_length, (256, 256, 3), dtype=torch.uint8, device=device)
+    frame3 = torch.randint(0, clip_length, (256, 256, 3), dtype=torch.uint8, device=device)
+    frame4 = torch.randint(0, clip_length, (256, 256, 3), dtype=torch.uint8, device=device)
     video = [frame1, frame2, frame3, frame4]
     result = inference(model, video, device)
     print(len(result), result[0].shape)
