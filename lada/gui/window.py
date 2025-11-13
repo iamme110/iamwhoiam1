@@ -93,12 +93,12 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.fullscreen()
 
-    def on_window_resize_requested(self, obj, paintable: Gdk.Paintable, playback_controls: Gtk.Widget, header_bar: Gtk.Widget):
+    def on_window_resize_requested(self, obj, paintable: Gdk.Paintable, playback_controls: Gtk.Widget, header_bar: Gtk.Widget, video_width: int = 0, video_height: int = 0):
         logger.debug("Window resize requested from config toggle")
         if self.is_visible():
-            self._resize_window(paintable, playback_controls, header_bar)
+            self._resize_window(paintable, playback_controls, header_bar, video_width=video_width, video_height=video_height)
         else:
-            self.connect("map", self._resize_window, paintable, playback_controls, header_bar, True)
+            self.connect("map", self._resize_window, paintable, playback_controls, header_bar, True, video_width=video_width, video_height=video_height)
 
     def _setup_shortcuts(self):
         self._shortcuts_manager.register_group("ui", "UI")
@@ -138,13 +138,11 @@ class MainWindow(Adw.ApplicationWindow):
         if initial:
             self.disconnect_by_func(self._resize_window)
 
-        # Check if paintable is None or invalid
-        if paintable is None:
-            logger.debug("Paintable is None, skipping resize")
-            return
-
         # Use real video dimensions if provided, otherwise fallback to paintable dimensions
         if video_width == 0 or video_height == 0:
+            if paintable is None:
+                logger.debug("Paintable is None and no video dimensions provided, skipping resize")
+                return
             if not (video_width := paintable.get_intrinsic_width()) or not (
                     video_height := paintable.get_intrinsic_height()
             ):
@@ -198,7 +196,7 @@ class MainWindow(Adw.ApplicationWindow):
                 else DEFAULT_OCCUPY_SCREEN
             )
 
-            if hasattr(self, '_config') and hasattr(self._config, 'adjust_video_size_to_resolution') and self._config.adjust_video_size_to_resolution:
+            if hasattr(self, '_config') and hasattr(self._config, 'enable_window_centering') and self._config.enable_window_centering:
                 target_scale = 1.0
             else:
                 size_scale = sqrt(monitor_area / video_area * occupy_area_factor)
@@ -221,7 +219,7 @@ class MainWindow(Adw.ApplicationWindow):
                 nat_height = max_height
                 nat_width = video_width * nat_height / video_height
 
-            if hasattr(self, '_config') and hasattr(self._config, 'adjust_video_size_to_resolution') and self._config.adjust_video_size_to_resolution and (nat_width < original_nat_width or nat_height < original_nat_height):
+            if hasattr(self, '_config') and hasattr(self._config, 'enable_window_centering') and self._config.enable_window_centering and (nat_width < original_nat_width or nat_height < original_nat_height):
                 self.maximize()
                 return
 
@@ -244,7 +242,7 @@ class MainWindow(Adw.ApplicationWindow):
                 else DEFAULT_OCCUPY_SCREEN
             )
 
-            adjust_to_resolution = hasattr(self, '_config') and hasattr(self._config, 'adjust_video_size_to_resolution') and self._config.adjust_video_size_to_resolution
+            adjust_to_resolution = hasattr(self, '_config') and hasattr(self._config, 'enable_window_centering') and self._config.enable_window_centering
 
             if adjust_to_resolution:
                 # Exact video resolution mode
@@ -290,11 +288,16 @@ class MainWindow(Adw.ApplicationWindow):
             if self.is_maximized() and not (exact_video_width_needed > available_width or exact_video_height_needed > available_height):
                 logger.debug(f"Unmaximizing window: previous video required maximization, but new video fits in available space")
                 self.unmaximize()
+                # Force window update after unmaximize
+                self.present()
 
             # Maximize if the exact video resolution would exceed screen bounds
             if exact_video_width_needed > available_width or exact_video_height_needed > available_height:
                 logger.debug(f"Maximizing window: exact video size ({exact_video_width_needed}x{exact_video_height_needed}) exceeds available space ({available_width}x{available_height})")
-                self.maximize()
+                if not self.is_maximized():
+                    self.maximize()
+                    # Force window update after maximize
+                    self.present()
                 return
 
             # Check if change is significant enough to resize
@@ -328,7 +331,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Check if we need to maximize due to size constraints
         # This applies both when adjust_video_size_to_resolution is enabled AND when the window would be too large
         size_too_large = (original_nat_width > monitor_width - margin * hidpi_scale) or (original_nat_height > monitor_height - margin * hidpi_scale - timeline_preview_space)
-        adjust_to_resolution = hasattr(self, '_config') and hasattr(self._config, 'adjust_video_size_to_resolution') and self._config.adjust_video_size_to_resolution
+        adjust_to_resolution = hasattr(self, '_config') and hasattr(self._config, 'enable_window_centering') and self._config.enable_window_centering
 
         if adjust_to_resolution and (nat_width < original_nat_width or nat_height < original_nat_height or size_too_large):
             logger.debug(f"Maximizing window: adjust_to_resolution={adjust_to_resolution}, size_too_large={size_too_large}, constrained=({nat_width}x{nat_height}), original=({original_nat_width}x{original_nat_height})")
@@ -341,275 +344,283 @@ class MainWindow(Adw.ApplicationWindow):
         logger.debug(f"Window new size calculated: {nat_width}x{nat_height}")
 
         # Always center the window on screen after resize for better UX (if enabled)
-        if not initial and not self.is_maximized():
-            if not (surface := self.get_surface()):
-                logger.error("Could not get GdkSurface to center window")
-            else:
-                monitor = self.props.display.get_monitor_at_surface(surface)
-                if monitor:
-                    monitor_rect = monitor.props.geometry
-                    logger.debug(f"Centering window on monitor: {monitor_rect.width}x{monitor_rect.height} at ({monitor_rect.x}, {monitor_rect.y})")
+        if not initial:
+            if not self.is_maximized():
+                if not (surface := self.get_surface()):
+                    logger.error("Could not get GdkSurface to center window")
+                else:
+                    monitor = self.props.display.get_monitor_at_surface(surface)
+                    if monitor:
+                        monitor_rect = monitor.props.geometry
+                        logger.debug(f"Centering window on monitor: {monitor_rect.width}x{monitor_rect.height} at ({monitor_rect.x}, {monitor_rect.y})")
 
-                    # Calculate center position
-                    center_x = monitor_rect.x + (monitor_rect.width - nat_width) // 2
+                        # Calculate center position
+                        center_x = monitor_rect.x + (monitor_rect.width - nat_width) // 2
 
-                    # For Windows, account for taskbar by adjusting available height
-                    import platform
-                    centering_enabled = hasattr(self, '_config') and hasattr(self._config, 'enable_window_centering') and self._config.enable_window_centering
+                        # For Windows, account for taskbar by adjusting available height
+                        import platform
+                        centering_enabled = hasattr(self, '_config') and hasattr(self._config, 'enable_window_centering') and self._config.enable_window_centering
 
-                    if centering_enabled and platform.system() == 'Windows':
-                        try:
-                            import ctypes
-                            user32 = ctypes.windll.user32
-                            # Get work area (excluding taskbar)
-                            work_area = ctypes.wintypes.RECT()
-                            user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work_area), 0)  # SPI_GETWORKAREA
-                            available_height = work_area.bottom - work_area.top
-                            center_y = work_area.top + (available_height - nat_height) // 2
-                            logger.debug(f"Windows taskbar detected, using work area height {available_height} instead of monitor height {monitor_rect.height}")
-                        except Exception as taskbar_e:
-                            logger.debug(f"Could not get Windows work area: {taskbar_e}, using full monitor height")
+                        if centering_enabled and platform.system() == 'Windows':
+                            try:
+                                import ctypes
+                                user32 = ctypes.windll.user32
+                                # Get work area (excluding taskbar)
+                                work_area = ctypes.wintypes.RECT()
+                                user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work_area), 0)  # SPI_GETWORKAREA
+                                available_height = work_area.bottom - work_area.top
+                                center_y = work_area.top + (available_height - nat_height) // 2
+                                logger.debug(f"Windows taskbar detected, using work area height {available_height} instead of monitor height {monitor_rect.height}")
+                            except Exception as taskbar_e:
+                                logger.debug(f"Could not get Windows work area: {taskbar_e}, using full monitor height")
+                                center_y = monitor_rect.y + (monitor_rect.height - nat_height) // 2
+                        elif centering_enabled:
                             center_y = monitor_rect.y + (monitor_rect.height - nat_height) // 2
-                    elif centering_enabled:
-                        center_y = monitor_rect.y + (monitor_rect.height - nat_height) // 2
-                    else:
-                        # Centering disabled - just present window without moving
+                        else:
+                            # Centering disabled - just present window without moving
+                            self.set_property("default-width", nat_width)
+                            self.set_property("default-height", nat_height)
+                            self.present()
+                            return
+
+                        # Ensure window stays within monitor bounds
+                        center_x = max(monitor_rect.x, min(center_x, monitor_rect.x + monitor_rect.width - nat_width))
+                        center_y = max(monitor_rect.y, min(center_y, monitor_rect.y + monitor_rect.height - nat_height))
+                        logger.debug(f"Adjusted center position (bounds checked): ({center_x}, {center_y})")
+
+                        # Set size and position
                         self.set_property("default-width", nat_width)
                         self.set_property("default-height", nat_height)
-                        self.present()
-                        return
 
-                    # Ensure window stays within monitor bounds
-                    center_x = max(monitor_rect.x, min(center_x, monitor_rect.x + monitor_rect.width - nat_width))
-                    center_y = max(monitor_rect.y, min(center_y, monitor_rect.y + monitor_rect.height - nat_height))
-                    logger.debug(f"Adjusted center position (bounds checked): ({center_x}, {center_y})")
-
-                    # Set size and position
-                    self.set_property("default-width", nat_width)
-                    self.set_property("default-height", nat_height)
-
-                    def reposition_window():
-                        try:
-                            # Calculate center position again (same logic as above)
-                            if platform.system() == 'Windows':
-                                try:
-                                    import ctypes
-                                    user32 = ctypes.windll.user32
-                                    work_area = ctypes.wintypes.RECT()
-                                    user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work_area), 0)
-                                    available_height = work_area.bottom - work_area.top
-                                    center_y = work_area.top + (available_height - nat_height) // 2
-                                except Exception as taskbar_e:
-                                    center_y = monitor_rect.y + (monitor_rect.height - nat_height) // 2
-                            else:
-                                center_y = monitor_rect.y + (monitor_rect.height - nat_height) // 2
-
-                            center_x = monitor_rect.x + (monitor_rect.width - nat_width) // 2
-                            center_x = max(monitor_rect.x, min(center_x, monitor_rect.x + monitor_rect.width - nat_width))
-                            center_y = max(monitor_rect.y, min(center_y, monitor_rect.y + monitor_rect.height - nat_height))
-
-                            # Try different methods to move the window (prefer more reliable methods first)
-                            window_moved = False
-
-                            # Method 1: Try GTK4 positioning using Win32 API for Windows
+                        def reposition_window():
                             try:
+                                # Calculate center position again (same logic as above)
                                 if platform.system() == 'Windows':
-                                    # For Windows with GTK4, we need to use the native Win32 window handle
-                                    native = self.get_native()
-                                    if native:
-                                        surface = native.get_surface()
-                                        if surface:
-                                            # On Windows, surface is GdkWin32Toplevel, try to get the window handle
-                                            logger.debug(f"Surface type {type(surface)} - checking for Win32 positioning")
+                                    try:
+                                        import ctypes
+                                        user32 = ctypes.windll.user32
+                                        work_area = ctypes.wintypes.RECT()
+                                        user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work_area), 0)
+                                        available_height = work_area.bottom - work_area.top
+                                        center_y = work_area.top + (available_height - nat_height) // 2
+                                    except Exception as taskbar_e:
+                                        center_y = monitor_rect.y + (monitor_rect.height - nat_height) // 2
+                                else:
+                                    center_y = monitor_rect.y + (monitor_rect.height - nat_height) // 2
 
-                                            # Try to use Win32 API directly if available
-                                            try:
-                                                import ctypes
-                                                import ctypes.wintypes
+                                center_x = monitor_rect.x + (monitor_rect.width - nat_width) // 2
+                                center_x = max(monitor_rect.x, min(center_x, monitor_rect.x + monitor_rect.width - nat_width))
+                                center_y = max(monitor_rect.y, min(center_y, monitor_rect.y + monitor_rect.height - nat_height))
 
-                                                # Get the window handle (HWND) from the surface
-                                                # For GdkWin32Toplevel, we can access the handle
-                                                hwnd = None
-                                                try:
-                                                    # Try different ways to get the handle
-                                                    if hasattr(surface, 'get_handle'):
-                                                        hwnd = surface.get_handle()
-                                                    elif hasattr(surface, 'get_hwnd'):
-                                                        hwnd = surface.get_hwnd()
-                                                    else:
-                                                        # Try to access the handle through GObject properties
-                                                        hwnd = surface.get_property('handle') if hasattr(surface, 'get_property') else None
-                                                except:
-                                                    pass
+                                # Try different methods to move the window (prefer more reliable methods first)
+                                window_moved = False
 
-                                                if not hwnd:
-                                                    # Fallback: Try FindWindow with window title
-                                                    try:
-                                                        import ctypes
-                                                        import ctypes.wintypes
-                                                        import os
-                                                        window_title = self.get_title()
-                                                        if window_title is None:
-                                                            window_title = "Lada"  # Replace with your app name
-                                                        user32 = ctypes.windll.user32
-                                                        # First try FindWindowW with exact title
-                                                        hwnd = user32.FindWindowW(None, window_title)
-                                                        if not hwnd and window_title:
-                                                            # Try FindWindowA with ASCII title
-                                                            try:
-                                                                hwnd = user32.FindWindowA(None, window_title.encode('utf-8'))
-                                                            except:
-                                                                pass
-                                                        if not hwnd:
-                                                            # Try finding window by class name "gdkWindowToplevel"
-                                                            try:
-                                                                hwnd = user32.FindWindowA(b"gdkWindowToplevel", None)
-                                                            except:
-                                                                pass
-                                                        if not hwnd:
-                                                            # Try finding any window with our process ID using EnumWindows
-                                                            pid = os.getpid()
-                                                            found_hwnd = None
-                                                            def enum_windows_callback(hwnd, lParam):
-                                                                if lParam[0] == 0:
-                                                                    pid_buffer = ctypes.wintypes.DWORD()
-                                                                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_buffer))
-                                                                    if pid_buffer.value == lParam[1]:
-                                                                        lParam[0] = hwnd
-                                                                return True
-                                                            EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.POINTER(ctypes.c_int))
-                                                            callback = EnumWindowsProc(enum_windows_callback)
-                                                            lParam = [0, pid]
-                                                            user32.EnumWindows(callback, ctypes.byref(ctypes.c_int(pid)))
-                                                            found_hwnd = lParam[0]
-                                                            if found_hwnd:
-                                                                hwnd = found_hwnd
-
-                                                    except Exception as find_e:
-                                                        logger.debug(f"FindWindow fallback failed: {find_e}")
-
-                                                if hwnd:
-                                                    logger.debug(f"Got Win32 window handle: {hwnd}")
-
-                                                    # Use Windows API to move the window
-                                                    user32 = ctypes.windll.user32
-                                                    # SWP_NOSIZE (0x0001) | SWP_NOZORDER (0x0004) = 0x0005
-                                                    result = user32.SetWindowPos(hwnd, 0, center_x, center_y, 0, 0, 0x0005)
-                                                    if result:
-                                                        window_moved = True
-                                                        logger.debug(f"Window moved using Win32 SetWindowPos to ({center_x}, {center_y})")
-                                                    else:
-                                                        logger.debug("Win32 SetWindowPos returned False")
-                                                else:
-                                                    logger.debug("Could not get window handle from surface")
-                                            except Exception as win32_e:
-                                                logger.debug(f"Win32 positioning failed: {win32_e}")
-
-                                            if not window_moved and hasattr(surface, 'set_position'):
-                                                surface.set_position(center_x, center_y)
-                                                window_moved = True
-                                                logger.debug(f"Window moved using surface.set_position() to ({center_x}, {center_y})")
-                                            elif not window_moved:
-                                                logger.debug(f"Surface type {type(surface)} doesn't support positioning methods")
-                                        else:
-                                            logger.debug("Could not get surface from native")
-                                    else:
-                                        logger.debug("Could not get native window")
-                            except Exception as e1:
-                                logger.debug(f"GTK4 positioning failed: {e1}")
-
-                            # Method 2: Try setting position property
-                            if not window_moved:
+                                # Method 1: Try GTK4 positioning using Win32 API for Windows
                                 try:
-                                    # Try to set position on the native window
-                                    if hasattr(self, 'get_native'):
+                                    if platform.system() == 'Windows':
+                                        # For Windows with GTK4, we need to use the native Win32 window handle
                                         native = self.get_native()
-                                        if native and hasattr(native, 'set_position'):
-                                            native.set_position(center_x, center_y)
-                                            window_moved = True
-                                            logger.debug(f"Window moved using native.set_position() to ({center_x}, {center_y})")
+                                        if native:
+                                            surface = native.get_surface()
+                                            if surface:
+                                                # On Windows, surface is GdkWin32Toplevel, try to get the window handle
+                                                logger.debug(f"Surface type {type(surface)} - checking for Win32 positioning")
+
+                                                # Try to use Win32 API directly if available
+                                                try:
+                                                    import ctypes
+                                                    import ctypes.wintypes
+
+                                                    # Get the window handle (HWND) from the surface
+                                                    # For GdkWin32Toplevel, we can access the handle
+                                                    hwnd = None
+                                                    try:
+                                                        # Try different ways to get the handle
+                                                        if hasattr(surface, 'get_handle'):
+                                                            hwnd = surface.get_handle()
+                                                        elif hasattr(surface, 'get_hwnd'):
+                                                            hwnd = surface.get_hwnd()
+                                                        else:
+                                                            # Try to access the handle through GObject properties
+                                                            hwnd = surface.get_property('handle') if hasattr(surface, 'get_property') else None
+                                                    except:
+                                                        pass
+
+                                                    if not hwnd:
+                                                        # Fallback: Try FindWindow with window title
+                                                        try:
+                                                            import ctypes
+                                                            import ctypes.wintypes
+                                                            import os
+                                                            window_title = self.get_title()
+                                                            if window_title is None:
+                                                                window_title = "Lada"  # Replace with your app name
+                                                            user32 = ctypes.windll.user32
+                                                            # First try FindWindowW with exact title
+                                                            hwnd = user32.FindWindowW(None, window_title)
+                                                            if not hwnd and window_title:
+                                                                # Try FindWindowA with ASCII title
+                                                                try:
+                                                                    hwnd = user32.FindWindowA(None, window_title.encode('utf-8'))
+                                                                except:
+                                                                    pass
+                                                            if not hwnd:
+                                                                # Try finding window by class name "gdkWindowToplevel"
+                                                                try:
+                                                                    hwnd = user32.FindWindowA(b"gdkWindowToplevel", None)
+                                                                except:
+                                                                    pass
+                                                            if not hwnd:
+                                                                # Try finding any window with our process ID using EnumWindows
+                                                                pid = os.getpid()
+                                                                found_hwnd = None
+                                                                def enum_windows_callback(hwnd, lParam):
+                                                                    if lParam[0] == 0:
+                                                                        pid_buffer = ctypes.wintypes.DWORD()
+                                                                        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_buffer))
+                                                                        if pid_buffer.value == lParam[1]:
+                                                                            lParam[0] = hwnd
+                                                                    return True
+                                                                EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.POINTER(ctypes.c_int))
+                                                                callback = EnumWindowsProc(enum_windows_callback)
+                                                                lParam = [0, pid]
+                                                                user32.EnumWindows(callback, ctypes.byref(ctypes.c_int(pid)))
+                                                                found_hwnd = lParam[0]
+                                                                if found_hwnd:
+                                                                    hwnd = found_hwnd
+
+                                                        except Exception as find_e:
+                                                            logger.debug(f"FindWindow fallback failed: {find_e}")
+
+                                                    if hwnd:
+                                                        logger.debug(f"Got Win32 window handle: {hwnd}")
+
+                                                        # Use Windows API to move the window
+                                                        user32 = ctypes.windll.user32
+                                                        # SWP_NOSIZE (0x0001) | SWP_NOZORDER (0x0004) = 0x0005
+                                                        result = user32.SetWindowPos(hwnd, 0, center_x, center_y, 0, 0, 0x0005)
+                                                        if result:
+                                                            window_moved = True
+                                                            logger.debug(f"Window moved using Win32 SetWindowPos to ({center_x}, {center_y})")
+                                                        else:
+                                                            logger.debug("Win32 SetWindowPos returned False")
+                                                    else:
+                                                        logger.debug("Could not get window handle from surface")
+                                                except Exception as win32_e:
+                                                    logger.debug(f"Win32 positioning failed: {win32_e}")
+
+                                                if not window_moved and hasattr(surface, 'set_position'):
+                                                    surface.set_position(center_x, center_y)
+                                                    window_moved = True
+                                                    logger.debug(f"Window moved using surface.set_position() to ({center_x}, {center_y})")
+                                                elif not window_moved:
+                                                    logger.debug(f"Surface type {type(surface)} doesn't support positioning methods")
+                                            else:
+                                                logger.debug("Could not get surface from native")
                                         else:
-                                            logger.debug("Native window doesn't have set_position method")
-                                    else:
-                                        logger.debug("No get_native method available for set_position")
+                                            logger.debug("Could not get native window")
+                                except Exception as e1:
+                                    logger.debug(f"GTK4 positioning failed: {e1}")
 
-                                    if not window_moved:
-                                        # Fallback to trying set_position on self
+                                # Method 2: Try setting position property
+                                if not window_moved:
+                                    try:
+                                        # Try to set position on the native window
+                                        if hasattr(self, 'get_native'):
+                                            native = self.get_native()
+                                            if native and hasattr(native, 'set_position'):
+                                                native.set_position(center_x, center_y)
+                                                window_moved = True
+                                                logger.debug(f"Window moved using native.set_position() to ({center_x}, {center_y})")
+                                            else:
+                                                logger.debug("Native window doesn't have set_position method")
+                                        else:
+                                            logger.debug("No get_native method available for set_position")
+
+                                        if not window_moved:
+                                            # Fallback to trying set_position on self
+                                            try:
+                                                self.set_position(center_x, center_y)
+                                                window_moved = True
+                                                logger.debug(f"Window moved using self.set_position() to ({center_x}, {center_y})")
+                                            except:
+                                                pass
+
+                                        # Get actual position after set_position to verify
                                         try:
-                                            self.set_position(center_x, center_y)
-                                            window_moved = True
-                                            logger.debug(f"Window moved using self.set_position() to ({center_x}, {center_y})")
-                                        except:
-                                            pass
+                                            if hasattr(self, 'get_position'):
+                                                actual_x, actual_y = self.get_position()
+                                                logger.debug(f"Actual window position after set_position: ({actual_x}, {actual_y})")
+                                            else:
+                                                logger.debug("get_position method not available")
+                                        except Exception as e_pos:
+                                            logger.debug(f"Could not get actual window position after set_position: {e_pos}")
+                                    except Exception as e2:
+                                        logger.debug(f"All set_position methods failed: {e2}")
 
-                                    # Get actual position after set_position to verify
+                                # Method 3: Try accessing underlying surface or toplevel
+                                if not window_moved:
+                                    try:
+                                        # Try to get the native toplevel
+                                        toplevel = self.get_native() if hasattr(self, 'get_native') else None
+                                        if toplevel:
+                                            # For GTK4, try setting default position before showing
+                                            self.set_default_size(nat_width, nat_height)
+                                            # Force re-realization of the window
+                                            self.unrealize() if hasattr(self, 'unrealize') else None
+                                            self.map() if hasattr(self, 'map') else None
+                                            logger.debug(f"Window unrealize/map attempted for repositioning")
+                                    except Exception as e3:
+                                        logger.debug(f"Native toplevel repositioning failed: {e3}")
+
+                                # Method 4: Try setting window hints for centering
+                                if not window_moved:
+                                    try:
+                                        # Set window positioning hints that might help the WM center it
+                                        self.set_property('resizable', True)
+                                        # Force window manager attention
+                                        self.present()
+                                        logger.debug(f"Set centering hints and presented window")
+                                    except Exception as e4:
+                                        logger.debug(f"Window hints failed: {e4}")
+
+                                # Force window update and bring to front
+                                self.present()
+
+                                if window_moved:
+                                    logger.debug(f"Successfully centered window to ({center_x}, {center_y}) for video resolution adjustment")
+                                else:
+                                    logger.debug(f"Could not move window to ({center_x}, {center_y}), but presenting window")
+                                    # Final attempt to get current position
                                     try:
                                         if hasattr(self, 'get_position'):
-                                            actual_x, actual_y = self.get_position()
-                                            logger.debug(f"Actual window position after set_position: ({actual_x}, {actual_y})")
+                                            current_x, current_y = self.get_position()
+                                            logger.debug(f"Final window position: ({current_x}, {current_y})")
                                         else:
-                                            logger.debug("get_position method not available")
-                                    except Exception as e_pos:
-                                        logger.debug(f"Could not get actual window position after set_position: {e_pos}")
-                                except Exception as e2:
-                                    logger.debug(f"All set_position methods failed: {e2}")
+                                            logger.debug("get_position method not available for final position check")
+                                    except Exception as e_final:
+                                        logger.debug(f"Could not get final window position: {e_final}")
+                            except Exception as e:
+                                logger.debug(f"Could not reposition window: {e}")
+                                # Fallback: just present the window
+                                self.present()
+                            return False
 
-                            # Method 3: Try accessing underlying surface or toplevel
-                            if not window_moved:
-                                try:
-                                    # Try to get the native toplevel
-                                    toplevel = self.get_native() if hasattr(self, 'get_native') else None
-                                    if toplevel:
-                                        # For GTK4, try setting default position before showing
-                                        self.set_default_size(nat_width, nat_height)
-                                        # Force re-realization of the window
-                                        self.unrealize() if hasattr(self, 'unrealize') else None
-                                        self.map() if hasattr(self, 'map') else None
-                                        logger.debug(f"Window unrealize/map attempted for repositioning")
-                                except Exception as e3:
-                                    logger.debug(f"Native toplevel repositioning failed: {e3}")
-
-                            # Method 4: Try setting window hints for centering
-                            if not window_moved:
-                                try:
-                                    # Set window positioning hints that might help the WM center it
-                                    self.set_property('resizable', True)
-                                    # Force window manager attention
-                                    self.present()
-                                    logger.debug(f"Set centering hints and presented window")
-                                except Exception as e4:
-                                    logger.debug(f"Window hints failed: {e4}")
-
-                            # Force window update and bring to front
-                            self.present()
-
-                            if window_moved:
-                                logger.debug(f"Successfully centered window to ({center_x}, {center_y}) for video resolution adjustment")
-                            else:
-                                logger.debug(f"Could not move window to ({center_x}, {center_y}), but presenting window")
-                                # Final attempt to get current position
-                                try:
-                                    if hasattr(self, 'get_position'):
-                                        current_x, current_y = self.get_position()
-                                        logger.debug(f"Final window position: ({current_x}, {current_y})")
-                                    else:
-                                        logger.debug("get_position method not available for final position check")
-                                except Exception as e_final:
-                                    logger.debug(f"Could not get final window position: {e_final}")
-                        except Exception as e:
-                            logger.debug(f"Could not reposition window: {e}")
-                            # Fallback: just present the window
-                            self.present()
-                        return False
-
-                    GLib.idle_add(reposition_window)
-                else:
-                    # Fallback to setting properties normally
-                    for prop, init, target in (
-                            ("default-width", init_width, nat_width),
-                            ("default-height", init_height, nat_height),
-                    ):
-                        self.set_property(prop, target)
+                        GLib.idle_add(reposition_window)
+                    else:
+                        # Fallback to setting properties normally
+                        for prop, init, target in (
+                                ("default-width", init_width, nat_width),
+                                ("default-height", init_height, nat_height),
+                        ):
+                            self.set_property(prop, target)
+            else:
+                # Window is maximized, just set the properties
+                for prop, init, target in (
+                        ("default-width", init_width, nat_width),
+                        ("default-height", init_height, nat_height),
+                ):
+                    self.set_property(prop, target)
         else:
             for prop, init, target in (
                     ("default-width", init_width, nat_width),
