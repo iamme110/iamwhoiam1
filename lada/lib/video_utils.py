@@ -7,10 +7,11 @@ import re
 import subprocess
 from contextlib import contextmanager
 from fractions import Fraction
-from typing import Callable
+from typing import Callable, Iterator, Tuple, Optional, Union
 
 import av
 import cv2
+import torch
 import numpy as np
 
 from lada.lib import Image, Mask, VideoMetadata, os_utils
@@ -83,10 +84,13 @@ class VideoReader:
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
 
-    def frames(self):
+    def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
+        self.container.streams.video[0].thread_type = 'AUTO'
+        
         for frame in self.container.decode(video=0):
-            frame_img = frame.to_ndarray(format='bgr24')
-            yield frame_img, frame.pts
+            nd_frame = frame.to_ndarray(format='bgr24')
+            torch_frame = torch.from_numpy(nd_frame)
+            yield torch_frame, frame.pts
 
     def seek(self, offset_ns):
         offset = int((offset_ns / 1_000_000_000) * av.time_base)
@@ -297,6 +301,8 @@ class VideoWriter:
         self.release()
 
     def write(self, frame, frame_pts=None, bgr2rgb=False):
+        if isinstance(frame, torch.Tensor):
+            frame = frame.cpu().numpy()
         if bgr2rgb:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         out_frame = av.VideoFrame.from_ndarray(frame, format='rgb24')
