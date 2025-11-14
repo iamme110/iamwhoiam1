@@ -5,6 +5,8 @@ import logging
 import pathlib
 import threading
 
+import cv2
+import numpy as np
 from gi.repository import Gtk, GObject, GLib, Gio, Gst, Adw, Gdk
 
 from lada import LOG_LEVEL
@@ -74,6 +76,7 @@ class PreviewView(Gtk.Widget):
         self.appsource_worker_reset_requested = False
 
         self._config: Config | None = None
+        self._current_file: Gio.File | None = None
 
         self.widget_timeline.connect('seek_requested', lambda widget, seek_position: self.seek_video(seek_position))
         self.widget_timeline.connect('cursor_position_changed', lambda widget, cursor_position: self.show_cursor_position(cursor_position))
@@ -205,6 +208,10 @@ class PreviewView(Gtk.Widget):
         utils.show_open_files_dialog(callback, dismissed_callback)
 
     @property
+    def current_file(self):
+        return self._current_file
+
+    @property
     def frame_restorer_options(self):
         return self._frame_restorer_options
 
@@ -329,11 +336,53 @@ class PreviewView(Gtk.Widget):
 
         threading.Thread(target=run).start()
 
+    def _get_thumbnail_dimensions(self):
+        """Get thumbnail dimensions based on configuration"""
+        size_config = getattr(self._config, 'seek_preview_size', 'standard') if self._config else 'standard'
+
+        if size_config == 'huge':
+            return 320, 180  # 50% bigger than large
+        elif size_config == 'large':
+            return 240, 135  # 50% bigger than standard
+        else:  # standard
+            return 160, 90
+
+    def generate_thumbnail_for_timestamp(self, file_path: str, timestamp_ns: int) -> np.ndarray | None:
+        """Generate a thumbnail for a specific timestamp in the video"""
+        try:
+            # Open video capture
+            cap = cv2.VideoCapture(file_path)
+            if not cap.isOpened():
+                logger.warning(f"Could not open video file: {file_path}")
+                return None
+
+            # Convert timestamp to seconds and seek
+            timestamp_sec = timestamp_ns / Gst.SECOND
+            cap.set(cv2.CAP_PROP_POS_MSEC, timestamp_sec * 1000)
+
+            # Read frame
+            ret, frame = cap.read()
+            cap.release()
+
+            if not ret or frame is None:
+                logger.warning(f"Could not read frame at timestamp {timestamp_sec}s")
+                return None
+
+            # Get thumbnail size based on configuration
+            width, height = self._get_thumbnail_dimensions()
+            thumb = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
+            return thumb
+
+        except Exception as e:
+            logger.error(f"Error generating thumbnail: {e}")
+            return None
+
     def _open_file(self, file: Gio.File):
         self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, video_utils.get_video_meta_data(file.get_path()), self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False)
         file_path = file.get_path()
 
         assert not self._video_preview_init_done
+        self._current_file = file
         self.video_metadata = video_utils.get_video_meta_data(file_path)
         self._frame_restorer_options = self._frame_restorer_options.with_video_metadata(self.video_metadata)
         self.has_audio = audio_utils.get_audio_codec(self.video_metadata.video_file) is not None
@@ -350,6 +399,7 @@ class PreviewView(Gtk.Widget):
         self.buffer_queue_min_thresh_time_auto = self._buffer_queue_min_thresh_time_auto_min
 
         self.widget_timeline.set_property("duration", self.file_duration_ns)
+        self.widget_timeline.set_property("parent_widget", self)
 
         self.frame_restorer_provider.init(self._frame_restorer_options)
 
