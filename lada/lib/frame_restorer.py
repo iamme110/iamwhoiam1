@@ -22,7 +22,14 @@ from lada.lib.mosaic_detector import Clip
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-def load_models(device: torch.device, mosaic_restoration_model_name: str, mosaic_restoration_model_path: str, mosaic_restoration_config_path: str | None, mosaic_detection_model_path: str, fp16: bool, clip_length: int):
+def load_models(
+    device: torch.device, 
+    mosaic_restoration_model_name: str, 
+    mosaic_restoration_model_path: str, 
+    mosaic_restoration_config_path: str | None, 
+    mosaic_detection_model_path: str, 
+    fp16: bool, 
+    clip_length: int):
     if mosaic_restoration_model_name.startswith("deepmosaics"):
         from lada.deepmosaics.models import loadmodel
         mosaic_restoration_model = loadmodel.video(device, mosaic_restoration_model_path, fp16)
