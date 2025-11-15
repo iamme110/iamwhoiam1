@@ -302,7 +302,7 @@ class VideoWriter:
         self.release()
 
     def _process_buffer(self, flush_all=False):
-        """Processes the buffer to encode frames in correct PTS order."""
+        """Processes the buffer to encode frames."""
         if len(self.frame_queue) > (self.BUFFER_MAX_SIZE / 2) or (flush_all and self.frame_queue):
             frame_to_encode = self.frame_queue.popleft()
             pts_to_assign = heapq.heappop(self.pts_heap)
@@ -316,6 +316,14 @@ class VideoWriter:
 
 
     def write(self, frame, frame_pts=None, bgr2rgb=False):
+        # We add the frame and its pts given by PyAV (FFmpeg) to a FIFO queue and a min heap, respectively.
+        # Upon a call to write(), if the buffer is full, we pop the head of the queue and the smallest PTS and pair
+        # those together. This operation is a no-op for "nicely behaved" videos, where frames and PTS are decoded
+        # in linear order. However, it appears several problematic videos exist such that the frames are given in
+        # linear order, but the PTS associated with the frames are not. This strategy is used to avoid prompting
+        # the user to identify a framerate ahead of time, and uses the timing of the existing PTS, but reorders the PTS.
+        #
+        # See https://codeberg.org/ladaapp/lada/pulls/33 for more information/discussion.
         if bgr2rgb:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
