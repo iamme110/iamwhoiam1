@@ -116,6 +116,38 @@ def process_video_file(input_path: str, output_path: str, device: torch.device, 
         if os.path.exists(video_tmp_file_output_path):
             os.remove(video_tmp_file_output_path)
 
+def _check_conv3d_memory_bug(device: torch.device):
+    """
+    Bug: PyTorch 2.9 with cuDNN >= 91002 uses 3x memory for Conv3d with fp16/bfloat16 due to buggy dispatch layer.
+    Fixed in cudnn 915xx and 2.9.1+
+    """
+    try:
+        if hasattr(torch.version, 'hip') and torch.version.hip is not None:
+            return False
+        if not (hasattr(torch, 'cuda') and torch.cuda.is_available()):
+            return False
+        if not (hasattr(torch.backends.cudnn, 'is_available') and torch.backends.cudnn.is_available()):
+            return False
+        if device.type != 'cuda' or torch.cuda.get_device_capability(device)[0] < 3:
+            return False
+        
+        version_str = torch.__version__.split('+')[0]
+        parts = version_str.split('.')
+        torch_version = tuple(int(p) for p in parts)
+        
+        if torch_version < (2, 9, 0):
+            return False
+        if torch_version == (2, 9, 0):
+            return True
+        
+        cudnn_version = torch.backends.cudnn.version()
+        if cudnn_version is None or cudnn_version < 91002 or cudnn_version >= 91500:
+            return False
+        
+        return True
+    except:
+        return False
+
 def main():
     argparser = setup_argparser()
     args = argparser.parse_args()
@@ -151,6 +183,9 @@ def main():
         sys.exit(1)
 
     device = torch.device(args.device)
+    if _check_conv3d_memory_bug(device):
+        print("Warning: PyTorch 2.9 with cuDNN >= 91002 uses 3x memory for Conv3d with fp16/bfloat16 due to buggy dispatch layer. This is fixed in cudnn 9.15+ and 2.9.1+. Using fp32 instead.")
+        args.fp16 = False
     mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode = load_models(
         device, args.mosaic_restoration_model, args.mosaic_restoration_model_path, args.mosaic_restoration_config_path,
         args.mosaic_detection_model_path, args.fp16, args.max_clip_length
