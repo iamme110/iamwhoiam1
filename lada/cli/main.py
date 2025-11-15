@@ -183,7 +183,7 @@ def main():
         sys.exit(1)
 
     device = torch.device(args.device)
-    if _check_conv3d_memory_bug(device):
+    if args.mosaic_restoration_model.startswith("deepmosaics") and _check_conv3d_memory_bug(device):
         print("Warning: PyTorch 2.9 with cuDNN >= 91002 uses 3x memory for Conv3d with fp16/bfloat16 due to buggy dispatch layer. This is fixed in cudnn 9.15+ and 2.9.1+. Using fp32 instead.")
         args.fp16 = False
     mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode = load_models(
