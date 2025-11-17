@@ -45,8 +45,7 @@ class ConfigSidebar(Gtk.Box):
     check_button_post_export_custom_command: Gtk.CheckButton = Gtk.Template.Child()
     entry_row_post_export_custom_command: Adw.EntryRow = Gtk.Template.Child()
     check_button_show_mosaic_detections: Gtk.CheckButton = Gtk.Template.Child()
-    expander_row_seek_preview = Gtk.Template.Child()
-    combo_row_seek_preview_size = Gtk.Template.Child()
+    switch_row_seek_preview = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -105,19 +104,9 @@ class ConfigSidebar(Gtk.Box):
         self.spin_row_clip_max_duration.set_value(config.max_clip_duration)
         self.switch_row_mute_audio.set_active(config.mute_audio)
 
-        # init seek preview size dropdown
-        combo_row_seek_preview_size_list = Gtk.StringList.new([])
-        preview_sizes = ['standard', 'large', 'huge']
-        for size in preview_sizes:
-            combo_row_seek_preview_size_list.append(size)
-        self.combo_row_seek_preview_size.set_model(combo_row_seek_preview_size_list)
-        try:
-            idx = preview_sizes.index(config.seek_preview_size)
-            self.combo_row_seek_preview_size.set_selected(idx)
-        except ValueError:
-            self.combo_row_seek_preview_size.set_selected(0)  # default to 'standard'
+        # Seek preview size is now auto-scaled based on screen resolution
 
-        self.expander_row_seek_preview.set_enable_expansion(config.seek_preview_enabled)
+        self.switch_row_seek_preview.set_active(config.seek_preview_enabled)
 
         # init color scheme
         if config.color_scheme == ColorScheme.LIGHT: self.light_color_scheme_button.set_property("active", True)
@@ -402,11 +391,5 @@ class ConfigSidebar(Gtk.Box):
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
-    def switch_row_seek_preview_active_callback(self, expander_row, enable_expansion):
-        self._config.seek_preview_enabled = expander_row.get_property("enable-expansion")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def combo_row_seek_preview_size_selected_callback(self, combo_row, value):
-        selected_size = combo_row.get_property("selected_item").get_string()
-        self._config.seek_preview_size = selected_size
+    def switch_row_seek_preview_active_callback(self, switch_row, active):
+        self._config.seek_preview_enabled = switch_row.get_property("active")
