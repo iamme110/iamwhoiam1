@@ -7,7 +7,7 @@ import threading
 
 import cv2
 import numpy as np
-from gi.repository import Gtk, GObject, GLib, Gio, Gst, Adw, Gdk
+from gi.repository import Gtk, GObject, GLib, Gio, Gst, Adw, Gdk, GdkPixbuf, Graphene
 
 from lada import LOG_LEVEL
 from lada.gui import utils
@@ -79,7 +79,7 @@ class PreviewView(Gtk.Widget):
         self._current_file: Gio.File | None = None
 
         self.widget_timeline.connect('seek_requested', lambda widget, seek_position: self.seek_video(seek_position))
-        self.widget_timeline.connect('cursor_position_changed', lambda widget, cursor_position: self.show_cursor_position(cursor_position))
+        self.widget_timeline.connect('cursor_position_changed', lambda widget, cursor_position, x: self.show_cursor_position(cursor_position, x if x != 0.0 else None))
 
         self.fullscreen_mouse_activity_controller = None
 
@@ -301,13 +301,161 @@ class PreviewView(Gtk.Widget):
         if not self.waiting_for_data:
             self.spinner_overlay.set_visible(False)
 
-    def show_cursor_position(self, cursor_position_ns):
-        if cursor_position_ns > 0:
-            self.label_cursor_time.set_visible(True)
-            label_text = self.get_time_label_text(cursor_position_ns)
-            self.label_cursor_time.set_text(label_text)
+    def show_cursor_position(self, cursor_position_ns, x=None):
+        # Handle seek preview or cursor time display
+        if x is not None and cursor_position_ns > 0:
+            seek_preview_enabled = getattr(self._config, 'seek_preview_enabled', False) if self._config else False
+            if seek_preview_enabled:
+                # Hide cursor time label and show seek preview
+                self.label_cursor_time.set_visible(False)
+                self.update_seek_preview(cursor_position_ns, x)
+            else:
+                # Show cursor time label below timeline (original implementation)
+                self.label_cursor_time.set_visible(True)
+                label_text = self.get_time_label_text(cursor_position_ns)
+                self.label_cursor_time.set_text(label_text)
+                # Hide any existing seek preview popover
+                if hasattr(self, 'seek_preview_popover') and self.seek_preview_popover.get_visible():
+                    self.seek_preview_popover.popdown()
         else:
+            # Hide both cursor time label and seek preview when mouse leaves
             self.label_cursor_time.set_visible(False)
+            if hasattr(self, 'seek_preview_popover') and self.seek_preview_popover.get_visible():
+                self.seek_preview_popover.popdown()
+
+    def update_seek_preview(self, timestamp_ns: int, mouse_x: float):
+        """Update the seek preview popover at the specified position"""
+        # Hide existing popover if visible
+        if hasattr(self, 'seek_preview_popover') and self.seek_preview_popover.get_visible():
+            self.seek_preview_popover.popdown()
+
+        # Create popover if it doesn't exist
+        if not hasattr(self, 'seek_preview_popover'):
+            self.seek_preview_popover = Gtk.Popover.new()
+            self.seek_preview_popover.set_autohide(False)
+            self.seek_preview_popover.set_position(Gtk.PositionType.TOP)  # Remove arrow, make it a plain rectangle
+
+            # Create box with time label and picture
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            box.set_margin_start(2)  # Further reduced
+            box.set_margin_end(2)   # Further reduced
+            box.set_margin_top(0)   # No top margin
+            box.set_margin_bottom(2)  # Further reduced
+            self.seek_preview_time_label = Gtk.Label()
+            # Use same size as current time label (no caption class)
+            self.seek_preview_time_label.set_margin_top(-4)  # Move up 1px more
+            self.seek_preview_time_label.set_margin_bottom(0)  # No bottom margin for time label
+            self.seek_preview_time_label.set_valign(Gtk.Align.START)  # Align to top
+            self.seek_preview_time_label.set_size_request(-1, 20)  # Set minimum height to avoid GTK warnings
+            box.append(self.seek_preview_time_label)
+
+            # Create spinner for placeholder
+            self.seek_preview_spinner = Gtk.Spinner()
+            box.append(self.seek_preview_spinner)
+
+            # Create picture for thumbnail
+            self.seek_preview_picture = Gtk.Picture()
+            box.append(self.seek_preview_picture)
+
+            self.seek_preview_popover.set_child(box)
+            self.seek_preview_popover.set_parent(self.box_video_preview)
+
+        # Set time label
+        time_text = self.get_time_label_text(timestamp_ns)
+        self.seek_preview_time_label.set_text(time_text)
+
+        # Show spinner initially, hide picture
+        self.seek_preview_spinner.set_visible(True)
+        self.seek_preview_spinner.start()
+        self.seek_preview_picture.set_visible(False)
+
+        # Position popover above the timeline, centered on mouse cursor
+        # Transform mouse coordinates from timeline to video preview coordinate space
+        success, transformed_point = self.widget_timeline.compute_point(self.box_video_preview, Graphene.Point().init(mouse_x, 0))
+        if success:
+            mouse_x_in_video = transformed_point.x
+        else:
+            mouse_x_in_video = mouse_x
+
+        # Use even larger thumbnails to maximize image space
+        thumbnail_width = 220
+        thumbnail_height = 124
+
+        # Calculate popover dimensions with reduced margins for maximum image size
+        popover_width = thumbnail_width + 6  # thumbnail + reduced margins (was 8, now 6)
+        popover_height = thumbnail_height + 28  # thumbnail + space for time label (increased more to meet GTK minimum size requirements)
+
+        # Store thumbnail size for use in thumbnail generation
+        self._current_thumbnail_size = (thumbnail_width, thumbnail_height)
+
+        video_allocation = self.box_video_preview.get_allocation()
+
+        # Center the popover horizontally on the mouse cursor with bounds checking
+        pointing_rect = Gdk.Rectangle()
+        # For TOP position, the pointing rect center should align with mouse cursor
+        pointing_rect.x = int(mouse_x_in_video - popover_width // 2)
+        # Ensure popover stays within video area horizontally
+        pointing_rect.x = max(10, min(pointing_rect.x, video_allocation.width - popover_width - 10))
+
+        # Position above the timeline - since popover appears above pointing position,
+        # we point to just above the timeline
+        pointing_rect.y = video_allocation.height - 10  # Point to bottom of video area
+
+        pointing_rect.width = popover_width
+        pointing_rect.height = 1
+        self.seek_preview_popover.set_pointing_to(pointing_rect)
+        self.seek_preview_popover.popup()
+
+        # Generate thumbnail asynchronously
+        def generate_thumbnail():
+            try:
+                if not hasattr(self, 'current_file') or not self.current_file:
+                    return
+
+                file_path = self.current_file.get_path()
+                if not file_path:
+                    return
+
+                with video_utils.VideoThumbnailer(file_path) as thumbnailer:
+                    thumbnail = thumbnailer.get_thumbnail(timestamp_ns, width=self._current_thumbnail_size[0], height=self._current_thumbnail_size[1])
+
+                    if thumbnail is not None:
+                        # Convert BGR to RGB for GdkPixbuf
+                        rgb_thumbnail = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2RGB)
+
+                        # Create pixbuf from bytes in memory
+                        height, width, channels = rgb_thumbnail.shape
+                        pixbuf = GdkPixbuf.Pixbuf.new_from_bytes(
+                            GLib.Bytes.new(rgb_thumbnail.tobytes()),
+                            GdkPixbuf.Colorspace.RGB,
+                            False,  # has_alpha
+                            8,      # bits_per_sample
+                            width,
+                            height,
+                            width * channels
+                        )
+
+                        # Update UI in main thread
+                        def update_ui():
+                            self.seek_preview_picture.set_pixbuf(pixbuf)
+                            self.seek_preview_spinner.stop()
+                            self.seek_preview_spinner.set_visible(False)
+                            self.seek_preview_picture.set_visible(True)
+                            return False
+
+                        GLib.idle_add(update_ui)
+
+            except Exception as e:
+                logger.error(f"Error generating seek preview thumbnail: {e}")
+                # Hide spinner and show error state if needed
+                def hide_spinner():
+                    self.seek_preview_spinner.stop()
+                    self.seek_preview_spinner.set_visible(False)
+                    return False
+                GLib.idle_add(hide_spinner)
+
+        import threading
+        threading.Thread(target=generate_thumbnail, daemon=True).start()
 
     def play_file(self, idx):
         self._show_spinner()
@@ -336,46 +484,6 @@ class PreviewView(Gtk.Widget):
 
         threading.Thread(target=run).start()
 
-    def _get_thumbnail_dimensions(self):
-        """Get thumbnail dimensions based on configuration"""
-        size_config = getattr(self._config, 'seek_preview_size', 'standard') if self._config else 'standard'
-
-        if size_config == 'huge':
-            return 320, 180  # 50% bigger than large
-        elif size_config == 'large':
-            return 240, 135  # 50% bigger than standard
-        else:  # standard
-            return 160, 90
-
-    def generate_thumbnail_for_timestamp(self, file_path: str, timestamp_ns: int) -> np.ndarray | None:
-        """Generate a thumbnail for a specific timestamp in the video"""
-        try:
-            # Open video capture
-            cap = cv2.VideoCapture(file_path)
-            if not cap.isOpened():
-                logger.warning(f"Could not open video file: {file_path}")
-                return None
-
-            # Convert timestamp to seconds and seek
-            timestamp_sec = timestamp_ns / Gst.SECOND
-            cap.set(cv2.CAP_PROP_POS_MSEC, timestamp_sec * 1000)
-
-            # Read frame
-            ret, frame = cap.read()
-            cap.release()
-
-            if not ret or frame is None:
-                logger.warning(f"Could not read frame at timestamp {timestamp_sec}s")
-                return None
-
-            # Get thumbnail size based on configuration
-            width, height = self._get_thumbnail_dimensions()
-            thumb = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
-            return thumb
-
-        except Exception as e:
-            logger.error(f"Error generating thumbnail: {e}")
-            return None
 
     def _open_file(self, file: Gio.File):
         self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, video_utils.get_video_meta_data(file.get_path()), self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False)
