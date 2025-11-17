@@ -38,11 +38,6 @@ class Timeline(Gtk.Widget):
     @parent_widget.setter
     def parent_widget(self, value):
         self._parent_widget = value
-        # Set popover parent to the video overlay so thumbnail appears over video content
-        if value and hasattr(value, 'box_video_preview'):
-            self.preview_popover.set_parent(value.box_video_preview)
-        elif value:
-            self.preview_popover.set_parent(value)
 
     @GObject.Property()
     def duration(self):
@@ -65,8 +60,8 @@ class Timeline(Gtk.Widget):
     def seek_requested_signal(self, position: int):
         pass
 
-    @GObject.Signal(name="cursor_position_changed", arg_types=(GObject.TYPE_INT64,))
-    def cursor_position(self, position: int | None):
+    @GObject.Signal(name="cursor_position_changed", arg_types=(GObject.TYPE_INT64, GObject.TYPE_DOUBLE))
+    def cursor_position(self, position: int | None, x: float | None):
         pass
 
     def __init__(self, **kwargs):
@@ -100,11 +95,7 @@ class Timeline(Gtk.Widget):
         self._parent_widget = None
         self._current_thumbnail = None
 
-        # Create popover for thumbnail display
-        self.preview_popover = Gtk.Popover.new()
-        self.preview_popover.set_autohide(False)  # Prevent auto-hiding when clicking elsewhere
-        self.preview_image = Gtk.Picture.new()
-        self.preview_popover.set_child(self.preview_image)
+        # Popover management moved to parent widget (PreviewView)
 
     def update_duration(self, value):
         self._duration = value
@@ -138,17 +129,18 @@ class Timeline(Gtk.Widget):
         else:
             cursor_position = -1
 
-        # Hide popover if no cursor position
+        # Hide popover if no cursor position - now handled by parent widget
         if cursor_position == -1:
-            if self.preview_popover.get_visible():
-                self.preview_popover.popdown()
             self._current_thumbnail = None
             self._last_cursor_position_x = None
             self.cursor_position_x = None
             self.queue_draw()
 
         self.queue_draw()
-        self.emit('cursor_position_changed', cursor_position)
+        if x is not None:
+            self.emit('cursor_position_changed', cursor_position, x)
+        else:
+            self.emit('cursor_position_changed', cursor_position, 0.0)
 
         seek_preview_enabled = False
         if self._parent_widget and hasattr(self._parent_widget, '_config') and self._parent_widget._config:
@@ -169,13 +161,8 @@ class Timeline(Gtk.Widget):
                         self._thumbnail_thread = None  # Signal to stop
                     self._pending_thumbnail_request = (cursor_position, int(x), 0)
 
-                # Start new thumbnail generation thread
-                self._thumbnail_thread = threading.Thread(
-                    target=self._generate_thumbnail_async,
-                    args=(cursor_position, int(x), 0),
-                    daemon=True
-                )
-                self._thumbnail_thread.start()
+                # Start new thumbnail generation thread - now handled by parent widget
+                pass
 
     def do_snapshot(self, s: Gtk.Snapshot):
         """
@@ -252,123 +239,6 @@ class Timeline(Gtk.Widget):
 
         return TimelineColors(timeline_color, playhead_color, cursor_color)
 
-    def _get_thumbnail_dimensions(self):
-        """Get thumbnail dimensions based on configuration"""
-        size_config = 'standard'  # default
-        if self._parent_widget and hasattr(self._parent_widget, '_config') and self._parent_widget._config:
-            size_config = getattr(self._parent_widget._config, 'seek_preview_size', 'standard')
-
-        if size_config == 'huge':
-            return 320, 180  # 50% bigger than large
-        elif size_config == 'large':
-            return 240, 135  # 50% bigger than standard
-        else:  # standard
-            return 160, 90
-
-    def show_preview(self, thumbnail: np.ndarray, x: int, y: int):
-        if thumbnail is not None and self._parent_widget:
-            self._current_thumbnail = thumbnail.copy()
-
-            # Convert BGR to RGB for GdkPixbuf
-            rgb_thumbnail = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2RGB)
-
-            # Create pixbuf from bytes in memory
-            height, width, channels = rgb_thumbnail.shape
-            pixbuf = GdkPixbuf.Pixbuf.new_from_bytes(
-                GLib.Bytes.new(rgb_thumbnail.tobytes()),
-                GdkPixbuf.Colorspace.RGB,
-                False,  # has_alpha
-                8,      # bits_per_sample
-                width,
-                height,
-                width * channels
-            )
-
-            # Set pixbuf directly to picture
-            self.preview_image.set_pixbuf(pixbuf)
-
-            # Position above the timeline
-            self.preview_popover.set_position(Gtk.PositionType.TOP)
-
-            # Calculate proper coordinates relative to the video widget
-            # The timeline is in box_playback_controls, but popover parent is box_video_preview
-            timeline_allocation = self.get_allocation()
-
-            # Get timeline position relative to video widget (popover parent)
-            if hasattr(self._parent_widget, 'box_playback_controls') and hasattr(self._parent_widget, 'box_video_preview'):
-                # Get position of playback controls relative to video preview
-                playback_pos = self._parent_widget.box_playback_controls.translate_coordinates(
-                    self._parent_widget.box_video_preview, 0, 0
-                )
-                if playback_pos:
-                    playback_x_offset = playback_pos[0]
-                    playback_y_offset = playback_pos[1]
-
-                    # Get timeline position within playback controls
-                    timeline_pos = self.translate_coordinates(
-                        self._parent_widget.box_playback_controls, 0, 0
-                    )
-                    if timeline_pos:
-                        timeline_x_in_playback = timeline_pos[0]
-                        timeline_y_in_playback = timeline_pos[1]
-
-                        # Point to cursor position on timeline
-                        pointing_rect = Gdk.Rectangle()
-                        pointing_rect.x = int(playback_x_offset + timeline_x_in_playback + x - width // 2)
-                        pointing_rect.y = int(playback_y_offset + timeline_y_in_playback - 1)  # Above timeline
-                        pointing_rect.width = width
-                        pointing_rect.height = 1
-
-                        self.preview_popover.set_pointing_to(pointing_rect)
-                    else:
-                        # Fallback without timeline position
-                        pointing_rect = Gdk.Rectangle()
-                        pointing_rect.x = int(playback_x_offset + x - width // 2)
-                        pointing_rect.y = int(playback_y_offset - 1)  # Above timeline
-                        pointing_rect.width = width
-                        pointing_rect.height = 1
-                        self.preview_popover.set_pointing_to(pointing_rect)
-                else:
-                    # Fallback if coordinate translation fails
-                    pointing_rect = Gdk.Rectangle()
-                    pointing_rect.x = int(x - width // 2)
-                    pointing_rect.y = -1  # Above timeline
-                    pointing_rect.width = width
-                    pointing_rect.height = 1
-                    self.preview_popover.set_pointing_to(pointing_rect)
-            else:
-                # Final fallback
-                pointing_rect = Gdk.Rectangle()
-                pointing_rect.x = int(x - width // 2)
-                pointing_rect.y = -1  # Above timeline
-                pointing_rect.width = width
-                pointing_rect.height = 1
-                self.preview_popover.set_pointing_to(pointing_rect)
-
-            if not self.preview_popover.get_visible():
-                self.preview_popover.popup()
-            else:
-                # If already visible, force it to reposition
-                self.preview_popover.popdown()
-                self.preview_popover.popup()
 
 
-    def _generate_thumbnail_async(self, timestamp_ns: int, x: int, y: int):
-        """Generate thumbnail in background thread without blocking UI"""
-        try:
-            # Generate thumbnail using parent's method
-            if self._parent_widget and hasattr(self._parent_widget, 'generate_thumbnail_for_timestamp'):
-                file_path = None
-                if hasattr(self._parent_widget, 'current_file') and self._parent_widget.current_file:
-                    file_path = self._parent_widget.current_file.get_path()
 
-                if file_path:
-                    thumb = self._parent_widget.generate_thumbnail_for_timestamp(file_path, timestamp_ns)
-                    if thumb is not None:
-                        # Check again if request is still valid before showing
-                        with self._thumbnail_lock:
-                            if self._thumbnail_thread is not None:
-                                GLib.idle_add(self.show_preview, thumb, x, y)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
