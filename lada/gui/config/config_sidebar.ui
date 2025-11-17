@@ -102,23 +102,11 @@ SPDX-License-Identifier: AGPL-3.0
                                     </object>
                                 </child>
                                 <child>
-                                    <object class="AdwExpanderRow" id="expander_row_seek_preview">
+                                    <object class="AdwSwitchRow" id="switch_row_seek_preview">
                                         <property name="title" translatable="true">Enable seek preview</property>
                                         <property name="subtitle" translatable="true">Show a preview of the video frame when hovering over the timeline.</property>
-                                        <property name="show-enable-switch">true</property>
-                                        <signal name="notify::enable-expansion"
+                                        <signal name="notify::active"
                                                 handler="switch_row_seek_preview_active_callback"/>
-                                        <child>
-                                            <object class="AdwComboRow" id="combo_row_seek_preview_size">
-                                                <property name="title" translatable="true">Size</property>
-                                                <property name="subtitle" translatable="true">Larger sizes show more detail but may impact performance.</property>
-                                                <signal name="notify::selected"
-                                                        handler="combo_row_seek_preview_size_selected_callback"/>
-                                                <property name="model">
-                                                    <object class="GtkStringList"/>
-                                                </property>
-                                            </object>
-                                        </child>
                                     </object>
                                 </child>
                             </object>
