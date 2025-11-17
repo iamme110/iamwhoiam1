@@ -334,3 +334,50 @@ def get_available_video_encoder_codecs():
             continue
         codecs.add((e_codec.name, e_codec.long_name))
     return sorted(list(codecs))
+
+
+class VideoThumbnailer:
+    """Generate video thumbnails at specific timestamps"""
+
+    def __init__(self, video_path: str):
+        self.video_path = video_path
+        self.container = None
+        self.metadata = None
+
+    def __enter__(self):
+        self.metadata = get_video_meta_data(self.video_path)
+        self.container = av.open(self.video_path, metadata_errors='ignore')
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.container:
+            self.container.close()
+
+    def get_thumbnail(self, timestamp_ns: int, width: int = 160, height: int = 90) -> np.ndarray | None:
+        """Generate thumbnail at specified timestamp in nanoseconds"""
+        try:
+            # Convert nanoseconds to seconds for seeking
+            timestamp_seconds = timestamp_ns / 1_000_000_000
+
+            # Seek to timestamp
+            seek_offset = int(timestamp_seconds * av.time_base)
+            self.container.seek(seek_offset, stream=self.container.streams.video[0])
+
+            # Decode frames until we find one after our timestamp
+            for frame in self.container.decode(video=0):
+                # Convert frame timestamp to nanoseconds
+                frame_timestamp_ns = int((frame.pts * frame.time_base) * 1_000_000_000)
+
+                # If we're at or past the requested timestamp, use this frame
+                if frame_timestamp_ns >= timestamp_ns:
+                    # Convert to numpy array (BGR format)
+                    thumbnail = frame.to_ndarray(format='bgr24')
+
+                    # Resize to target dimensions
+                    thumbnail = cv2.resize(thumbnail, (width, height), interpolation=cv2.INTER_LINEAR)
+
+                    return thumbnail
+
+            return None
+        except Exception:
+            return None
