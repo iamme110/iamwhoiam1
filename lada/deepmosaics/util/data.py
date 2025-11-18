@@ -1,11 +1,15 @@
+# SPDX-FileCopyrightText: DeepMosaics Authors
+# SPDX-License-Identifier: GPL-3.0 AND AGPL-3.0
+# Code vendored from: https://github.com/HypoX64/DeepMosaics/
+
 import numpy as np
 import torch
 import cv2
 
-def to_tensor(data,gpu_id):
+def to_tensor(data,gpu_id,dtype):
     data = torch.from_numpy(data)
     if gpu_id != '-1':
-        data = data.cuda()
+        data = data.to(device=f'cuda:{gpu_id}',dtype=dtype)
     return data
 
 def normalize(data):
@@ -40,7 +44,7 @@ def tensor2im(image_tensor, gray=False, rgb2bgr = True ,is0_1 = False, batch_ind
     return image_numpy.astype(np.uint8)
 
 
-def im2tensor(image_numpy, gray=False,bgr2rgb = True, reshape = True, gpu_id = '-1',is0_1 = False):
+def im2tensor(image_numpy, gray=False,bgr2rgb = True, reshape = True, gpu_id = '-1',is0_1 = False, dtype=torch.float32):
     if gray:
         h, w = image_numpy.shape
         image_numpy = (image_numpy/255.0-0.5)/0.5
@@ -60,7 +64,7 @@ def im2tensor(image_numpy, gray=False,bgr2rgb = True, reshape = True, gpu_id = '
         if reshape:
             image_tensor = image_tensor.reshape(1,ch,h,w)
     if gpu_id != '-1':
-        image_tensor = image_tensor.cuda()
+        image_tensor = image_tensor.to(device=f'cuda:{gpu_id}',dtype=dtype)
     return image_tensor
 
 def shuffledata(data,target):

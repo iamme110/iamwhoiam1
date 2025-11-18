@@ -1,86 +1,84 @@
+# SPDX-FileCopyrightText: Lada Authors
+# SPDX-License-Identifier: AGPL-3.0
+
 import logging
 import queue
 import threading
 import time
 from pathlib import Path
+from typing import List, Tuple
 
 import cv2
-import numpy as np
 import torch
+
 from ultralytics.engine.results import Results
-from lada.lib import Box, Mask, Image, VideoMetadata, threading_utils
+from lada.lib import VideoMetadata, threading_utils
 from lada.lib import image_utils
+from lada.lib.box_utils import box_overlap
 from lada.lib.mosaic_detection_model import MosaicDetectionModel
 from lada.lib.scene_utils import crop_to_box_v3
 from lada.lib import video_utils
 from lada import LOG_LEVEL
-from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask
+from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask_tensor
+from lada.lib import Box
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
+Image = torch.Tensor # [H, W, C] fp
+Images = List[torch.Tensor] # [H, W, C] fp
+Mask = torch.Tensor # [H, W] uint8
+Masks = List[torch.Tensor] # [H, W] uint8
+Boxes = List[Box] # [4] int64
 
 class Scene:
     def __init__(self, file_path: Path, video_meta_data: VideoMetadata):
         self.file_path = file_path
         self.video_meta_data = video_meta_data
-        self.data: list = []
+        self.frames: Images = []
+        self.masks: Masks = []
+        self.boxes: Boxes = []
         self.frame_start: int | None = None
         self.frame_end: int | None = None
         self._index: int = 0
 
     def __len__(self):
-        return len(self.data)
+        return len(self.frames)
 
     def add_frame(self, frame_num: int, img: Image, mask: Mask, box: Box):
         if self.frame_start is None:
             self.frame_start = frame_num
             self.frame_end = frame_num
-            self.data.append((img, mask, box))
         else:
             assert frame_num == self.frame_end + 1
             self.frame_end = frame_num
-            self.data.append((img, mask, box))
+
+        self.frames.append(img)
+        self.masks.append(mask)
+        self.boxes.append(box)
 
     def merge_mask_box(self, mask: Mask, box: Box):
         assert self.belongs(box)
-        current_box = self.data[-1][2]
+        current_box = self.boxes[-1]
         t = min(current_box[0], box[0])
         l = min(current_box[1], box[1])
         b = max(current_box[2], box[2])
         r = max(current_box[3], box[3])
         new_box = (t, l, b, r)
-
-        current_mask = self.data[-1][1]
-        new_mask = np.maximum(current_mask, mask)
-
-        self.data[-1] = self.data[-1][0], new_mask, new_box
-
-    def get_images(self):
-        return [img for img, _, _ in self.data]
-
-    def get_masks(self):
-        return [mask for _, mask, _ in self.data]
-
-    def get_boxes(self):
-        return [box for _, _, box in self.data]
-
-    def box_overlaps(self, box1: Box, box2: Box) -> bool:
-        y_overlaps = (box1[0] <= box2[0] <= box1[2] or box1[0] <= box2[2] <= box1[2]) or (box2[0] <= box1[0] <= box2[2] or box2[0] <= box1[2] <= box2[2])
-        x_overlaps = (box1[1] <= box2[1] <= box1[3] or box1[1] <= box2[3] <= box1[3]) or (box2[1] <= box1[1] <= box2[3] or box2[1] <= box1[3] <= box2[3])
-        return y_overlaps and x_overlaps
+        self.boxes[-1] = new_box
+        self.masks[-1] = torch.maximum(self.masks[-1], mask)
 
     def belongs(self, box: Box):
-        if len(self.data) == 0:
+        if len(self.boxes) == 0:
             return False
-        last_scene_box = self.data[-1][2]
-        return self.box_overlaps(last_scene_box, box)
+        last_scene_box = self.boxes[-1]
+        return box_overlap(last_scene_box, box)
 
     def __iter__(self):
         return self
 
     def __next__(self):
         if self._index < len(self):
-            item = self.data[self._index]
+            item = self.frames[self._index], self.masks[self._index], self.boxes[self._index]
             self._index += 1
             return item
         else:
@@ -96,24 +94,27 @@ class Clip:
         assert self.frame_start <= self.frame_end
         self.size = size
         self.pad_mode = pad_mode
-        self.data = []
+        self.frames: Images = []
+        self.masks: Masks = []
+        self.boxes: Boxes = []
+        self.crop_shapes: List[Tuple[int, int]] = []
+        self.pad_after_resizes: List[Tuple[int, int, int, int]] = []
         self._index: int = 0
-        scene_masks = scene.get_masks()
-        scene_images = scene.get_images()
-        scene_boxes = scene.get_boxes()
-        pad_after_resize = (0, 0, 0, 0)
 
         # crop scene
         for i in range(len(scene)):
-            img, mask, box = scene_images[i], scene_masks[i], scene_boxes[i]
+            img, mask, box = scene.frames[i], scene.masks[i], scene.boxes[i]
             cropped_img, cropped_mask, cropped_box, _ = crop_to_box_v3(box, img, mask, (size, size), max_box_expansion_factor=1., border_size=0.06)
-            self.data.append((cropped_img, cropped_mask, cropped_box, cropped_img.shape, pad_after_resize))
+            self.frames.append(cropped_img)
+            self.masks.append(cropped_mask)
+            self.boxes.append(cropped_box)
+            self.crop_shapes.append(cropped_img.shape)
 
         # resize crops to out_size
         max_width, max_height = self.get_max_width_height()
         scale_width, scale_height = size/max_width, size/max_height
 
-        for i, (cropped_img, cropped_mask, cropped_box, _, _) in enumerate(self.data):
+        for i, (cropped_img, cropped_mask, cropped_box) in enumerate(zip(self.frames, self.masks, self.boxes)):
             crop_shape = cropped_img.shape
 
             resize_shape = (int(crop_shape[0] * scale_height), int(crop_shape[1] * scale_width))
@@ -125,12 +126,16 @@ class Clip:
             cropped_img, pad_after_resize = image_utils.pad_image(cropped_img, size, size, mode=self.pad_mode)
             cropped_mask, _ = image_utils.pad_image(cropped_mask, size, size, mode='zero')
 
-            self.data[i] = (cropped_img, cropped_mask, cropped_box, crop_shape, pad_after_resize)
+            self.frames[i] = cropped_img
+            self.masks[i] = cropped_mask
+            self.boxes[i] = cropped_box
+            self.crop_shapes[i] = crop_shape
+            self.pad_after_resizes.append(pad_after_resize)
 
     def get_max_width_height(self):
         max_width = 0
         max_height = 0
-        for box in self.get_clip_boxes():
+        for box in self.boxes:
             t, l, b, r = box
             width, height = r - l + 1, b - t + 1
             if height > max_height:
@@ -139,35 +144,30 @@ class Clip:
                 max_width = width
         return max_width, max_height
 
-    def get_clip_images(self):
-        return [clip_img for clip_img, _, _, _, _ in self.data]
-
-    def get_clip_boxes(self):
-        return [clip_box for _, _, clip_box, _, _ in self.data]
-
     def pop(self):
         self.frame_start += 1
         if self.frame_start > self.frame_end:
             self.frame_start = None
             self.frame_end = None
-        return self.data.pop(0)
+
+        return self.frames.pop(0), self.masks.pop(0), self.boxes.pop(0), self.crop_shapes.pop(0), self.pad_after_resizes.pop(0)
 
     def __len__(self):
-        return len(self.data)
+        return len(self.frames)
 
     def __iter__(self):
         return self
 
     def __next__(self):
         if self._index < len(self):
-            item = self.data[self._index]
+            item = self.frames[self._index], self.masks[self._index], self.boxes[self._index], self.crop_shapes[self._index], self.pad_after_resizes[self._index]
             self._index += 1
             return item
         else:
             raise StopIteration
 
     def __getitem__(self, item):
-        return self.data[item]
+        return self.frames[item], self.masks[item], self.boxes[item]
 
 class MosaicDetector:
     def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4):
@@ -306,10 +306,10 @@ class MosaicDetector:
             return
         for i in range(len(results.boxes)):
             if self.model.is_segmentation_model:
-                mask = convert_yolo_mask(results.masks[i], results.orig_shape)
+                mask = convert_yolo_mask_tensor(results.masks[i], results.orig_shape)
             else:
                 # TODO: we currently don't use mosaic masks in the restoration pipeline, so we could also remove it
-                mask = np.zeros(results.orig_shape, dtype=np.uint8)
+                mask = torch.zeros(results.orig_shape, dtype=torch.uint8, device=self.device)
             box = convert_yolo_box(results.boxes[i], results.orig_shape)
 
             current_scene = None
@@ -385,10 +385,12 @@ class MosaicDetector:
                     logger.debug("inference worker: inference_queue producer unblocked")
                 break
             frames_batch, frames, frame_num = frames_data
-            inference_results = self.model.inference(frames_batch) if frames_batch is not None else None
+
+            batch_prediction_results = self.model.inference_and_postprocess(frames_batch, frames)
+
             self.queue_stats["inference_queue_max_size"] = max(self.inference_queue.qsize()+1, self.queue_stats["inference_queue_max_size"])
             s = time.time()
-            self.inference_queue.put((inference_results, frames_batch, frames, frame_num))
+            self.inference_queue.put((batch_prediction_results, frames_batch, frame_num))
             self.queue_stats["inference_queue_wait_time_put"] += time.time() - s
             if self.stop_requested:
                 logger.debug("inference worker: inference_queue producer unblocked")
@@ -424,10 +426,9 @@ class MosaicDetector:
                     logger.debug("frame detector worker: mosaic_clip_queue producer unblocked")
                 self.frame_detector_thread_should_be_running = False
             else:
-                inference_results, preprocessed_frames, orig_frames, _frame_num = inference_data
+                batch_prediction_results, preprocessed_frames, _frame_num = inference_data
                 assert frame_num == _frame_num, "frame detector worker out of sync with frame reader"
-                batch_prediction_results = self.model.postprocess(inference_results, preprocessed_frames, orig_frames)
-                assert preprocessed_frames.shape[0] == len(batch_prediction_results)
+                assert len(preprocessed_frames) == len(batch_prediction_results)
                 for i, results in enumerate(batch_prediction_results):
                     self._create_or_append_scenes_based_on_prediction_result(results, scenes, frame_num)
                     self._create_clips_for_completed_scenes(scenes, frame_num, eof=False)

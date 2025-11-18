@@ -1,30 +1,26 @@
-import threading
+# SPDX-FileCopyrightText: Lada Authors
+# SPDX-License-Identifier: AGPL-3.0
 
 import torch
 from ultralytics.utils.checks import check_imgsz
-import numpy as np
-from ultralytics.data.augment import LetterBox
 from ultralytics.utils import nms, ops
 from ultralytics.engine.results import Results
 from ultralytics.nn.autobackend import AutoBackend
 from ultralytics.cfg import get_cfg
 from ultralytics.utils import DEFAULT_CFG
 from ultralytics import YOLO
-from lada.lib import Image
+from lada.lib.torch_letterbox import PyTorchLetterBox
+from typing import List
 
 class MosaicDetectionModel:
-    def __init__(self, model_path: str, device, imgsz=640, **kwargs):
+    def __init__(self, model_path: str, device, imgsz=640, fp16=False, **kwargs):
         yolo_model = YOLO(model_path)
         assert yolo_model.task == 'segment'
         self.stride = 32
         self.imgsz = check_imgsz(imgsz, stride=self.stride, min_dim=2)
-        self.letterbox = LetterBox(
-            self.imgsz,
-            auto=True,
-            stride=self.stride
-        )
+        self.letterbox = PyTorchLetterBox(self.imgsz, stride=self.stride)
 
-        custom = {"conf": 0.25, "batch": 1, "save": False, "mode": "predict", "device": device}
+        custom = {"conf": 0.25, "batch": 1, "save": False, "mode": "predict", "device": device, "half": fp16}
         args = {**yolo_model.overrides, **custom, **kwargs}  # highest priority args on the right
         self.args = get_cfg(DEFAULT_CFG, args)
 
@@ -41,25 +37,36 @@ class MosaicDetectionModel:
         self.args.half = self.model.fp16
         self.model.eval()
         self.model.warmup(imgsz=(1, 3, *self.imgsz))
+        self.dtype = torch.float16 if fp16 else torch.float32
+        self.cpu_buffer = None
 
         self.is_segmentation_model = yolo_model.task == 'segment'
-        self._lock = threading.Lock()
 
-    def preprocess(self, imgs):
-        im = np.stack([self.letterbox(image=x) for x in imgs])
-        im = im.transpose((0, 3, 1, 2))  # BHWC to BCHW, (n, 3, h, w)
-        im = np.ascontiguousarray(im)  # contiguous
-        im = torch.from_numpy(im)
-        im = im.to(self.device)
-        im = im.float()  # uint8 to fp16/32
-        im /= 255  # 0 - 255 to 0.0 - 1.0
-        return im
+    def preallocate_buffers(self, batch_size: int, img_shape: tuple[int, int]):
+        self.cpu_buffer = torch.empty(batch_size, 3, *img_shape, dtype=torch.uint8, device='cpu', pin_memory=True)
+        self.inference_buffer = torch.empty(batch_size, 3, *img_shape, dtype=self.dtype, device=self.device, memory_format=torch.channels_last)
+
+    def preprocess(self, imgs: list[torch.Tensor]) -> list[torch.Tensor]:
+        return [self.letterbox(im.permute(2, 0, 1).unsqueeze(0)).squeeze(0) for im in imgs]
 
     def inference(self, image_batch: torch.Tensor):
-        with self._lock:
-            return self.model(image_batch, augment=False, visualize=False, embed=None)
+        return self.model(image_batch, augment=False, visualize=False, embed=None)
 
-    def postprocess(self, preds, img, orig_imgs):
+    def inference_and_postprocess(self, imgs: list[torch.Tensor], orig_imgs: list[torch.Tensor]) -> list[Results]:
+        if self.cpu_buffer is None:
+            self.preallocate_buffers(len(imgs), imgs[0].shape[1:])
+
+        with torch.inference_mode():
+            cpu_buffer_view = self.cpu_buffer[:len(imgs)]
+            inference_view = self.inference_buffer[:len(imgs)]
+            torch.stack(imgs, dim=0, out=cpu_buffer_view)
+            inference_view.copy_(cpu_buffer_view, non_blocking=True)
+            inference_view.div_(255.0)
+
+            preds = self.inference(inference_view)
+            return self.postprocess(preds, inference_view, orig_imgs)
+
+    def postprocess(self, preds, img, orig_imgs: List[torch.Tensor]) -> List[Results]:
         protos = preds[1][-1]
         preds = nms.non_max_suppression(
             preds,
@@ -73,7 +80,7 @@ class MosaicDetectionModel:
         )
         return [self.construct_result(pred, img, orig_img, proto) for pred, orig_img, proto in zip(preds, orig_imgs, protos)]
 
-    def construct_result(self, preds: torch.tensor, img: torch.tensor, orig_img: list[Image], proto: torch.tensor):
+    def construct_result(self, preds: torch.tensor, img: torch.tensor, orig_img: torch.Tensor, proto: torch.tensor):
         if not len(preds):  # save empty boxes
             masks = None
         else:
@@ -82,4 +89,4 @@ class MosaicDetectionModel:
         if masks is not None:
             keep = masks.sum((-2, -1)) > 0  # only keep predictions with masks
             preds, masks = preds[keep], masks[keep]
-        return Results(orig_img, path='', names=self.model.names, boxes=preds[:, :6], masks=masks)
+        return Results(orig_img, path='', names=self.model.names, boxes=preds[:, :6].cpu(), masks=masks)

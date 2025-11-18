@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Lada Authors
+# SPDX-License-Identifier: AGPL-3.0
+
 import json
 import os
 import re
@@ -10,6 +13,7 @@ import heapq
 
 import av
 import cv2
+import torch
 import numpy as np
 
 from lada.lib import Image, Mask, VideoMetadata, os_utils
@@ -82,10 +86,13 @@ class VideoReader:
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
 
-    def frames(self):
+    def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
+        self.container.streams.video[0].thread_type = 'AUTO'
+
         for frame in self.container.decode(video=0):
-            frame_img = frame.to_ndarray(format='bgr24')
-            yield frame_img, frame.pts
+            nd_frame = frame.to_ndarray(format='bgr24')
+            torch_frame = torch.from_numpy(nd_frame)
+            yield torch_frame, frame.pts
 
     def seek(self, offset_ns):
         offset = int((offset_ns / 1_000_000_000) * av.time_base)
@@ -307,7 +314,7 @@ class VideoWriter:
             frame_to_encode = self.frame_queue.popleft()
             pts_to_assign = heapq.heappop(self.pts_heap)
             self.pts_set.remove(pts_to_assign)
-            
+
             out_frame = av.VideoFrame.from_ndarray(frame_to_encode, format='rgb24')
             out_frame.pts = pts_to_assign
             out_packet = self.video_stream.encode(out_frame)
@@ -324,9 +331,11 @@ class VideoWriter:
         # the user to identify a framerate ahead of time, and uses the timing of the existing PTS, but reorders the PTS.
         #
         # See https://codeberg.org/ladaapp/lada/pulls/33 for more information/discussion.
+        if isinstance(frame, torch.Tensor):
+            frame = frame.cpu().numpy()
         if bgr2rgb:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
+
         if frame_pts not in self.pts_set:
             heapq.heappush(self.pts_heap, frame_pts)
             self.frame_queue.append(frame)

@@ -1,6 +1,11 @@
+# SPDX-FileCopyrightText: Lada Authors
+# SPDX-License-Identifier: AGPL-3.0
+
 import cv2
+import torch
 from lada.lib import image_utils
 from lada.lib import Image
+from lada.lib.mosaic_detector import Clip
 
 def overlay_mask(frame, mask):
     overlay = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
@@ -26,12 +31,18 @@ def draw_text(text, position, output, font_scale=0.5):
     cv2.putText(output, text, position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 2,
                 cv2.LINE_AA)
 
-def draw_mosaic_detections(clip, border_color = (255, 0, 255)) -> list[Image]:
+def draw_mosaic_detections(clip: Clip, border_color = (255, 0, 255)) -> list[torch.Tensor]:
+    if len(clip) == 0:
+        return []
+
     mosaic_detection_images = []
     box_border_thickness = 2
     border_thickness_half = box_border_thickness // 2
+    device = clip.frames[0].device
+
     for (cropped_img, cropped_mask, _, orig_crop_shape, pad_after_resize) in clip:
-        mosaic_detection_img = cropped_img.copy()
+        mosaic_detection_img = cropped_img.to(device='cpu').contiguous().numpy()
+        cropped_mask = cropped_mask.to(device='cpu').contiguous().numpy()
 
         draw_text(f"c:{clip.id},f_start:{clip.frame_start}",(25, cropped_img.shape[1] // 2), mosaic_detection_img)
 
@@ -52,4 +63,9 @@ def draw_mosaic_detections(clip, border_color = (255, 0, 255)) -> list[Image]:
         mosaic_detection_img = overlay_mask_boundary(mosaic_detection_img, cropped_mask)
 
         mosaic_detection_images.append(mosaic_detection_img)
+
+    mosaic_detection_images = [torch.from_numpy(x) for x in mosaic_detection_images]
+    if device.type == 'cuda':
+        mosaic_detection_images = torch.stack(mosaic_detection_images, dim=0).to(device=device)
+        return torch.unbind(mosaic_detection_images, dim=0)
     return mosaic_detection_images

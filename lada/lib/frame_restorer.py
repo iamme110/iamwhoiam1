@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Lada Authors
+# SPDX-License-Identifier: AGPL-3.0
+
 import logging
 import queue
 import textwrap
@@ -6,6 +9,7 @@ import time
 from typing import Optional
 
 import cv2
+import torch
 import numpy as np
 
 from lada import LOG_LEVEL
@@ -13,14 +17,22 @@ from lada.lib import image_utils, video_utils, threading_utils, mask_utils
 from lada.lib import visualization_utils
 from lada.lib.mosaic_detector import MosaicDetector
 from lada.lib.mosaic_detection_model import MosaicDetectionModel
+from lada.lib.mosaic_detector import Clip
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_path, mosaic_restoration_config_path, mosaic_detection_model_path):
+def load_models(
+    device: torch.device,
+    mosaic_restoration_model_name: str,
+    mosaic_restoration_model_path: str,
+    mosaic_restoration_config_path: str | None,
+    mosaic_detection_model_path: str,
+    fp16: bool,
+    clip_length: int):
     if mosaic_restoration_model_name.startswith("deepmosaics"):
-        from lada.deepmosaics.models import loadmodel, model_util
-        mosaic_restoration_model = loadmodel.video(model_util.device_to_gpu_id(device), mosaic_restoration_model_path)
+        from lada.deepmosaics.models import loadmodel
+        mosaic_restoration_model = loadmodel.video(device, mosaic_restoration_model_path, fp16)
         pad_mode = 'reflect'
     elif mosaic_restoration_model_name.startswith("basicvsrpp"):
         from lada.basicvsrpp.inference import load_model, get_default_gan_inference_config
@@ -28,12 +40,12 @@ def load_models(device, mosaic_restoration_model_name, mosaic_restoration_model_
             config = mosaic_restoration_config_path
         else:
             config = get_default_gan_inference_config()
-        mosaic_restoration_model = load_model(config, mosaic_restoration_model_path, device)
+        mosaic_restoration_model = load_model(config, mosaic_restoration_model_path, device, fp16, clip_length)
         pad_mode = 'zero'
     else:
         raise NotImplementedError()
     # setting classes=[0] will consider only for class id = 0 as detections (nsfw mosaics) therefore filtering out sfw mosaics (heads, faces)
-    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2)
+    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, fp16=fp16)
     return mosaic_detection_model, mosaic_restoration_model, pad_mode
 
 
@@ -41,7 +53,7 @@ class FrameRestorer:
     def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode,
                  mosaic_detection=False):
-        self.device = device
+        self.device = torch.device(device)
         self.mosaic_restoration_model_name = mosaic_restoration_model_name
         self.max_clip_length = max_clip_length
         self.video_meta_data = video_utils.get_video_meta_data(video_file)
@@ -185,10 +197,10 @@ class FrameRestorer:
         if self.mosaic_restoration_model_name.startswith("deepmosaics"):
             from lada.deepmosaics.inference import restore_video_frames
             from lada.deepmosaics.models import model_util
-            restored_clip_images = restore_video_frames(model_util.device_to_gpu_id(self.device), self.mosaic_restoration_model, images)
+            restored_clip_images = restore_video_frames(self.device.index, self.mosaic_restoration_model, images)
         elif self.mosaic_restoration_model_name.startswith("basicvsrpp"):
             from lada.basicvsrpp.inference import inference
-            restored_clip_images = inference(self.mosaic_restoration_model, images, self.device)
+            restored_clip_images = inference(self.mosaic_restoration_model, images)
         else:
             raise NotImplementedError()
         return restored_clip_images
@@ -205,11 +217,18 @@ class FrameRestorer:
             clip_img = image_utils.resize(clip_img, orig_crop_shape[:2])
             clip_mask = image_utils.resize(clip_mask, orig_crop_shape[:2],interpolation=cv2.INTER_NEAREST)
             t, l, b, r = orig_clip_box
-            blend_mask = mask_utils.create_blend_mask(clip_mask)
-            blended_img = (frame[t:b + 1, l:r + 1, :] * (1 - blend_mask[..., None]) + clip_img * (blend_mask[..., None])).clip(0, 255).astype(np.uint8)
-            frame[t:b + 1, l:r + 1, :] = blended_img
+            blend_mask = mask_utils.create_blend_mask(clip_mask).to(device=frame.device)
 
-    def _restore_clip(self, clip):
+            frame_roi = frame[t:b + 1, l:r + 1, :]
+            roi_f = frame_roi.to(dtype=self.mosaic_restoration_model.dtype)
+            temp = clip_img.to(dtype=self.mosaic_restoration_model.dtype, device=frame_roi.device)
+            temp.sub_(roi_f)
+            temp.mul_(blend_mask.unsqueeze(-1))
+            temp.add_(roi_f)
+            temp.round_().clamp_(0, 255)
+            frame_roi[:] = temp
+
+    def _restore_clip(self, clip: Clip):
         """
         Restores each contained from of the mosaic clip. If self.mosaic_detection is True will instead draw mosaic detection
         boundaries on each frame.
@@ -217,18 +236,21 @@ class FrameRestorer:
         if self.mosaic_detection:
             restored_clip_images = visualization_utils.draw_mosaic_detections(clip)
         else:
-            images = clip.get_clip_images()
-            restored_clip_images = self._restore_clip_frames(images)
-        assert len(restored_clip_images) == len(clip.get_clip_images())
+            restored_clip_images = self._restore_clip_frames(clip.frames)
+        assert len(restored_clip_images) == len(clip.frames)
 
         for i in range(len(restored_clip_images)):
-            assert clip.data[i][0].shape == restored_clip_images[i].shape
-            clip.data[i] = restored_clip_images[i], clip.data[i][1], clip.data[i][2], clip.data[i][3], clip.data[i][4]
+            assert clip.frames[i].shape == restored_clip_images[i].shape
+            clip.frames[i] = restored_clip_images[i]
 
     def _collect_garbage(self, clip_buffer):
         processed_clips = list(filter(lambda _clip: len(_clip) == 0, clip_buffer))
+        has_processed_clips = len(processed_clips) > 0
         for processed_clip in processed_clips:
             clip_buffer.remove(processed_clip)
+
+        if has_processed_clips and self.device.type == 'cuda':
+            torch.cuda.empty_cache()
 
     def _contains_at_least_one_clip_starting_after_frame_num(self, frame_num, clip_buffer):
         return len(clip_buffer) > 0 and frame_num < max(clip_buffer, key=lambda c: c.frame_start).frame_start
