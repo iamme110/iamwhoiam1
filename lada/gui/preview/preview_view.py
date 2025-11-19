@@ -325,6 +325,28 @@ class PreviewView(Gtk.Widget):
 
     def update_seek_preview(self, timestamp_ns: int, mouse_x: float):
         """Update the seek preview popover at the specified position"""
+        # Performance optimization: only update thumbnail if cursor moved significantly
+        # Initialize tracking variables if they don't exist
+        if not hasattr(self, '_last_seek_preview_timestamp_ns'):
+            self._last_seek_preview_timestamp_ns = 0
+        if not hasattr(self, '_last_seek_preview_mouse_x'):
+            self._last_seek_preview_mouse_x = 0.0
+
+        # Calculate movement deltas
+        time_delta_ns = abs(timestamp_ns - self._last_seek_preview_timestamp_ns)
+        position_delta = abs(mouse_x - self._last_seek_preview_mouse_x)
+
+        # Only update if movement is significant (>2 seconds or >10 pixels)
+        time_threshold_ns = 2 * Gst.SECOND  # 2 seconds
+        position_threshold = 10  # 10 pixels
+
+        if time_delta_ns < time_threshold_ns and position_delta < position_threshold:
+            return  # Skip update to improve performance
+
+        # Update tracking variables
+        self._last_seek_preview_timestamp_ns = timestamp_ns
+        self._last_seek_preview_mouse_x = mouse_x
+
         # Hide existing popover if visible
         if hasattr(self, 'seek_preview_popover') and self.seek_preview_popover.get_visible():
             self.seek_preview_popover.popdown()
@@ -335,30 +357,53 @@ class PreviewView(Gtk.Widget):
             self.seek_preview_popover.set_autohide(False)
             self.seek_preview_popover.set_position(Gtk.PositionType.TOP)  # Remove arrow, make it a plain rectangle
 
-            # Create box with time label and picture
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-            box.set_margin_start(2)  # Further reduced
-            box.set_margin_end(2)   # Further reduced
-            box.set_margin_top(0)   # No top margin
-            box.set_margin_bottom(2)  # Further reduced
-            self.seek_preview_time_label = Gtk.Label()
-            # Use same size as current time label (no caption class)
-            self.seek_preview_time_label.set_margin_top(-4)  # Move up 1px more
-            self.seek_preview_time_label.set_margin_bottom(0)  # No bottom margin for time label
-            self.seek_preview_time_label.set_valign(Gtk.Align.START)  # Align to top
-            self.seek_preview_time_label.set_size_request(-1, 20)  # Set minimum height to avoid GTK warnings
-            box.append(self.seek_preview_time_label)
+            # Create overlay for thumbnail area (spinner + picture) above timecode
+            overlay = Gtk.Overlay()
+            overlay.set_margin_start(2)
+            overlay.set_margin_end(2)
+            overlay.set_margin_top(2)
+            overlay.set_margin_bottom(0)  # No bottom margin for overlay
 
-            # Create spinner for placeholder
-            self.seek_preview_spinner = Gtk.Spinner()
-            box.append(self.seek_preview_spinner)
+            # Create fixed-size container for spinner/picture area
+            thumbnail_container = Gtk.Box()
+            thumbnail_container.set_size_request(220, 124)  # Fixed size for thumbnail area
+            thumbnail_container.set_halign(Gtk.Align.CENTER)
 
-            # Create picture for thumbnail
+            # Create spinner centered in thumbnail area
+            seek_preview_spinner = Gtk.Spinner()
+            seek_preview_spinner.set_size_request(64, 64)
+            seek_preview_spinner.set_halign(Gtk.Align.CENTER)
+            seek_preview_spinner.set_valign(Gtk.Align.CENTER)
+            thumbnail_container.append(seek_preview_spinner)
+
+            # Create picture for thumbnail (overlaid on spinner)
             self.seek_preview_picture = Gtk.Picture()
-            box.append(self.seek_preview_picture)
+
+            # Add spinner container as base, picture as overlay
+            overlay.set_child(thumbnail_container)
+            overlay.add_overlay(self.seek_preview_picture)
+
+            # Create main vertical box: thumbnail overlay above timecode
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            box.set_margin_start(0)  # Margins already on overlay
+            box.set_margin_end(0)
+            box.set_margin_top(0)
+            box.set_margin_bottom(2)
+
+            # Create time label below thumbnail
+            self.seek_preview_time_label = Gtk.Label()
+            self.seek_preview_time_label.set_halign(Gtk.Align.CENTER)
+            self.seek_preview_time_label.set_valign(Gtk.Align.CENTER)
+            self.seek_preview_time_label.set_margin_top(2)
+
+            # Add to main box: thumbnail area + timecode below
+            box.append(overlay)                       # Thumbnail overlay
+            box.append(self.seek_preview_time_label) # Timecode below
+
+            self.seek_preview_spinner = seek_preview_spinner
 
             self.seek_preview_popover.set_child(box)
-            self.seek_preview_popover.set_parent(self.box_video_preview)
+            self.seek_preview_popover.set_parent(self.box_playback_controls)  # Align closer to timeline instead of video
 
         # Set time label
         time_text = self.get_time_label_text(timestamp_ns)
@@ -370,36 +415,36 @@ class PreviewView(Gtk.Widget):
         self.seek_preview_picture.set_visible(False)
 
         # Position popover above the timeline, centered on mouse cursor
-        # Transform mouse coordinates from timeline to video preview coordinate space
-        success, transformed_point = self.widget_timeline.compute_point(self.box_video_preview, Graphene.Point().init(mouse_x, 0))
+        # Transform mouse coordinates from timeline to playback controls coordinate space
+        success, transformed_point = self.widget_timeline.compute_point(self.box_playback_controls, Graphene.Point().init(mouse_x, 0))
         if success:
-            mouse_x_in_video = transformed_point.x
+            mouse_x_in_controls = transformed_point.x
         else:
-            mouse_x_in_video = mouse_x
+            mouse_x_in_controls = mouse_x
 
-        # Use even larger thumbnails to maximize image space
+        # Use standard thumbnail size for good visibility
         thumbnail_width = 220
         thumbnail_height = 124
 
-        # Calculate popover dimensions with reduced margins for maximum image size
-        popover_width = thumbnail_width + 6  # thumbnail + reduced margins (was 8, now 6)
-        popover_height = thumbnail_height + 28  # thumbnail + space for time label (increased more to meet GTK minimum size requirements)
+        # Calculate popover dimensions with space for time label below thumbnail
+        popover_width = thumbnail_width + 4  # thumbnail + minimal margins
+        popover_height = thumbnail_height + 24  # thumbnail + space for time label below
 
         # Store thumbnail size for use in thumbnail generation
         self._current_thumbnail_size = (thumbnail_width, thumbnail_height)
 
-        video_allocation = self.box_video_preview.get_allocation()
+        controls_allocation = self.box_playback_controls.get_allocation()
 
         # Center the popover horizontally on the mouse cursor with bounds checking
         pointing_rect = Gdk.Rectangle()
-        # For TOP position, the pointing rect center should align with mouse cursor
-        pointing_rect.x = int(mouse_x_in_video - popover_width // 2)
-        # Ensure popover stays within video area horizontally
-        pointing_rect.x = max(10, min(pointing_rect.x, video_allocation.width - popover_width - 10))
+        # For TOP position, center the popover on mouse cursor
+        pointing_rect.x = int(mouse_x_in_controls - popover_width // 2)
+        # Ensure popover stays within controls area horizontally
+        pointing_rect.x = max(5, min(pointing_rect.x, controls_allocation.width - popover_width - 5))
 
-        # Position above the timeline - since popover appears above pointing position,
-        # we point to just above the timeline
-        pointing_rect.y = video_allocation.height - 10  # Point to bottom of video area
+        # Position above the timeline - point to the timeline area
+        timeline_allocation = self.widget_timeline.get_allocation()
+        pointing_rect.y = timeline_allocation.y - 5  # Point just above the timeline
 
         pointing_rect.width = popover_width
         pointing_rect.height = 1
