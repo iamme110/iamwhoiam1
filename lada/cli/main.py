@@ -153,6 +153,10 @@ def main():
         sys.exit(1)
 
     device = torch.device(args.device)
+    if args.use_nvidia_decoder_encoder and device.type != 'cuda':
+        print("Nvidia decoder/encoder selected but device is not a CUDA device. Ignoring --use-nvidia-decoder-encoder.")
+        args.use_nvidia_decoder_encoder = False 
+
     mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode = load_models(
         device, args.mosaic_restoration_model, args.mosaic_restoration_model_path, args.mosaic_restoration_config_path,
         args.mosaic_detection_model_path, args.fp16, args.max_clip_length
