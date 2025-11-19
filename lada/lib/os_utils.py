@@ -16,6 +16,11 @@ def is_valid_nvidia_gpu_available() -> bool:
     if not torch.cuda.is_available():
         return False
 
+    try:
+        import PyNvVideoCodec as nvc
+    except ImportError:
+        return False
+
     min_vram_gb = 7.5
     cc_major, _ = torch.cuda.get_device_capability()
     total_vram = torch.cuda.get_device_properties().total_memory
