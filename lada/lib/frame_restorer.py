@@ -322,7 +322,7 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with self.video_reader_writer_factory.create_video_reader(self.video_meta_data.video_file, batch_size=1) as video_reader:
+        with self.video_reader_writer_factory.create_video_reader(self.video_meta_data.video_file, batch_size=1) as video_reader, torch.cuda.stream(video_reader.decoder_stream):
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
 
@@ -351,7 +351,12 @@ class FrameRestorer:
                     self._restore_frame(frame, frame_num, clip_buffer)
                     self.queue_stats["frame_restoration_queue_max_size"] = max(self.frame_restoration_queue.qsize()+1, self.queue_stats["frame_restoration_queue_max_size"])
                     s = time.time()
-                    self.frame_restoration_queue.put((frame, frame_pts))
+                    if video_reader.decoder_stream is not None:
+                        cuda_event = torch.cuda.Event()
+                        cuda_event.record(video_reader.decoder_stream)
+                        self.frame_restoration_queue.put(self.FrameRestorationQueueItem(frame, frame_pts, cuda_event))
+                    else:
+                        self.frame_restoration_queue.put(self.FrameRestorationQueueItem(frame, frame_pts, None))
                     self.queue_stats["frame_restoration_queue_wait_time_put"] += time.time() -s
                     if self.stop_requested:
                         logger.debug("frame restoration worker: frame_restoration_queue producer unblocked")
@@ -359,7 +364,12 @@ class FrameRestorer:
                 else:
                     self.queue_stats["frame_restoration_queue_max_size"] = max(self.frame_restoration_queue.qsize()+1, self.queue_stats["frame_restoration_queue_max_size"])
                     s = time.time()
-                    self.frame_restoration_queue.put((frame, frame_pts))
+                    if video_reader.decoder_stream is not None:
+                        cuda_event = torch.cuda.Event()
+                        cuda_event.record(video_reader.decoder_stream)
+                        self.frame_restoration_queue.put(self.FrameRestorationQueueItem(frame, frame_pts, cuda_event))
+                    else:
+                        self.frame_restoration_queue.put(self.FrameRestorationQueueItem(frame, frame_pts, None))
                     self.queue_stats["frame_restoration_queue_wait_time_put"] += time.time() - s
                     if self.stop_requested:
                         logger.debug("frame restoration worker: frame_restoration_queue producer unblocked")
@@ -379,13 +389,22 @@ class FrameRestorer:
         else:
             while not self.stop_requested:
                 s = time.time()
-                elem = self.frame_restoration_queue.get()
+                elem: FrameRestorer.FrameRestorationQueueItem = self.frame_restoration_queue.get()
                 self.queue_stats["frame_restoration_queue_wait_time_get"] += time.time() -s
                 if self.stop_requested:
                     logger.debug("frame_restoration_queue consumer unblocked")
                 if elem is None and not self.stop_requested:
                     raise StopIteration
-                return elem
+
+                if elem.cuda_event is not None:
+                    elem.cuda_event.synchronize()
+                return elem.frame, elem.frame_pts
 
     def get_frame_restoration_queue(self):
         return self.frame_restoration_queue
+
+    class FrameRestorationQueueItem:
+        def __init__(self, frame: torch.Tensor, frame_pts: int, cuda_event: torch.cuda.Event|None):
+            self.frame = frame
+            self.frame_pts = frame_pts
+            self.cuda_event = cuda_event
