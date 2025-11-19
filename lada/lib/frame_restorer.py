@@ -286,7 +286,7 @@ class FrameRestorer:
         if eof:
             logger.debug("clip restoration worker: stopped itself, EOF")
 
-    def _read_next_frame(self, video_frames_generator, expected_frame_num) -> Optional[tuple[bool, np.ndarray, int]]:
+    def _read_next_frame(self, video_frames_generator, expected_frame_num) -> Optional[tuple[bool, torch.Tensor, int]]:
         try:
             frame, frame_pts = next(video_frames_generator)
         except StopIteration:
@@ -322,13 +322,13 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with video_utils.VideoReader(self.video_meta_data.video_file) as video_reader:
+        with self.video_reader_writer_factory.create_video_reader(self.video_meta_data.video_file, batch_size=1) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
 
             video_frames_generator = video_reader.frames()
 
-            frame_num = self.start_frame
+            frame_num = self.start_frame 
             clips_remaining = True
             clip_buffer = []
 
