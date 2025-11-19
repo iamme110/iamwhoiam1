@@ -170,9 +170,22 @@ class Clip:
         return self.frames[item], self.masks[item], self.boxes[item]
 
 class MosaicDetector:
-    def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4):
+    def __init__(
+        self, 
+        model: MosaicDetectionModel, 
+        video_file: str, 
+        frame_detection_queue: queue.Queue, 
+        mosaic_clip_queue: queue.Queue, 
+        video_reader_writer_factory: video_utils.VideoReaderWriterFactory,
+        max_clip_length=30, 
+        clip_size=256, 
+        device=None, 
+        pad_mode='reflect', 
+        batch_size=4):
+
         self.model = model
         self.video_file = video_file
+        self.video_reader_writer_factory = video_reader_writer_factory
         self.device = torch.device(device) if device is not None else device
         self.max_clip_length = max_clip_length
         assert max_clip_length > 0
@@ -329,7 +342,7 @@ class MosaicDetector:
 
     def _frame_feeder_worker(self):
         logger.debug("frame feeder: started")
-        with video_utils.VideoReader(self.video_file) as video_reader:
+        with self.video_reader_writer_factory.create_video_reader(self.video_file, self.batch_size) as video_reader, torch.cuda.stream(video_reader.decoder_stream):
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
             video_frames_generator = video_reader.frames()
@@ -349,6 +362,8 @@ class MosaicDetector:
                     data = (frames_batch, frames, frame_num)
                     self.queue_stats["frame_feeder_queue_max_size"] = max(self.frame_feeder_queue.qsize()+1, self.queue_stats["frame_feeder_queue_max_size"])
                     s = time.time()
+                    if video_reader.decoder_stream is not None:
+                        video_reader.decoder_stream.synchronize()
                     self.frame_feeder_queue.put(data)
                     self.queue_stats["frame_feeder_queue_wait_time_put"] += time.time() - s
                     if self.stop_requested:

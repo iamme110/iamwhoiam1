@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Lada Authors
 # SPDX-License-Identifier: AGPL-3.0
 
+from sympy.logic import inference
 import torch
 from ultralytics.utils.checks import check_imgsz
 from ultralytics.utils import nms, ops
@@ -46,23 +47,31 @@ class MosaicDetectionModel:
         self.cpu_buffer = torch.empty(batch_size, 3, *img_shape, dtype=torch.uint8, device='cpu', pin_memory=True)
         self.inference_buffer = torch.empty(batch_size, 3, *img_shape, dtype=self.dtype, device=self.device, memory_format=torch.channels_last)
 
-    def preprocess(self, imgs: list[torch.Tensor]) -> list[torch.Tensor]:
+    def preprocess(self, imgs: list[torch.Tensor]) -> list[torch.Tensor]: # (H, W, C) -> (C, H, W)
+        input_device = imgs[0].device
+        if input_device.type == 'cuda':
+            im = torch.stack([x.permute(2, 0, 1) for x in imgs]).to(dtype=self.dtype, memory_format=torch.channels_last)
+            return self.letterbox(im)
         return [self.letterbox(im.permute(2, 0, 1).unsqueeze(0)).squeeze(0) for im in imgs]
 
     def inference(self, image_batch: torch.Tensor):
         return self.model(image_batch, augment=False, visualize=False, embed=None)
 
-    def inference_and_postprocess(self, imgs: list[torch.Tensor], orig_imgs: list[torch.Tensor]) -> list[Results]:
-        if self.cpu_buffer is None:
+    def inference_and_postprocess(self, imgs: list[torch.Tensor]|torch.Tensor, orig_imgs: list[torch.Tensor]) -> list[Results]:
+        cpu_input = imgs[0].device.type == 'cpu'
+        if self.cpu_buffer is None and cpu_input:
             self.preallocate_buffers(len(imgs), imgs[0].shape[1:])
 
         with torch.inference_mode():
-            cpu_buffer_view = self.cpu_buffer[:len(imgs)]
-            inference_view = self.inference_buffer[:len(imgs)]
-            torch.stack(imgs, dim=0, out=cpu_buffer_view)
-            inference_view.copy_(cpu_buffer_view, non_blocking=True)
-            inference_view.div_(255.0)
+            if cpu_input:
+                cpu_buffer_view = self.cpu_buffer[:len(imgs)]
+                inference_view = self.inference_buffer[:len(imgs)]
+                torch.stack(imgs, dim=0, out=cpu_buffer_view)
+                inference_view.copy_(cpu_buffer_view, non_blocking=True)
+            else:
+                inference_view = imgs
 
+            inference_view.div_(255.0)
             preds = self.inference(inference_view)
             return self.postprocess(preds, inference_view, orig_imgs)
 

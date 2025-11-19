@@ -7,7 +7,8 @@ import re
 import subprocess
 from contextlib import contextmanager
 from fractions import Fraction
-from typing import Callable, Iterator, Tuple, Optional, Union
+from typing import Callable, Iterator, Tuple, Optional, Union, List
+from abc import ABC, abstractmethod
 
 import av
 import cv2
@@ -69,9 +70,41 @@ def VideoReaderOpenCV(*args, **kwargs):
     finally:
         cap.release()
 
-class VideoReader:
-    def __init__(self, file):
+class VideoReaderBase(ABC):
+    def __init__(self, file: str, batch_size: int|None):
         self.file = file
+        self.batch_size = batch_size
+        self.decoder_stream = None
+    
+    @abstractmethod
+    def __enter__(self):
+        pass
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+    
+    @abstractmethod
+    def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
+        pass
+
+    @abstractmethod
+    def seek(self, offset_ns: int):
+        pass
+
+class VideoReaderWriterFactory:
+    def __init__(self, use_nvidia: bool, device: torch.device):
+        self.use_nvidia = use_nvidia
+        self.device = device
+    
+    def create_video_reader(self, file: str, batch_size: int) -> VideoReaderBase:
+        if self.use_nvidia:
+            from lada.lib.video_nvidia_utils import NvidiaVideoReader
+            return NvidiaVideoReader(file, batch_size, self.device)
+        return VideoReader(file)
+
+class VideoReader(VideoReaderBase):
+    def __init__(self, file: str):
+        super().__init__(file, batch_size=None)
         self.container = None
 
     def __enter__(self):
@@ -84,7 +117,7 @@ class VideoReader:
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
 
-    def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
+    def frames(self) -> Iterator[Tuple[List[torch.Tensor], List[int]]]:
         self.container.streams.video[0].thread_type = 'AUTO'
         
         for frame in self.container.decode(video=0):

@@ -12,9 +12,9 @@ import torch
 
 from lada import MODEL_WEIGHTS_DIR, VERSION
 from lada.cli import utils
-from lada.lib import audio_utils
+from lada.lib import audio_utils, os_utils
 from lada.lib.frame_restorer import load_models, FrameRestorer
-from lada.lib.video_utils import get_video_meta_data, VideoWriter
+from lada.lib.video_utils import get_video_meta_data, VideoWriter, VideoReaderWriterFactory
 
 def setup_argparser() -> argparse.ArgumentParser:
     examples_header_text = _("Examples:")
@@ -44,11 +44,12 @@ def setup_argparser() -> argparse.ArgumentParser:
         add_help=False)
 
     group_general = parser.add_argument_group(_('General'))
-    group_general.add_argument('--input', type=str, help=_('Path to pixelated video file or directory containing video files'))
-    group_general.add_argument('--output', type=str, help=_('Path used to save output file(s). If path is a directory then file name will be chosen automatically (see --output-file-pattern). If no output path was given then the directory of the input file will be used'))
+    group_general.add_argument('--input', default=r"K:\lada\tests\test3-decensor-original.mp4", type=str, help=_('Path to pixelated video file or directory containing video files'))
+    group_general.add_argument('--output', default=r"K:\lada\tests\test3-decensor.hw.mp4", type=str, help=_('Path used to save output file(s). If path is a directory then file name will be chosen automatically (see --output-file-pattern). If no output path was given then the directory of the input file will be used'))
     group_general.add_argument('--output-file-pattern', type=str, default="{orig_file_name}.restored.mp4", help=_("Pattern used to determine output file name(s). Used when input is a directory or a file with no output path specified"))
     group_general.add_argument('--device', type=str, default="cuda:0", help=_('Device used for running Restoration and Detection models. Use "cpu" or "cuda". If you have multiple GPUs you can select a specific one via index e.g. "cuda:0" (default: %(default)s)'))
     group_general.add_argument('--fp16', action=argparse.BooleanOptionalAction, default=torch.cuda.is_available(), help=_("Use FP16 precision for restoration and detection models. Reduces memory usage, defaults to true if CUDA is available"))
+    group_general.add_argument('--use-nvidia-decoder-encoder', action=argparse.BooleanOptionalAction, default=os_utils.is_valid_nvidia_gpu_available(), help=_("Use Nvidia decoder/encoder for improved performance at cost of higher VRAM usage. Defaults to true on newer Nvidia GPUs with at least 8GB VRAM. (default: %(default)s)"))
     group_general.add_argument('--list-devices', action='store_true', help=_("List available devices and exit"))
     group_general.add_argument('--version', action='store_true', help=_("Display version and exit"))
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
@@ -69,17 +70,18 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_restoration.add_argument('--max-clip-length', type=int, default=180, help=_('Maximum number of frames for restoration. Higher values improve temporal stability. Lower values reduce memory footprint. If set too low flickering could appear (default: %(default)s)'))
 
     group_detection = parser.add_argument_group(_('Mosaic Detection'))
-    group_detection.add_argument('--mosaic-detection-model-path', type=str, default=os.path.join(MODEL_WEIGHTS_DIR, 'lada_mosaic_detection_model_v3.1_fast.pt'), help=_("Path to restoration model weights file (default: %(default)s)"))
+    group_detection.add_argument('--mosaic-detection-model-path', type=str, default=os.path.join(MODEL_WEIGHTS_DIR, 'lada_mosaic_detection_model_v2.pt'), help=_("Path to restoration model weights file (default: %(default)s)"))
     group_detection.add_argument('--list-mosaic-detection-models', action='store_true', help=_("List available detection model weights found in MODEL_WEIGHTS_DIR and exit (default location is './model_weights' if not overwritten by environment variable MODEL_WEIGHTS_DIR)"))
 
     return parser
 
 def process_video_file(input_path: str, output_path: str, device: torch.device, mosaic_restoration_model, mosaic_detection_model,
-                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, moov_front, preset, custom_encoder_options):
+                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, moov_front, preset, custom_encoder_options,
+                       video_reader_writer_factory: VideoReaderWriterFactory):
     video_metadata = get_video_meta_data(input_path)
 
     frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
-                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
+                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode, video_reader_writer_factory)
     success = True
     video_tmp_file_output_path = os.path.join(tempfile.gettempdir(), f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
     pathlib.Path(output_path).parent.mkdir(exist_ok=True, parents=True)
@@ -159,14 +161,15 @@ def main():
     input_files, output_files = utils.setup_input_and_output_paths(args.input, args.output, args.output_file_pattern)
 
     single_file_input = len(input_files) == 1
-
+    video_reader_writer_factory = VideoReaderWriterFactory(args.use_nvidia_decoder_encoder, device=device)
     for input_path, output_path in zip(input_files, output_files):
         if not single_file_input:
             print(f"{os.path.basename(input_path)}:")
         try:
             process_video_file(input_path=input_path, output_path=output_path, device=device, mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
                                mosaic_restoration_model_name=args.mosaic_restoration_model, preferred_pad_mode=preferred_pad_mode, max_clip_length=args.max_clip_length,
-                               codec=args.codec, crf=args.crf, moov_front=args.moov_front, preset=args.preset, custom_encoder_options=args.custom_encoder_options)
+                               codec=args.codec, crf=args.crf, moov_front=args.moov_front, preset=args.preset, custom_encoder_options=args.custom_encoder_options,
+                               video_reader_writer_factory=video_reader_writer_factory)
         except KeyboardInterrupt:
             print(_("Received Ctrl-C, stopping restoration."))
             break

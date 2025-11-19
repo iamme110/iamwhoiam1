@@ -59,12 +59,16 @@ def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_le
 def inference(model, video: list[torch.Tensor], max_frames=-1):
     input_frame_count = len(video)
     input_frame_shape = video[0].shape
-    with torch.inference_mode():
-        cpu_buffer_view = model.cpu_buffer[0][:input_frame_count]
-        inference_view = model.inference_buffer[:, :input_frame_count]
+    is_cpu_input = video[0].device.type == 'cpu'
+    inference_view = model.inference_buffer[:, :input_frame_count]
 
-        torch.stack([x.permute(2, 0, 1) for x in video], dim=0, out=cpu_buffer_view)
-        inference_view.copy_(cpu_buffer_view, non_blocking=True)
+    with torch.inference_mode():
+        if is_cpu_input:
+            cpu_buffer_view = model.cpu_buffer[0][:input_frame_count]
+            torch.stack([x.permute(2, 0, 1) for x in video], dim=0, out=cpu_buffer_view)
+            inference_view.copy_(cpu_buffer_view, non_blocking=True)
+        else:
+            torch.stack([x.permute(2, 0, 1) for x in video], dim=0, out=inference_view[0])
         inference_view.div_(255.0)
 
         if max_frames > 0:
