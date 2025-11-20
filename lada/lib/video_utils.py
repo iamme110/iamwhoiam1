@@ -7,7 +7,7 @@ import re
 import subprocess
 from contextlib import contextmanager
 from fractions import Fraction
-from typing import Callable
+from typing import Callable, Iterator, Tuple
 from collections import deque
 import heapq
 
