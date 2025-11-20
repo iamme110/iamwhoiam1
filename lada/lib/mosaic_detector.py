@@ -73,6 +73,18 @@ class Scene:
         last_scene_box = self.boxes[-1]
         return box_overlap(last_scene_box, box)
 
+    def get_max_width_height(self):
+        max_width = 0
+        max_height = 0
+        for box in self.boxes:
+            t, l, b, r = box
+            width, height = r - l + 1, b - t + 1
+            if height > max_height:
+                max_height = height
+            if width > max_width:
+                max_width = width
+        return max_width, max_height
+
     def __iter__(self):
         return self
 
@@ -178,6 +190,9 @@ class MosaicDetector:
         assert max_clip_length > 0
         self.clip_size = clip_size
         self.pad_mode = pad_mode
+
+        # Calculate dynamic clip size based on typical video resolutions to reduce pixelation
+        self.dynamic_clip_sizes = self._calculate_dynamic_clip_sizes(device)
         self.clip_counter = 0
         self.start_ns = 0
         self.start_frame = 0
@@ -206,6 +221,56 @@ class MosaicDetector:
         self.queue_stats["inference_queue_wait_time_put"] = 0
         self.queue_stats["inference_queue_wait_time_get"] = 0
         self.queue_stats["inference_queue_max_size"] = 0
+
+    def _calculate_dynamic_clip_sizes(self, device):
+        """Calculate safe clip sizes based on device VRAM and typical mosaic sizes."""
+        if device is None or device.type != 'cuda':
+            # CPU or no GPU: use conservative sizes
+            return [256, 384, 512]
+
+        try:
+            # Get available VRAM in MB
+            vram_mb = torch.cuda.get_device_properties(device).total_memory // (1024 * 1024)
+            # Reserve some for other operations
+            available_mb = vram_mb * 0.8
+
+            # Calculate max clip size: assume 3 channels, 30 max_clip_length, float16 (2 bytes)
+            # Formula: clip_size^2 * 3 * 30 * 2 * safety_factor
+            max_clip_size = int((available_mb * 1024 * 1024) / (3 * self.max_clip_length * 2 * 2)) ** 0.5
+            max_clip_size = min(max_clip_size, 1024)  # Cap at 1024 to avoid excessive memory
+            max_clip_size = max(max_clip_size, 256)   # Minimum 256
+
+            # Provide tiered sizes: small, medium, large
+            sizes = []
+            sizes.append(256)  # Always include base size
+            if max_clip_size >= 384:
+                sizes.append(384)
+            if max_clip_size >= 512:
+                sizes.append(512)
+            if max_clip_size >= 768 and max_clip_size >= 768:
+                sizes.append(768)
+            if max_clip_size >= 1024:
+                sizes.append(1024)
+
+            logger.debug(f"Dynamic clip sizes for {vram_mb}MB VRAM: {sizes}")
+            return sizes
+        except Exception as e:
+            logger.warning(f"Failed to calculate dynamic clip sizes: {e}, using defaults")
+            return [256, 384, 512]
+
+    def _get_clip_size_for_mosaic_area(self, width, height):
+        """Select appropriate clip size based on mosaic area to minimize pixelation."""
+        area = width * height
+
+        # Thresholds based on common resolutions and pixelation impact
+        if area <= 256 * 256:  # Small mosaics: use base size
+            return self.dynamic_clip_sizes[0]
+        elif area <= 512 * 512:  # Medium mosaics
+            return self.dynamic_clip_sizes[1] if len(self.dynamic_clip_sizes) > 1 else self.dynamic_clip_sizes[0]
+        elif area <= 1024 * 1024:  # Large mosaics
+            return self.dynamic_clip_sizes[2] if len(self.dynamic_clip_sizes) > 2 else self.dynamic_clip_sizes[-1]
+        else:  # Very large mosaics: use largest available
+            return self.dynamic_clip_sizes[-1]
 
     def start(self, start_ns):
         assert self.frame_feeder_queue.empty()
@@ -283,7 +348,10 @@ class MosaicDetector:
                         completed_scenes.append(other_scene)
 
         for completed_scene in sorted(completed_scenes, key=lambda s: s.frame_start):
-            clip = Clip(completed_scene, self.clip_size, self.pad_mode, self.clip_counter)
+            # Calculate dynamic clip size based on the largest mosaic in this scene
+            max_width, max_height = completed_scene.get_max_width_height()
+            dynamic_clip_size = self._get_clip_size_for_mosaic_area(max_width, max_height)
+            clip = Clip(completed_scene, dynamic_clip_size, self.pad_mode, self.clip_counter)
             self.queue_stats["mosaic_clip_queue_max_size"] = max(self.mosaic_clip_queue.qsize()+1, self.queue_stats["mosaic_clip_queue_max_size"])
             s = time.time()
             self.mosaic_clip_queue.put(clip)
