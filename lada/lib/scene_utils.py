@@ -1,12 +1,15 @@
 # SPDX-FileCopyrightText: Lada Authors
 # SPDX-License-Identifier: AGPL-3.0
 
+import logging
 import math
 
 from lada.lib import Box, Mask, Image
 
+logger = logging.getLogger(__name__)
 
-def crop_to_box_v3(box: Box, img: Image, mask_img: Mask, target_size: tuple[int, int], max_box_expansion_factor=1.0, border_size=0):
+
+def crop_to_box_v3(box: Box, img: Image, mask_img: Mask, target_size: tuple[int, int], max_box_expansion_factor=1.0, border_size=0, large_mosaic_threshold=512):
     """
     Crops Mask and Image by using Box. Will try to grow Box to better fit target size
     Parameters
@@ -17,6 +20,7 @@ def crop_to_box_v3(box: Box, img: Image, mask_img: Mask, target_size: tuple[int,
     target_size
     max_box_expansion_factor: Limits how much to grow the Box before cropping. Could be useful for tiny Boxes (compared to given target size)
     border_size: includes area outside of box. useful to additional context outside the box detection
+    large_mosaic_threshold: Pixel threshold above which border is reduced to prevent pixelation
 
     Returns
     -------
@@ -27,8 +31,9 @@ def crop_to_box_v3(box: Box, img: Image, mask_img: Mask, target_size: tuple[int,
     width, height = r - l + 1,  b - t + 1
     # Reduce border for larger mosaics to avoid excessive downscaling that causes pixelation
     max_dim = max(width, height)
-    if max_dim > 512:
-        # Reduce border by half for mosaics larger than 512px to prevent pixelation
+    if max_dim > large_mosaic_threshold:
+        logger.debug(f"Reducing border for large mosaic ({max_dim}px > {large_mosaic_threshold}px) to prevent pixelation")
+        # Reduce border by half for mosaics larger than threshold to prevent pixelation
         border_size *= 0.5
     border_size = max(10, int(max(width, height) * border_size)) if border_size > 0. else 0
     t, l, b, r = max(0, t-border_size), max(0, l-border_size), min(img.shape[0]-1, b+border_size), min(img.shape[1]-1, r+border_size)
