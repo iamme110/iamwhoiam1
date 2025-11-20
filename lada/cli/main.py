@@ -44,8 +44,8 @@ def setup_argparser() -> argparse.ArgumentParser:
         add_help=False)
 
     group_general = parser.add_argument_group(_('General'))
-    group_general.add_argument('--input', default=r"K:\lada\tests\test3-decensor-original.mp4", type=str, help=_('Path to pixelated video file or directory containing video files'))
-    group_general.add_argument('--output', default=r"K:\lada\tests\test3-decensor.hw.mp4", type=str, help=_('Path used to save output file(s). If path is a directory then file name will be chosen automatically (see --output-file-pattern). If no output path was given then the directory of the input file will be used'))
+    group_general.add_argument('--input', type=str, help=_('Path to pixelated video file or directory containing video files'))
+    group_general.add_argument('--output', type=str, help=_('Path used to save output file(s). If path is a directory then file name will be chosen automatically (see --output-file-pattern). If no output path was given then the directory of the input file will be used'))
     group_general.add_argument('--output-file-pattern', type=str, default="{orig_file_name}.restored.mp4", help=_("Pattern used to determine output file name(s). Used when input is a directory or a file with no output path specified"))
     group_general.add_argument('--device', type=str, default="cuda:0", help=_('Device used for running Restoration and Detection models. Use "cpu" or "cuda". If you have multiple GPUs you can select a specific one via index e.g. "cuda:0" (default: %(default)s)'))
     group_general.add_argument('--fp16', action=argparse.BooleanOptionalAction, default=torch.cuda.is_available(), help=_("Use FP16 precision for restoration and detection models. Reduces memory usage, defaults to true if CUDA is available"))
@@ -70,7 +70,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_restoration.add_argument('--max-clip-length', type=int, default=180, help=_('Maximum number of frames for restoration. Higher values improve temporal stability. Lower values reduce memory footprint. If set too low flickering could appear (default: %(default)s)'))
 
     group_detection = parser.add_argument_group(_('Mosaic Detection'))
-    group_detection.add_argument('--mosaic-detection-model-path', type=str, default=os.path.join(MODEL_WEIGHTS_DIR, 'lada_mosaic_detection_model_v2.pt'), help=_("Path to restoration model weights file (default: %(default)s)"))
+    group_detection.add_argument('--mosaic-detection-model-path', type=str, default=os.path.join(MODEL_WEIGHTS_DIR, 'lada_mosaic_detection_model_v3.1_fast.pt'), help=_("Path to restoration model weights file (default: %(default)s)"))
     group_detection.add_argument('--list-mosaic-detection-models', action='store_true', help=_("List available detection model weights found in MODEL_WEIGHTS_DIR and exit (default location is './model_weights' if not overwritten by environment variable MODEL_WEIGHTS_DIR)"))
 
     return parser
@@ -91,7 +91,8 @@ def process_video_file(input_path: str, output_path: str, device: torch.device, 
         with VideoWriter(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
                          video_metadata.video_fps_exact, codec=codec, crf=crf, moov_front=moov_front,
                          time_base=video_metadata.time_base, preset=preset,
-                         custom_encoder_options=custom_encoder_options) as video_writer:
+                         custom_encoder_options=custom_encoder_options,
+                         dst_color_space=video_metadata.color_space, dst_color_range=video_metadata.color_range, dst_pix_fmt=video_metadata.pix_fmt) as video_writer:
             frame_restorer_progressbar = utils.Progressbar(video_metadata, frame_restorer)
             for elem in frame_restorer_progressbar:
                 if elem is None:
@@ -99,7 +100,7 @@ def process_video_file(input_path: str, output_path: str, device: torch.device, 
                     print("Error on export: frame restorer stopped prematurely")
                     break
                 (restored_frame, restored_frame_pts) = elem
-                video_writer.write(restored_frame, restored_frame_pts, bgr2rgb=True)
+                video_writer.write(restored_frame, restored_frame_pts, bgr2rgb=True, apply_colorspace=video_reader_writer_factory.use_nvidia)
                 frame_restorer_progressbar.update()
                 frame_restorer_progressbar.update_time_remaining_and_speed()
     except (Exception, KeyboardInterrupt) as e:

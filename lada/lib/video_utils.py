@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from fractions import Fraction
 from typing import Callable, Iterator, Tuple, Optional, Union, List
 from abc import ABC, abstractmethod
+from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 import av
 import cv2
@@ -16,6 +17,24 @@ import torch
 import numpy as np
 
 from lada.lib import Image, Mask, VideoMetadata, os_utils
+
+def _ffprobe_colorspace_to_av_colorspace(cs: Optional[str]) -> AvColorspace:
+    s = (cs or '').strip().lower()
+    if s in ("bt709", "rec709", "rec.709", "bt.709"):
+        return AvColorspace.ITU709
+    if s in ("smpte170m", "bt470bg", "bt601", "bt.601", "bt470m"):
+        return AvColorspace.ITU601
+    if s == "smpte240m":
+        return AvColorspace.SMPTE240M
+    return AvColorspace.ITU709
+
+def _ffprobe_range_to_av_range(r: Optional[str]) -> AvColorRange:
+    s = (r or '').strip().lower()
+    if s in ("pc", "full", "jpeg"):
+        return AvColorRange.JPEG
+    if s in ("tv", "limited", "mpeg"):
+        return AvColorRange.MPEG
+    return AvColorRange.MPEG
 
 
 def read_video_frames(path: str, float32: bool = True, start_idx: int = 0, end_idx: int | None = None, normalize_neg1_pos1 = False, binary_frames=False) -> list[np.ndarray]:
@@ -172,7 +191,10 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         frames_count=frame_count,
         duration=float(json_video_stream.get('duration', json_video_format['duration'])),
         time_base=time_base,
-        start_pts=start_pts
+        start_pts=start_pts,
+        color_space=json_video_stream.get('color_space'),
+        color_range=json_video_stream.get('color_range'),
+        pix_fmt=json_video_stream.get('pix_fmt'),
     )
     return metadata
 
@@ -290,7 +312,20 @@ class VideoWriter:
         encoder_defaults['hevc'] = libx265
         return encoder_defaults
 
-    def __init__(self, output_path, width, height, fps, codec, crf=None, preset=None, time_base=None, moov_front=False, custom_encoder_options=None):
+    def __init__(
+        self, 
+        output_path, 
+        width, height,
+        fps, 
+        codec,
+        crf=None, 
+        preset=None, 
+        time_base=None, 
+        moov_front=False, 
+        custom_encoder_options=None,
+        dst_color_space: str|None = None,
+        dst_color_range: str|None = None,
+        dst_pix_fmt: str|None = None):
         container_options = {"movflags": "+frag_keyframe+empty_moov+faststart"} if moov_front else {}
         encoder_defaults = self.get_default_encoder_options()
         encoder_options = encoder_defaults.get(codec, {})
@@ -315,6 +350,7 @@ class VideoWriter:
         video_stream_out.thread_count = 0
         video_stream_out.thread_type = 3
         video_stream_out.time_base = time_base
+        video_stream_out.pix_fmt = dst_pix_fmt
 
         # up until PyAV 15.5.0 it was enough to set these settings on the stream only.
         video_stream_out.codec_context.width = width
@@ -322,10 +358,14 @@ class VideoWriter:
         video_stream_out.codec_context.thread_count = 0
         video_stream_out.codec_context.thread_type = 3
         video_stream_out.codec_context.time_base = time_base
+        video_stream_out.codec_context.pix_fmt = dst_pix_fmt
 
         video_stream_out.options = encoder_options
         self.output_container = output_container
         self.video_stream = video_stream_out
+        self.dst_colorspace_enum = _ffprobe_colorspace_to_av_colorspace(dst_color_space)
+        self.dst_range_enum = _ffprobe_range_to_av_range(dst_color_range)
+        self.dst_pix_fmt = dst_pix_fmt if dst_pix_fmt else 'yuv420p'
 
     def __enter__(self):
         return self
@@ -333,12 +373,18 @@ class VideoWriter:
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
-    def write(self, frame, frame_pts=None, bgr2rgb=False):
+    def write(self, frame, frame_pts=None, bgr2rgb=False, apply_colorspace=False):
         if isinstance(frame, torch.Tensor):
             frame = frame.cpu().numpy()
         if bgr2rgb:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         out_frame = av.VideoFrame.from_ndarray(frame, format='rgb24')
+        if apply_colorspace:
+            out_frame = out_frame.reformat(             
+                format=self.dst_pix_fmt,                
+                dst_colorspace=self.dst_colorspace_enum,
+                dst_color_range=self.dst_range_enum,    
+            )                                           
         if frame_pts:
             out_frame.pts = frame_pts
         out_packet = self.video_stream.encode(out_frame)

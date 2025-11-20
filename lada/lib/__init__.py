@@ -47,6 +47,9 @@ class VideoMetadata:
     duration: float
     time_base: Fraction
     start_pts: int
+    color_space: str | None
+    color_range: str | None
+    pix_fmt: str | None
 
 @dataclass
 class Detection:
