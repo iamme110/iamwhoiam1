@@ -25,7 +25,10 @@ def crop_to_box_v3(box: Box, img: Image, mask_img: Mask, target_size: tuple[int,
     target_width, target_height = target_size
     t, l, b, r = box
     width, height = r - l + 1,  b - t + 1
-    border_size = max(20, int(max(width, height) * border_size)) if border_size > 0. else 0
+    # Reduce border for larger mosaics to avoid excessive downscaling
+    if width > 512 or height > 512:
+        border_size *= 0.5  # Reduce by half for large mosaics
+    border_size = max(10, int(max(width, height) * border_size)) if border_size > 0. else 0
     t, l, b, r = max(0, t-border_size), max(0, l-border_size), min(img.shape[0]-1, b+border_size), min(img.shape[1]-1, r+border_size)
     width, height = r - l + 1,  b - t + 1
     down_scale_factor = min(target_width / width, target_height / height)
