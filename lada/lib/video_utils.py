@@ -10,6 +10,7 @@ from fractions import Fraction
 from typing import Callable, Iterator, Tuple
 from collections import deque
 import heapq
+from functools import lru_cache
 
 import av
 import cv2
@@ -373,47 +374,113 @@ def get_available_video_encoder_codecs():
 
 
 class VideoThumbnailer:
-    """Generate video thumbnails at specific timestamps"""
+    """Generate video thumbnails at specific timestamps using OpenCV for fast seeking"""
 
     def __init__(self, video_path: str):
         self.video_path = video_path
-        self.container = None
-        self.metadata = None
+        self.cap = None
+        # LRU cache for recently accessed frames to avoid re-seeking for nearby timestamps
+        self._frame_cache = {}
+        self._cache_max_size = 20  # Increased cache size for better performance
+        self._cache_access_order = []  # Track access order for LRU
 
     def __enter__(self):
-        self.metadata = get_video_meta_data(self.video_path)
-        self.container = av.open(self.video_path, metadata_errors='ignore')
+        if self.cap is None:
+            self.cap = cv2.VideoCapture(self.video_path)
+            if not self.cap.isOpened():
+                raise Exception(f"Unable to open video file: {self.video_path}")
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.container:
-            self.container.close()
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+        self._frame_cache.clear()
+        self._cache_access_order.clear()
+
+    def _ensure_open(self):
+        """Ensure the video capture is open"""
+        if self.cap is None:
+            self.cap = cv2.VideoCapture(self.video_path)
+            if not self.cap.isOpened():
+                raise Exception(f"Unable to open video file: {self.video_path}")
+
+    def close(self):
+        """Close the video capture"""
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+        self._frame_cache.clear()
+        self._cache_access_order.clear()
+
+    def _get_cached_frame(self, timestamp_ms: float) -> np.ndarray | None:
+        """Get frame from cache if available and recent enough"""
+        # Round to nearest 100ms for caching (avoids too many cache entries)
+        cache_key = round(timestamp_ms / 100) * 100
+
+        if cache_key in self._frame_cache:
+            # Move to end of access order (most recently used)
+            if cache_key in self._cache_access_order:
+                self._cache_access_order.remove(cache_key)
+            self._cache_access_order.append(cache_key)
+            return self._frame_cache[cache_key].copy()
+        return None
+
+    def _cache_frame(self, timestamp_ms: float, frame: np.ndarray):
+        """Add frame to cache with LRU eviction"""
+        cache_key = round(timestamp_ms / 100) * 100
+
+        # Remove from access order if already exists
+        if cache_key in self._cache_access_order:
+            self._cache_access_order.remove(cache_key)
+
+        # Add to cache
+        self._frame_cache[cache_key] = frame.copy()
+        self._cache_access_order.append(cache_key)
+
+        # Evict least recently used if cache is full
+        if len(self._frame_cache) > self._cache_max_size:
+            oldest_key = self._cache_access_order.pop(0)
+            del self._frame_cache[oldest_key]
+
+    @lru_cache(maxsize=100)
+    def _get_video_fps(self) -> float:
+        """Get video FPS with caching"""
+        return self.cap.get(cv2.CAP_PROP_FPS)
 
     def get_thumbnail(self, timestamp_ns: int, width: int = 160, height: int = 90) -> np.ndarray | None:
-        """Generate thumbnail at specified timestamp in nanoseconds"""
+        """Generate thumbnail at specified timestamp in nanoseconds using fast OpenCV seeking"""
         try:
-            # Convert nanoseconds to seconds for seeking
-            timestamp_seconds = timestamp_ns / 1_000_000_000
+            # Ensure video capture is open
+            self._ensure_open()
 
-            # Seek to timestamp
-            seek_offset = int(timestamp_seconds * av.time_base)
-            self.container.seek(seek_offset, stream=self.container.streams.video[0])
+            # Convert nanoseconds to milliseconds for OpenCV
+            timestamp_ms = timestamp_ns / 1_000_000
 
-            # Decode frames until we find one after our timestamp
-            for frame in self.container.decode(video=0):
-                # Convert frame timestamp to nanoseconds
-                frame_timestamp_ns = int((frame.pts * frame.time_base) * 1_000_000_000)
+            # Check cache first
+            cached_frame = self._get_cached_frame(timestamp_ms)
+            if cached_frame is not None:
+                # Resize cached frame to requested dimensions
+                return cv2.resize(cached_frame, (width, height), interpolation=cv2.INTER_LINEAR)
 
-                # If we're at or past the requested timestamp, use this frame
-                if frame_timestamp_ns >= timestamp_ns:
-                    # Convert to numpy array (BGR format)
-                    thumbnail = frame.to_ndarray(format='bgr24')
+            # Fast seek: OpenCV CAP_PROP_POS_MSEC allows direct timestamp seeking
+            # This is much faster than PyAV's frame-by-frame decoding
+            self.cap.set(cv2.CAP_PROP_POS_MSEC, timestamp_ms)
 
-                    # Resize to target dimensions
-                    thumbnail = cv2.resize(thumbnail, (width, height), interpolation=cv2.INTER_LINEAR)
+            # Read the frame at the exact timestamp
+            ret, frame = self.cap.read()
 
-                    return thumbnail
+            if ret and frame is not None:
+                # Cache the original frame before resizing
+                self._cache_frame(timestamp_ms, frame)
+
+                # Resize to target dimensions using fast interpolation
+                thumbnail = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
+                return thumbnail
 
             return None
-        except Exception:
+
+        except Exception as e:
+            # Log error for debugging but don't crash
+            print(f"Error generating thumbnail at {timestamp_ns}: {e}")
             return None
