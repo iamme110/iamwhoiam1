@@ -4,6 +4,7 @@
 import logging
 import pathlib
 import threading
+import time
 
 import cv2
 import numpy as np
@@ -61,6 +62,12 @@ class PreviewView(Gtk.Widget):
         self._buffer_queue_min_thresh_time_auto_max = 8.
         self._buffer_queue_min_thresh_time_auto = self._buffer_queue_min_thresh_time_auto_min
         self._shortcuts_manager: ShortcutsManager | None = None
+
+        # Shared VideoThumbnailer instance for seek preview
+        self._video_thumbnailer: video_utils.VideoThumbnailer | None = None
+        self._thumbnailer_lock = threading.Lock()
+        self._thread_counter = 0
+        self._thread_counter_lock = threading.Lock()
 
         self.eos = False
 
@@ -461,10 +468,23 @@ class PreviewView(Gtk.Widget):
                 if not file_path:
                     return
 
-                with video_utils.VideoThumbnailer(file_path) as thumbnailer:
-                    thumbnail = thumbnailer.get_thumbnail(timestamp_ns, width=self._current_thumbnail_size[0], height=self._current_thumbnail_size[1])
+                # Use shared VideoThumbnailer with proper thread synchronization
+                with self._thumbnailer_lock:
+                    if self._video_thumbnailer is None:
+                        self._video_thumbnailer = video_utils.VideoThumbnailer(file_path)
 
-                    if thumbnail is not None:
+                    # Increment thread counter for this request
+                    with self._thread_counter_lock:
+                        self._thread_counter += 1
+                        current_thread_id = self._thread_counter
+
+                    thumbnail = self._video_thumbnailer.get_thumbnail(timestamp_ns, width=self._current_thumbnail_size[0], height=self._current_thumbnail_size[1])
+
+                    # Check if this thread should still update (not cancelled by newer request)
+                    with self._thread_counter_lock:
+                        should_update = current_thread_id == self._thread_counter
+
+                    if thumbnail is not None and should_update:
                         # Convert BGR to RGB for GdkPixbuf
                         rgb_thumbnail = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2RGB)
 
@@ -489,17 +509,27 @@ class PreviewView(Gtk.Widget):
                             return False
 
                         GLib.idle_add(update_ui)
+                    elif not should_update:
+                        # This request was cancelled, don't update UI
+                        pass
+                    else:
+                        # Failed to get thumbnail, hide spinner
+                        def hide_spinner():
+                            self.seek_preview_spinner.stop()
+                            self.seek_preview_spinner.set_visible(False)
+                            return False
+                        GLib.idle_add(hide_spinner)
 
             except Exception as e:
                 logger.error(f"Error generating seek preview thumbnail: {e}")
                 # Hide spinner and show error state if needed
                 def hide_spinner():
-                    self.seek_preview_spinner.stop()
-                    self.seek_preview_spinner.set_visible(False)
+                    if hasattr(self, 'seek_preview_spinner'):
+                        self.seek_preview_spinner.stop()
+                        self.seek_preview_spinner.set_visible(False)
                     return False
                 GLib.idle_add(hide_spinner)
 
-        import threading
         threading.Thread(target=generate_thumbnail, daemon=True).start()
 
     def play_file(self, idx):
@@ -706,6 +736,11 @@ class PreviewView(Gtk.Widget):
         if not self.pipeline_manager:
             return
         self._video_preview_init_done = False
+        # Close VideoThumbnailer
+        with self._thumbnailer_lock:
+            if self._video_thumbnailer:
+                self._video_thumbnailer.__exit__(None, None, None)
+                self._video_thumbnailer = None
         if block:
             self.pipeline_manager.close_video_file()
         else:
