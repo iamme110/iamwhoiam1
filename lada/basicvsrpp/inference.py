@@ -30,7 +30,7 @@ def get_default_gan_inference_config() -> dict:
         ))
 
 
-def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_length):
+def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_length, max_clip_size=1024):
     register_all_modules()
     if device and type(device) == str:
         device = torch.device(device)
@@ -45,21 +45,26 @@ def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_le
     model.cfg = config
     model = model.to(device).eval()
     model.device = device
-    model.cpu_buffer = torch.empty(1, clip_length, 3, 256, 256, dtype=torch.uint8, device='cpu', pin_memory=True)
+    model.cpu_buffer = torch.empty(1, clip_length, 3, max_clip_size, max_clip_size, dtype=torch.uint8, device='cpu', pin_memory=True)
     if fp16:
         model.dtype = torch.float16
         model = model.half()
     else:
         model.dtype = torch.float32
 
-    model.inference_buffer = torch.empty(1, clip_length, 3, 256, 256, dtype=model.dtype, device=device, memory_format=torch.channels_last_3d)
+    model.inference_buffer = torch.empty(1, clip_length, 3, max_clip_size, max_clip_size, dtype=model.dtype, device=device, memory_format=torch.channels_last_3d)
     return model
 
 
 def inference(model, video: list[torch.Tensor], max_frames=-1):
     input_frame_count = len(video)
     input_frame_shape = video[0].shape
+    h, w = input_frame_shape[:2]
     with torch.inference_mode():
+        # Resize buffers dynamically for each inference call to match current clip size
+        model.cpu_buffer = torch.empty(1, input_frame_count, 3, h, w, dtype=torch.uint8, device='cpu', pin_memory=True)
+        model.inference_buffer = torch.empty(1, input_frame_count, 3, h, w, dtype=model.dtype, device=model.device, memory_format=torch.channels_last_3d)
+
         cpu_buffer_view = model.cpu_buffer[0][:input_frame_count]
         inference_view = model.inference_buffer[:, :input_frame_count]
 
