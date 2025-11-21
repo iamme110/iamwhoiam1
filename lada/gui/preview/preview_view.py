@@ -4,10 +4,7 @@
 import logging
 import pathlib
 import threading
-import time
 
-import cv2
-import numpy as np
 from gi.repository import Gtk, GObject, GLib, Gio, Gst, Adw, Gdk, GdkPixbuf, Graphene
 
 from lada import LOG_LEVEL
@@ -19,6 +16,7 @@ from lada.gui.frame_restorer_provider import FrameRestorerProvider, FrameRestore
 from lada.gui.preview.fullscreen_mouse_activity_controller import FullscreenMouseActivityController
 from lada.gui.preview.gstreamer_pipeline_manager import PipelineManager, PipelineState
 from lada.gui.preview.headerbar_files_drop_down import HeaderbarFilesDropDown
+from lada.gui.preview.seek_preview_popover import SeekPreviewPopover
 from lada.gui.preview.timeline import Timeline
 from lada.gui.shortcuts import ShortcutsManager
 from lada.lib import audio_utils, video_utils
@@ -318,12 +316,12 @@ class PreviewView(Gtk.Widget):
                 label_text = self.get_time_label_text(cursor_position_ns)
                 self.label_cursor_time.set_text(label_text)
                 # Hide any existing seek preview popover
-                if hasattr(self, 'seek_preview_popover') and self.seek_preview_popover.get_visible():
+                if hasattr(self, 'seek_preview_popover'):
                     self.seek_preview_popover.popdown()
         else:
             # Hide both cursor time label and seek preview when mouse leaves
             self.label_cursor_time.set_visible(False)
-            if hasattr(self, 'seek_preview_popover') and self.seek_preview_popover.get_visible():
+            if hasattr(self, 'seek_preview_popover'):
                 self.seek_preview_popover.popdown()
 
     def _get_seek_preview_popover_pointing_rect(self, mouse_x: float) -> Gdk.Rectangle:
@@ -381,71 +379,19 @@ class PreviewView(Gtk.Widget):
         self._last_seek_preview_mouse_x = mouse_x
 
         # Hide existing popover if visible
-        if hasattr(self, 'seek_preview_popover') and self.seek_preview_popover.get_visible():
+        if hasattr(self, 'seek_preview_popover'):
             self.seek_preview_popover.popdown()
-
-        # Create popover if it doesn't exist
-        if not hasattr(self, 'seek_preview_popover'):
-            self.seek_preview_popover = Gtk.Popover.new()
-            self.seek_preview_popover.set_autohide(False)
-            self.seek_preview_popover.set_position(Gtk.PositionType.TOP)  # Remove arrow, make it a plain rectangle
-
-            # Create overlay for thumbnail area (spinner + picture) above timecode
-            overlay = Gtk.Overlay()
-            overlay.set_margin_start(2)
-            overlay.set_margin_end(2)
-            overlay.set_margin_top(2)
-            overlay.set_margin_bottom(0)  # No bottom margin for overlay
-
-            # Create fixed-size container for spinner/picture area
-            thumbnail_container = Gtk.Box()
-            thumbnail_container.set_size_request(220, 124)  # Fixed size for thumbnail area
-            thumbnail_container.set_halign(Gtk.Align.CENTER)
-
-            # Create spinner centered in thumbnail area
-            seek_preview_spinner = Gtk.Spinner()
-            seek_preview_spinner.set_size_request(64, 64)
-            seek_preview_spinner.set_halign(Gtk.Align.CENTER)
-            seek_preview_spinner.set_valign(Gtk.Align.CENTER)
-            thumbnail_container.append(seek_preview_spinner)
-
-            # Create picture for thumbnail (overlaid on spinner)
-            self.seek_preview_picture = Gtk.Picture()
-
-            # Add spinner container as base, picture as overlay
-            overlay.set_child(thumbnail_container)
-            overlay.add_overlay(self.seek_preview_picture)
-
-            # Create main vertical box: thumbnail overlay above timecode
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-            box.set_margin_start(0)  # Margins already on overlay
-            box.set_margin_end(0)
-            box.set_margin_top(0)
-            box.set_margin_bottom(2)
-
-            # Create time label below thumbnail
-            self.seek_preview_time_label = Gtk.Label()
-            self.seek_preview_time_label.set_halign(Gtk.Align.CENTER)
-            self.seek_preview_time_label.set_valign(Gtk.Align.CENTER)
-            self.seek_preview_time_label.set_margin_top(2)
-
-            # Add to main box: thumbnail area + timecode below
-            box.append(overlay)                       # Thumbnail overlay
-            box.append(self.seek_preview_time_label) # Timecode below
-
-            self.seek_preview_spinner = seek_preview_spinner
-
-            self.seek_preview_popover.set_child(box)
-            self.seek_preview_popover.set_parent(self.box_playback_controls)  # Align closer to timeline instead of video
+        else:
+            # Create popover if it doesn't exist
+            self.seek_preview_popover = SeekPreviewPopover()
+            self.seek_preview_popover.set_parent(self.box_playback_controls)
 
         # Set time label
         time_text = self.get_time_label_text(timestamp_ns)
-        self.seek_preview_time_label.set_text(time_text)
+        self.seek_preview_popover.set_text(time_text)
 
-        # Show spinner initially, hide picture
-        self.seek_preview_spinner.set_visible(True)
-        self.seek_preview_spinner.start()
-        self.seek_preview_picture.set_visible(False)
+        # Show spinner initially
+        self.seek_preview_popover.show_spinner()
 
         self.seek_preview_popover.set_pointing_to(self._get_seek_preview_popover_pointing_rect(mouse_x))
         self.seek_preview_popover.popup()
@@ -470,38 +416,14 @@ class PreviewView(Gtk.Widget):
                         should_update = current_thread_id == self._thread_counter
 
                     if thumbnail is not None and should_update:
-                        # Convert BGR to RGB for GdkPixbuf
-                        rgb_thumbnail = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2RGB)
-
-                        # Create pixbuf from bytes in memory
-                        height, width, channels = rgb_thumbnail.shape
-                        pixbuf = GdkPixbuf.Pixbuf.new_from_bytes(
-                            GLib.Bytes.new(rgb_thumbnail.tobytes()),
-                            GdkPixbuf.Colorspace.RGB,
-                            False,  # has_alpha
-                            8,      # bits_per_sample
-                            width,
-                            height,
-                            width * channels
-                        )
-
-                        # Update UI in main thread
-                        def update_ui():
-                            self.seek_preview_picture.set_pixbuf(pixbuf)
-                            self.seek_preview_spinner.stop()
-                            self.seek_preview_spinner.set_visible(False)
-                            self.seek_preview_picture.set_visible(True)
-                            return False
-
-                        GLib.idle_add(update_ui)
+                        self.seek_preview_popover.set_thumbnail(thumbnail)
                     elif not should_update:
                         # This request was cancelled, don't update UI
                         pass
                     else:
                         # Failed to get thumbnail, hide spinner
                         def hide_spinner():
-                            self.seek_preview_spinner.stop()
-                            self.seek_preview_spinner.set_visible(False)
+                            self.seek_preview_popover.hide_spinner()
                             return False
                         GLib.idle_add(hide_spinner)
 
@@ -509,9 +431,8 @@ class PreviewView(Gtk.Widget):
                 logger.error(f"Error generating seek preview thumbnail: {e}")
                 # Hide spinner and show error state if needed
                 def hide_spinner():
-                    if hasattr(self, 'seek_preview_spinner'):
-                        self.seek_preview_spinner.stop()
-                        self.seek_preview_spinner.set_visible(False)
+                    if hasattr(self, 'seek_preview_popover'):
+                        self.seek_preview_popover.hide_spinner()
                     return False
                 GLib.idle_add(hide_spinner)
 
