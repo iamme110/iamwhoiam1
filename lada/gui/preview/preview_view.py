@@ -83,7 +83,6 @@ class PreviewView(Gtk.Widget):
         self.appsource_worker_reset_requested = False
 
         self._config: Config | None = None
-        self._current_file: Gio.File | None = None
 
         self.widget_timeline.connect('seek_requested', lambda widget, seek_position: self.seek_video(seek_position))
         self.widget_timeline.connect('cursor_position_changed', lambda widget, cursor_position, x: self.show_cursor_position(cursor_position, x if x != 0.0 else None))
@@ -213,10 +212,6 @@ class PreviewView(Gtk.Widget):
         callback = lambda files: self.emit("files-opened", files)
         dismissed_callback = lambda *args: self.button_open_files.set_sensitive(True)
         utils.show_open_files_dialog(callback, dismissed_callback)
-
-    @property
-    def current_file(self):
-        return self._current_file
 
     @property
     def frame_restorer_options(self):
@@ -461,17 +456,10 @@ class PreviewView(Gtk.Widget):
         # Generate thumbnail asynchronously
         def generate_thumbnail():
             try:
-                if not hasattr(self, 'current_file') or not self.current_file:
-                    return
-
-                file_path = self.current_file.get_path()
-                if not file_path:
-                    return
-
                 # Use shared VideoThumbnailer with proper thread synchronization
                 with self._thumbnailer_lock:
                     if self._video_thumbnailer is None:
-                        self._video_thumbnailer = video_utils.VideoThumbnailer(file_path)
+                        self._video_thumbnailer = video_utils.VideoThumbnailer(self.video_metadata.video_file)
 
                     # Increment thread counter for this request
                     with self._thread_counter_lock:
@@ -565,7 +553,6 @@ class PreviewView(Gtk.Widget):
         file_path = file.get_path()
 
         assert not self._video_preview_init_done
-        self._current_file = file
         self.video_metadata = video_utils.get_video_meta_data(file_path)
         self._frame_restorer_options = self._frame_restorer_options.with_video_metadata(self.video_metadata)
         self.has_audio = audio_utils.get_audio_codec(self.video_metadata.video_file) is not None
