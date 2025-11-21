@@ -68,6 +68,7 @@ class PreviewView(Gtk.Widget):
         self._thumbnailer_lock = threading.Lock()
         self._thread_counter = 0
         self._thread_counter_lock = threading.Lock()
+        self._current_thumbnail_size = (220, 124)
 
         self.eos = False
 
@@ -325,6 +326,36 @@ class PreviewView(Gtk.Widget):
             if hasattr(self, 'seek_preview_popover') and self.seek_preview_popover.get_visible():
                 self.seek_preview_popover.popdown()
 
+    def _get_seek_preview_popover_pointing_rect(self, mouse_x: float) -> Gdk.Rectangle:
+        # Position popover above the timeline, centered on mouse cursor
+        # Transform mouse coordinates from timeline to playback controls coordinate space
+        success, transformed_point = self.widget_timeline.compute_point(self.box_playback_controls, Graphene.Point().init(mouse_x, 0))
+        if success:
+            mouse_x_in_controls = transformed_point.x
+        else:
+            mouse_x_in_controls = mouse_x
+
+        # Calculate popover dimensions with space for time label below thumbnail
+        popover_width = self._current_thumbnail_size[0] + 4  # thumbnail + minimal margins
+
+        controls_allocation = self.box_playback_controls.get_allocation()
+
+        # Center the popover horizontally on the mouse cursor with bounds checking
+        pointing_rect = Gdk.Rectangle()
+        # For TOP position, center the popover on mouse cursor
+        pointing_rect.x = int(mouse_x_in_controls - popover_width // 2)
+        # Ensure popover stays within controls area horizontally
+        pointing_rect.x = max(5, min(pointing_rect.x, controls_allocation.width - popover_width - 5))
+
+        # Position above the timeline - point to the timeline area
+        timeline_allocation = self.widget_timeline.get_allocation()
+        pointing_rect.y = timeline_allocation.y - 5  # Point just above the timeline
+
+        pointing_rect.width = popover_width
+        pointing_rect.height = 1
+
+        return pointing_rect
+
     def update_seek_preview(self, timestamp_ns: int, mouse_x: float):
         """Update the seek preview popover at the specified position"""
         # Performance optimization: only update thumbnail if cursor moved significantly
@@ -416,41 +447,7 @@ class PreviewView(Gtk.Widget):
         self.seek_preview_spinner.start()
         self.seek_preview_picture.set_visible(False)
 
-        # Position popover above the timeline, centered on mouse cursor
-        # Transform mouse coordinates from timeline to playback controls coordinate space
-        success, transformed_point = self.widget_timeline.compute_point(self.box_playback_controls, Graphene.Point().init(mouse_x, 0))
-        if success:
-            mouse_x_in_controls = transformed_point.x
-        else:
-            mouse_x_in_controls = mouse_x
-
-        # Use standard thumbnail size for good visibility
-        thumbnail_width = 220
-        thumbnail_height = 124
-
-        # Calculate popover dimensions with space for time label below thumbnail
-        popover_width = thumbnail_width + 4  # thumbnail + minimal margins
-        popover_height = thumbnail_height + 24  # thumbnail + space for time label below
-
-        # Store thumbnail size for use in thumbnail generation
-        self._current_thumbnail_size = (thumbnail_width, thumbnail_height)
-
-        controls_allocation = self.box_playback_controls.get_allocation()
-
-        # Center the popover horizontally on the mouse cursor with bounds checking
-        pointing_rect = Gdk.Rectangle()
-        # For TOP position, center the popover on mouse cursor
-        pointing_rect.x = int(mouse_x_in_controls - popover_width // 2)
-        # Ensure popover stays within controls area horizontally
-        pointing_rect.x = max(5, min(pointing_rect.x, controls_allocation.width - popover_width - 5))
-
-        # Position above the timeline - point to the timeline area
-        timeline_allocation = self.widget_timeline.get_allocation()
-        pointing_rect.y = timeline_allocation.y - 5  # Point just above the timeline
-
-        pointing_rect.width = popover_width
-        pointing_rect.height = 1
-        self.seek_preview_popover.set_pointing_to(pointing_rect)
+        self.seek_preview_popover.set_pointing_to(self._get_seek_preview_popover_pointing_rect(mouse_x))
         self.seek_preview_popover.popup()
 
         # Generate thumbnail asynchronously
