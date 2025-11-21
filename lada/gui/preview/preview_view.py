@@ -397,29 +397,21 @@ class PreviewView(Gtk.Widget):
         self.seek_preview_popover.popup()
 
         # Generate thumbnail asynchronously
-        def generate_thumbnail():
+        def generate_thumbnail(current_thread_id):
             try:
                 # Use shared VideoThumbnailer with proper thread synchronization
                 with self._thumbnailer_lock:
+                    with self._thread_counter_lock:
+                        if current_thread_id < self._thread_counter:
+                            return
+
                     if self._video_thumbnailer is None:
                         self._video_thumbnailer = video_utils.VideoThumbnailer(self.video_metadata.video_file)
 
-                    # Increment thread counter for this request
-                    with self._thread_counter_lock:
-                        self._thread_counter += 1
-                        current_thread_id = self._thread_counter
-
                     thumbnail = self._video_thumbnailer.get_thumbnail(timestamp_ns, width=self._current_thumbnail_size[0], height=self._current_thumbnail_size[1])
 
-                    # Check if this thread should still update (not cancelled by newer request)
-                    with self._thread_counter_lock:
-                        should_update = current_thread_id == self._thread_counter
-
-                    if thumbnail is not None and should_update:
+                    if thumbnail is not None:
                         self.seek_preview_popover.set_thumbnail(thumbnail)
-                    elif not should_update:
-                        # This request was cancelled, don't update UI
-                        pass
                     else:
                         # Failed to get thumbnail, hide spinner
                         def hide_spinner():
@@ -436,7 +428,10 @@ class PreviewView(Gtk.Widget):
                     return False
                 GLib.idle_add(hide_spinner)
 
-        threading.Thread(target=generate_thumbnail, daemon=True).start()
+        # Increment thread counter for this request
+        with self._thread_counter_lock:
+            self._thread_counter += 1
+            threading.Thread(target=generate_thumbnail, args=(self._thread_counter,), daemon=True).start()
 
     def play_file(self, idx):
         self._show_spinner()
