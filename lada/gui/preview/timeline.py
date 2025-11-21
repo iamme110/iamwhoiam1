@@ -2,12 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import pathlib
-import threading
 from dataclasses import dataclass
 
-import cv2
-import numpy as np
-from gi.repository import Gtk, GObject, Gdk, Graphene, Gsk, Adw, GLib, GdkPixbuf
+from gi.repository import Gtk, GObject, Gdk, Graphene, Gsk, Adw
 
 from lada.gui import utils
 
@@ -15,9 +12,9 @@ here = pathlib.Path(__file__).parent.resolve()
 
 @dataclass
 class TimelineColors:
-    timeline_color: Gdk.RGBA
-    playhead_color: Gdk.RGBA
-    cursor_color: Gdk.RGBA
+    timeline_color: Gdk.RGBA()
+    playhead_color: Gdk.RGBA()
+    cursor_color: Gdk.RGBA()
 
 @Gtk.Template(string=utils.translate_ui_xml(here / 'timeline.ui'))
 class Timeline(Gtk.Widget):
@@ -30,14 +27,6 @@ class Timeline(Gtk.Widget):
     @style_manager.setter
     def style_manager(self, value):
         self._style_manager = value
-
-    @GObject.Property()
-    def parent_widget(self):
-        return self._parent_widget
-
-    @parent_widget.setter
-    def parent_widget(self, value):
-        self._parent_widget = value
 
     @GObject.Property()
     def duration(self):
@@ -61,7 +50,7 @@ class Timeline(Gtk.Widget):
         pass
 
     @GObject.Signal(name="cursor_position_changed", arg_types=(GObject.TYPE_INT64, GObject.TYPE_DOUBLE))
-    def cursor_position(self, position: int | None, x: float | None):
+    def cursor_position(self, position: int, x: float):
         pass
 
     def __init__(self, **kwargs):
@@ -69,13 +58,7 @@ class Timeline(Gtk.Widget):
         self._playhead_position = 0
         self.cursor_position_x: int | None = None
         self._duration = 0
-        self._last_cursor_position_x: int | None = None
         self.set_hexpand(True)
-
-        # Threading for non-blocking thumbnail generation
-        self._thumbnail_thread = None
-        self._thumbnail_lock = threading.Lock()
-        self._pending_thumbnail_request = None
 
         self.gesture_drag = Gtk.GestureDrag.new()
         self.drag_start = 0
@@ -92,10 +75,6 @@ class Timeline(Gtk.Widget):
         self.add_controller(event_controller_motion)
 
         self._style_manager = None
-        self._parent_widget = None
-        self._current_thumbnail = None
-
-        # Popover management moved to parent widget (PreviewView)
 
     def update_duration(self, value):
         self._duration = value
@@ -119,50 +98,16 @@ class Timeline(Gtk.Widget):
         self.drag_start = x
 
     def update_cursor_position(self, x):
-        old_position = self.cursor_position_x
         self.cursor_position_x = x
-
         if x:
             allocation = self.get_allocation()
             width = allocation.width
             cursor_position = int((x / width) * self._duration)
         else:
             cursor_position = -1
-
-        # Hide popover if no cursor position - now handled by parent widget
-        if cursor_position == -1:
-            self._current_thumbnail = None
-            self._last_cursor_position_x = None
-            self.cursor_position_x = None
-            self.queue_draw()
-
+            x = -1
         self.queue_draw()
-        if x is not None:
-            self.emit('cursor_position_changed', cursor_position, x)
-        else:
-            self.emit('cursor_position_changed', cursor_position, 0.0)
-
-        seek_preview_enabled = False
-        if self._parent_widget and hasattr(self._parent_widget, '_config') and self._parent_widget._config:
-            seek_preview_enabled = getattr(self._parent_widget._config, 'seek_preview_enabled', False)
-
-        # Always show cursor line when hovering, regardless of seek preview setting
-        if seek_preview_enabled and cursor_position != -1:
-            # Check if cursor moved significantly (at least 1px)
-            should_update = (self._last_cursor_position_x is None or
-                            abs(x - self._last_cursor_position_x) > 1)
-
-            if should_update:
-                self._last_cursor_position_x = x
-                # Always generate new thumbnail for new position
-                with self._thumbnail_lock:
-                    # Signal to cancel any existing thread
-                    if self._thumbnail_thread and self._thumbnail_thread.is_alive():
-                        self._thumbnail_thread = None  # Signal to stop
-                    self._pending_thumbnail_request = (cursor_position, int(x), 0)
-
-                # Start new thumbnail generation thread - now handled by parent widget
-                pass
+        self.emit('cursor_position_changed', cursor_position, x)
 
     def do_snapshot(self, s: Gtk.Snapshot):
         """
@@ -238,7 +183,3 @@ class Timeline(Gtk.Widget):
             cursor_color.parse("#000000ff")
 
         return TimelineColors(timeline_color, playhead_color, cursor_color)
-
-
-
-

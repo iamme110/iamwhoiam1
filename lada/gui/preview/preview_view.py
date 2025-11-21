@@ -84,7 +84,7 @@ class PreviewView(Gtk.Widget):
         self._config: Config | None = None
 
         self.widget_timeline.connect('seek_requested', lambda widget, seek_position: self.seek_video(seek_position))
-        self.widget_timeline.connect('cursor_position_changed', lambda widget, cursor_position, x: self.show_cursor_position(cursor_position, x if x != 0.0 else None))
+        self.widget_timeline.connect('cursor_position_changed', lambda widget, cursor_position, x: self.show_cursor_position(cursor_position if cursor_position >= 0 else None, x if x >= 0 else None))
 
         self.fullscreen_mouse_activity_controller = None
 
@@ -302,9 +302,9 @@ class PreviewView(Gtk.Widget):
         if not self.waiting_for_data:
             self.spinner_overlay.set_visible(False)
 
-    def show_cursor_position(self, cursor_position_ns, x=None):
+    def show_cursor_position(self, cursor_position_ns: int | None, x: float | None):
         # Handle seek preview or cursor time display
-        if x is not None and cursor_position_ns > 0:
+        if x is not None and cursor_position_ns is not None:
             seek_preview_enabled = getattr(self._config, 'seek_preview_enabled', False) if self._config else False
             if seek_preview_enabled:
                 # Hide cursor time label and show seek preview
@@ -487,7 +487,6 @@ class PreviewView(Gtk.Widget):
         self.buffer_queue_min_thresh_time_auto = self._buffer_queue_min_thresh_time_auto_min
 
         self.widget_timeline.set_property("duration", self.file_duration_ns)
-        self.widget_timeline.set_property("parent_widget", self)
 
         self.frame_restorer_provider.init(self._frame_restorer_options)
 
