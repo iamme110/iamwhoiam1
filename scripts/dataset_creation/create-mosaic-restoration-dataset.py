@@ -8,12 +8,12 @@ from pathlib import Path
 from time import sleep
 
 from lada.models.dover.evaluate import VideoQualityEvaluator
-from lada.detectors.mosaic_classifier import MosaicClassifier
-from lada.lib.nsfw_scene_detector import NsfwDetector, FileProcessingOptions
-from lada.lib.nsfw_scene_processor import SceneProcessingOptions, SceneProcessor
-from lada.detectors.nudenet_nsfw_detector import NudeNetNsfwDetector
-from lada.lib.threading_utils import wait_until_completed, clean_up_completed_futures
-from lada.detectors.watermark_detector import WatermarkDetector
+from lada.datasetcreation.detectors.mosaic_classifier import MosaicClassifier
+from lada.datasetcreation.nsfw_scene_detector import NsfwDetector, FileProcessingOptions
+from lada.datasetcreation.nsfw_scene_processor import SceneProcessingOptions, SceneProcessor
+from lada.datasetcreation.detectors.nudenet_nsfw_detector import NudeNetNsfwDetector
+from lada.utils.threading_utils import wait_until_completed, clean_up_completed_futures
+from lada.datasetcreation.detectors.watermark_detector import WatermarkDetector
 from lada.models.yolo.yolo import Yolo
 
 def parse_args():

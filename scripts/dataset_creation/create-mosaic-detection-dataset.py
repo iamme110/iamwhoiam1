@@ -14,19 +14,19 @@ import numpy as np
 
 from lada.models.centerface.centerface import CenterFace
 import lada.models.bpjdet.inference as bpjdet
-from lada.lib import visualization_utils, image_utils, transforms as lada_transforms, Detections, DETECTION_CLASSES, \
+from lada.utils import visualization_utils, image_utils, transforms as lada_transforms, Detections, DETECTION_CLASSES, \
     Image
-from lada.lib.box_utils import box_overlap
-from lada.detectors.face_detector import FaceDetector
-from lada.detectors.head_detector import HeadDetector
-from lada.detectors.nsfw_frame_detector import NsfwImageDetector
-from lada.lib.threading_utils import clean_up_completed_futures
-from lada.lib.ultralytics_utils import convert_segment_masks_to_yolo_labels
+from lada.utils.box_utils import box_overlap
+from lada.datasetcreation.detectors.face_detector import FaceDetector
+from lada.datasetcreation.detectors.head_detector import HeadDetector
+from lada.datasetcreation.detectors.nsfw_frame_detector import NsfwImageDetector
+from lada.utils.threading_utils import clean_up_completed_futures
+from lada.utils.ultralytics_utils import convert_segment_masks_to_yolo_labels
 
 from torchvision.transforms import transforms as torchvision_transforms
 
-from lada.lib.image_utils import UnsharpMaskingSharpener
-from lada.lib.jpeg_utils import DiffJPEG
+from lada.utils.image_utils import UnsharpMaskingSharpener
+from lada.utils.jpeg_utils import DiffJPEG
 from lada.models.yolo.yolo import Yolo
 
 def get_target_shape(img_shape, target_size: int):

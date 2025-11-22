@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import torch.utils.data as data
 
-import lada.lib.image_utils
 from lada.models.basicvsrpp.mmagic.data_sample import DataSample
 from lada.models.basicvsrpp.mmagic.registry import DATASETS
 
@@ -17,7 +16,7 @@ import lada.lib.video_utils as video_utils
 from lada.lib import random_utils, transforms as realesrgan_transforms, image_utils
 from lada.lib.mosaic_utils import addmosaic_base, get_random_parameters_by_block_size
 from lada.lib.image_utils import unpad_image, pad_image_by_pad, repad_image, scale_pad
-from lada.lib.restoration_dataset_metadata import RestorationDatasetMetadataV2
+from lada.datasetcreation.restoration_dataset_metadata import RestorationDatasetMetadataV2
 
 from torchvision.transforms import transforms as torchvision_transforms
 
