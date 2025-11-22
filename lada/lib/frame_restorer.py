@@ -32,15 +32,15 @@ def load_models(
     clip_length: int):
     if mosaic_restoration_model_name.startswith("deepmosaics"):
         from lada.models.deepmosaics.models import loadmodel
-        mosaic_restoration_model = loadmodel.video(device, mosaic_restoration_model_path, fp16)
+        from lada.restorers.deepmosaics_mosaic_restorer import DeepmosaicsMosaicRestorer
+        _model = loadmodel.video(device, mosaic_restoration_model_path, fp16)
+        mosaic_restoration_model = DeepmosaicsMosaicRestorer(_model, device)
         pad_mode = 'reflect'
     elif mosaic_restoration_model_name.startswith("basicvsrpp"):
-        from lada.models.basicvsrpp.inference import load_model, get_default_gan_inference_config
-        if mosaic_restoration_config_path:
-            config = mosaic_restoration_config_path
-        else:
-            config = get_default_gan_inference_config()
-        mosaic_restoration_model = load_model(config, mosaic_restoration_model_path, device, fp16, clip_length)
+        from lada.models.basicvsrpp.inference import load_model
+        from lada.restorers.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
+        _model = load_model(mosaic_restoration_config_path, mosaic_restoration_model_path, device, fp16)
+        mosaic_restoration_model = BasicvsrppMosaicRestorer(_model, device, fp16, clip_length)
         pad_mode = 'zero'
     else:
         raise NotImplementedError()
@@ -195,12 +195,13 @@ class FrameRestorer:
 
     def _restore_clip_frames(self, images):
         if self.mosaic_restoration_model_name.startswith("deepmosaics"):
-            from lada.models.deepmosaics.inference import restore_video_frames
-            from lada.models.deepmosaics.models import model_util
-            restored_clip_images = restore_video_frames(self.device.index, self.mosaic_restoration_model, images)
+            from lada.restorers.deepmosaics_mosaic_restorer import DeepmosaicsMosaicRestorer
+            assert isinstance(self.mosaic_restoration_model, DeepmosaicsMosaicRestorer)
+            restored_clip_images = self.mosaic_restoration_model.restore(images)
         elif self.mosaic_restoration_model_name.startswith("basicvsrpp"):
-            from lada.models.basicvsrpp.inference import inference
-            restored_clip_images = inference(self.mosaic_restoration_model, images)
+            from lada.restorers.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
+            assert isinstance(self.mosaic_restoration_model, BasicvsrppMosaicRestorer)
+            restored_clip_images = self.mosaic_restoration_model.restore(images)
         else:
             raise NotImplementedError()
         return restored_clip_images

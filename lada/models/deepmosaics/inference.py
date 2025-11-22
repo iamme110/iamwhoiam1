@@ -7,7 +7,7 @@ import torch
 
 from lada.models.deepmosaics.util import data
 
-def restore_video_frames(gpu_id,netG, frames: list[torch.Tensor]) -> list[torch.Tensor]:
+def restore_video_frames(gpu_id,netG, frames: list[np.ndarray[np.uint8]]) -> list[np.ndarray[np.uint8]]:
     """
     T is numer of frames processed in a single step (center frame + N previous/next frames that come before/after it):
      T = 2N + 1. The paper authors use N = 2 in their network (T = 5).
@@ -23,7 +23,6 @@ def restore_video_frames(gpu_id,netG, frames: list[torch.Tensor]) -> list[torch.
     img_pool = []
     previous_frame = None
     init_flag = True
-    frames = [x.contiguous().numpy() for x in frames]
 
     restored_clip_frames = []
 
@@ -53,5 +52,4 @@ def restore_video_frames(gpu_id,netG, frames: list[torch.Tensor]) -> list[torch.
         previous_frame = unmosaic_pred
         restored_clip_frames.append(img_fake.copy())
 
-    restored_clip_frames = [torch.from_numpy(x) for x in restored_clip_frames]
     return restored_clip_frames
