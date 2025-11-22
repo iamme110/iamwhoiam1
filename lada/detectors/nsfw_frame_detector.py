@@ -5,6 +5,7 @@ import ultralytics.models
 from lada.lib import Detections, Detection, Image
 from lada.lib import mask_utils
 from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask
+from lada.models.yolo.yolo import Yolo
 
 def get_nsfw_frames(yolo_results: ultralytics.engine.results.Results, random_extend_masks: bool) -> Detections | None:
     detections = []
@@ -31,7 +32,7 @@ def get_nsfw_frames(yolo_results: ultralytics.engine.results.Results, random_ext
     return Detections(yolo_results.orig_img, detections)
 
 class NsfwImageDetector:
-    def __init__(self, model: ultralytics.models.YOLO, device=None, random_extend_masks=False, conf=0.25):
+    def __init__(self, model: Yolo, device=None, random_extend_masks=False, conf=0.25):
         self.model = model
         self.device = device
         self.random_extend_masks = random_extend_masks

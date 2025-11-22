@@ -12,7 +12,7 @@ from ultralytics import YOLO
 from lada.lib.torch_letterbox import PyTorchLetterBox
 from typing import List
 
-class MosaicDetectionModel:
+class Yolo11SegmentationModel:
     def __init__(self, model_path: str, device, imgsz=640, fp16=False, **kwargs):
         yolo_model = YOLO(model_path)
         assert yolo_model.task == 'segment'
@@ -40,8 +40,6 @@ class MosaicDetectionModel:
         self.dtype = torch.float16 if fp16 else torch.float32
         self.cpu_buffer = None
         self.inference_buffer = None
-
-        self.is_segmentation_model = yolo_model.task == 'segment'
 
     def preallocate_buffers(self, batch_size: int, img_shape: tuple[int, int, int]):
         self.cpu_buffer = torch.empty(batch_size, *img_shape, dtype=torch.uint8, device='cpu', pin_memory=True)

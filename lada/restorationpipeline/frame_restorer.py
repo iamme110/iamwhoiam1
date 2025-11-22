@@ -16,7 +16,7 @@ from lada import LOG_LEVEL
 from lada.lib import image_utils, video_utils, threading_utils, mask_utils
 from lada.lib import visualization_utils
 from lada.restorationpipeline.mosaic_detector import MosaicDetector
-from lada.detectors.mosaic_detection_model import MosaicDetectionModel
+from lada.models.yolo.yolo11_segmentation_model import Yolo11SegmentationModel
 from lada.restorationpipeline.mosaic_detector import Clip
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def load_models(
     else:
         raise NotImplementedError()
     # setting classes=[0] will consider only for class id = 0 as detections (nsfw mosaics) therefore filtering out sfw mosaics (heads, faces)
-    mosaic_detection_model = MosaicDetectionModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, fp16=fp16)
+    mosaic_detection_model = Yolo11SegmentationModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, fp16=fp16)
     return mosaic_detection_model, mosaic_restoration_model, pad_mode
 
 

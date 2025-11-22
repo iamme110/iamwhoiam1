@@ -13,7 +13,6 @@ from typing import Generator, Optional, Dict
 import numpy as np
 import torch
 import ultralytics.models
-from ultralytics import YOLO
 
 from lada import LOG_LEVEL
 from lada.lib import Mask, Image, Box, VideoMetadata, threading_utils, video_utils
@@ -21,6 +20,7 @@ from lada.lib import mask_utils
 from lada.lib.scene_utils import crop_to_box_v3
 from lada.lib.threading_utils import wait_until_completed
 from lada.lib.ultralytics_utils import choose_biggest_detection, convert_yolo_mask, convert_yolo_box
+from lada.models.yolo.yolo import Yolo
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
@@ -322,8 +322,8 @@ def apply_random_mask_extensions(scene: Scene):
 
 
 class NsfwDetector:
-    def __init__(self, nsfw_detection_model: YOLO, device: str, file_queue: queue.Queue, frame_queue: queue.Queue, scene_queue: queue.Queue, file_processing_options: FileProcessingOptions, random_extend_masks=True):
-        self.nsfw_detection_model: YOLO = nsfw_detection_model
+    def __init__(self, nsfw_detection_model: Yolo, device: str, file_queue: queue.Queue, frame_queue: queue.Queue, scene_queue: queue.Queue, file_processing_options: FileProcessingOptions, random_extend_masks=True):
+        self.nsfw_detection_model: Yolo = nsfw_detection_model
         self.device = torch.device(device) if device is not None else device
         self.file_queue: queue.Queue = file_queue
         self.frame_queue: queue.Queue = frame_queue

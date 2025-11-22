@@ -15,7 +15,7 @@ from ultralytics.engine.results import Results
 from lada.lib import VideoMetadata, threading_utils
 from lada.lib import image_utils
 from lada.lib.box_utils import box_overlap
-from lada.detectors.mosaic_detection_model import MosaicDetectionModel
+from lada.models.yolo.yolo11_segmentation_model import Yolo11SegmentationModel
 from lada.lib.scene_utils import crop_to_box_v3
 from lada.lib import video_utils
 from lada import LOG_LEVEL
@@ -170,7 +170,7 @@ class Clip:
         return self.frames[item], self.masks[item], self.boxes[item]
 
 class MosaicDetector:
-    def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4):
+    def __init__(self, model: Yolo11SegmentationModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4):
         self.model = model
         self.video_file = video_file
         self.device = torch.device(device) if device is not None else device
@@ -305,11 +305,7 @@ class MosaicDetector:
             logger.debug("frame detector worker: frame_detection_queue producer unblocked")
             return
         for i in range(len(results.boxes)):
-            if self.model.is_segmentation_model:
-                mask = convert_yolo_mask_tensor(results.masks[i], results.orig_shape)
-            else:
-                # TODO: we currently don't use mosaic masks in the restoration pipeline, so we could also remove it
-                mask = torch.zeros(results.orig_shape, dtype=torch.uint8, device=self.device)
+            mask = convert_yolo_mask_tensor(results.masks[i], results.orig_shape)
             box = convert_yolo_box(results.boxes[i], results.orig_shape)
 
             current_scene = None

@@ -6,8 +6,7 @@ from typing import Optional
 from lada.lib.ultralytics_utils import convert_yolo_boxes
 from lada.lib.box_utils import box_overlap
 from lada.lib import Image, Box
-from ultralytics import YOLO
-
+from lada.models.yolo.yolo import Yolo
 
 MALE_GENITALIA_EXPOSED = 14
 FEMALE_GENITALIA_EXPOSED = 4
@@ -15,7 +14,7 @@ FEMALE_GENITALIA_EXPOSED = 4
 NSFW_CLASS_IDS = (MALE_GENITALIA_EXPOSED, FEMALE_GENITALIA_EXPOSED)
 
 class NudeNetNsfwDetector:
-    def __init__(self, model: YOLO, device):
+    def __init__(self, model: Yolo, device):
         self.model = model
         self.device = device
         self.batch_size = 4

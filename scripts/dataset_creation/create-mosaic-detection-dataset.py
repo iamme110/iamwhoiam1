@@ -11,7 +11,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
 
 from lada.models.centerface.centerface import CenterFace
 import lada.models.bpjdet.inference as bpjdet
@@ -28,6 +27,7 @@ from torchvision.transforms import transforms as torchvision_transforms
 
 from lada.lib.image_utils import UnsharpMaskingSharpener
 from lada.lib.jpeg_utils import DiffJPEG
+from lada.models.yolo.yolo import Yolo
 
 def get_target_shape(img_shape, target_size: int):
     h, w = img_shape[:2]
@@ -266,7 +266,7 @@ def main():
 
     detectors = []
     if args.create_nsfw_mosaics:
-        model = YOLO(args.model)
+        model = Yolo(args.model)
         detectors.append(NsfwImageDetector(model, args.device, random_extend_masks=True, conf=0.8))
     if args.create_sfw_face_mosaics:
         model = CenterFace()
