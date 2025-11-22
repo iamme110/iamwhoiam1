@@ -60,26 +60,30 @@ def get_mask_area(mask: Mask) -> float:
 
 
 def create_blend_mask(crop_mask):
+    """Create maximum coverage blend mask that covers all mosaic areas completely."""
     mask = crop_mask.squeeze().float()
     h, w = mask.shape
-    border_ratio = 0.05
-    h_inner, w_inner = int(h * (1.0 - border_ratio)), int(w * (1.0 - border_ratio))
-    h_outer, w_outer = h - h_inner, w - w_inner
-    border_size = min(h_outer, w_outer)
-    if border_size < 5:
-        return torch.ones_like(mask)
-    blur_size = int(border_size)
-    if blur_size % 2 == 0:
-        blur_size += 1
-    inner = torch.ones((h_inner, w_inner), device=mask.device, dtype=mask.dtype)
-    pad_top = h_outer // 2
-    pad_bottom = h_outer - pad_top
-    pad_left = w_outer // 2
-    pad_right = w_outer - pad_left
-    blend = F.pad(inner, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
-    mask4 = (mask > 0)
-    blend = torch.maximum(mask4, blend)
-    blend = tv_gaussian_blur(blend.unsqueeze(0), [blur_size, blur_size]).squeeze(0)
+
+    # Maximum inclusivity: process any pixel with any mosaic content
+    blend = torch.maximum(mask, (mask > 0).float())
+
+    # Use 9x9 kernel for extensive connectivity
+    kernel_size = 9
+    kernel = torch.ones(kernel_size, kernel_size, device=blend.device, dtype=blend.dtype)
+
+    # Three dilation passes for complete edge coverage
+    for _ in range(3):
+        blend_dilated = F.conv2d(blend.unsqueeze(0).unsqueeze(0),
+                               kernel.unsqueeze(0).unsqueeze(0),
+                               padding=kernel_size//2).squeeze()
+        # Include any area that has any neighboring mosaic content
+        new_coverage = (blend_dilated > 0) & (blend == 0)
+        blend = torch.maximum(blend, new_coverage.float())
+
+    # Final safety: ensure absolute comprehensive coverage
+    blend = torch.maximum(blend, (mask > 0).float())
+    blend = torch.maximum(blend, (mask > 0.01).float())  # Catch any remaining traces
+
     assert blend.shape == mask.shape
     return blend
 
