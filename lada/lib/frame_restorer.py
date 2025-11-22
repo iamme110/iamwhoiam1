@@ -221,9 +221,12 @@ class FrameRestorer:
 
             frame_roi = frame[t:b + 1, l:r + 1, :]
             roi_f = frame_roi.to(dtype=self.mosaic_restoration_model.dtype)
+            # Apply blending with reduced strength for distant areas to prevent over-blending
+            blend_mask_clamped = torch.clamp(blend_mask, 0.0, 1.0)
+
             temp = clip_img.to(dtype=self.mosaic_restoration_model.dtype, device=frame_roi.device)
             temp.sub_(roi_f)
-            temp.mul_(blend_mask.unsqueeze(-1))
+            temp.mul_(blend_mask_clamped.unsqueeze(-1))
             temp.add_(roi_f)
             temp.round_().clamp_(0, 255)
             frame_roi[:] = temp
