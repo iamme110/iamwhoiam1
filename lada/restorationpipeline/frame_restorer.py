@@ -15,9 +15,9 @@ import numpy as np
 from lada import LOG_LEVEL
 from lada.lib import image_utils, video_utils, threading_utils, mask_utils
 from lada.lib import visualization_utils
-from lada.lib.mosaic_detector import MosaicDetector
+from lada.restorationpipeline.mosaic_detector import MosaicDetector
 from lada.detectors.mosaic_detection_model import MosaicDetectionModel
-from lada.lib.mosaic_detector import Clip
+from lada.restorationpipeline.mosaic_detector import Clip
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)

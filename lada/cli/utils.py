@@ -16,7 +16,7 @@ from lada import DETECTION_MODEL_NAMES_TO_FILES, RESTORATION_MODEL_NAMES_TO_FILE
     get_available_restoration_models, get_available_detection_models, DETECTION_MODEL_FILES_TO_NAMES, \
     RESTORATION_MODEL_FILES_TO_NAMES
 from lada.lib import VideoMetadata
-from lada.lib.frame_restorer import FrameRestorer
+from lada.restorationpipeline.frame_restorer import FrameRestorer
 
 def _filter_video_files(directory_path: str):
     video_files = []

@@ -10,7 +10,7 @@ from lada.lib import VideoMetadata
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 from lada import RESTORATION_MODEL_NAMES_TO_FILES, DETECTION_MODEL_NAMES_TO_FILES
-from lada.lib.frame_restorer import load_models, FrameRestorer
+from lada.restorationpipeline.frame_restorer import load_models, FrameRestorer
 from lada.lib import video_utils
 
 import gc
