@@ -15,11 +15,11 @@ from pathlib import Path
 FILE = Path(__file__).absolute()
 sys.path.append(FILE.parents[1].as_posix())  # add yolov5/ to path
 
-from lada.bpjdet.models.common import *
-from lada.bpjdet.models.experimental import *
-from lada.bpjdet.utils.autoanchor import check_anchor_order
-from lada.bpjdet.utils.general import make_divisible
-from lada.bpjdet.utils.torch_utils import time_sync, fuse_conv_and_bn, model_info, scale_img, initialize_weights, copy_attr
+from lada.models.bpjdet.models.common import *
+from lada.models.bpjdet.models.experimental import *
+from lada.models.bpjdet.utils.autoanchor import check_anchor_order
+from lada.models.bpjdet.utils.general import make_divisible
+from lada.models.bpjdet.utils.torch_utils import time_sync, fuse_conv_and_bn, model_info, scale_img, initialize_weights, copy_attr
 
 try:
     import thop  # for FLOPs computation

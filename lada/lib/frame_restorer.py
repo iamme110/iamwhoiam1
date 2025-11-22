@@ -16,7 +16,7 @@ from lada import LOG_LEVEL
 from lada.lib import image_utils, video_utils, threading_utils, mask_utils
 from lada.lib import visualization_utils
 from lada.lib.mosaic_detector import MosaicDetector
-from lada.lib.mosaic_detection_model import MosaicDetectionModel
+from lada.detectors.mosaic_detection_model import MosaicDetectionModel
 from lada.lib.mosaic_detector import Clip
 
 logger = logging.getLogger(__name__)
@@ -31,11 +31,11 @@ def load_models(
     fp16: bool,
     clip_length: int):
     if mosaic_restoration_model_name.startswith("deepmosaics"):
-        from lada.deepmosaics.models import loadmodel
+        from lada.models.deepmosaics.models import loadmodel
         mosaic_restoration_model = loadmodel.video(device, mosaic_restoration_model_path, fp16)
         pad_mode = 'reflect'
     elif mosaic_restoration_model_name.startswith("basicvsrpp"):
-        from lada.basicvsrpp.inference import load_model, get_default_gan_inference_config
+        from lada.models.basicvsrpp.inference import load_model, get_default_gan_inference_config
         if mosaic_restoration_config_path:
             config = mosaic_restoration_config_path
         else:
@@ -195,11 +195,11 @@ class FrameRestorer:
 
     def _restore_clip_frames(self, images):
         if self.mosaic_restoration_model_name.startswith("deepmosaics"):
-            from lada.deepmosaics.inference import restore_video_frames
-            from lada.deepmosaics.models import model_util
+            from lada.models.deepmosaics.inference import restore_video_frames
+            from lada.models.deepmosaics.models import model_util
             restored_clip_images = restore_video_frames(self.device.index, self.mosaic_restoration_model, images)
         elif self.mosaic_restoration_model_name.startswith("basicvsrpp"):
-            from lada.basicvsrpp.inference import inference
+            from lada.models.basicvsrpp.inference import inference
             restored_clip_images = inference(self.mosaic_restoration_model, images)
         else:
             raise NotImplementedError()

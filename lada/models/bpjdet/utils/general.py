@@ -21,8 +21,8 @@ import numpy as np
 import torch
 import torchvision
 
-from lada.bpjdet.utils.metrics import box_iou
-from lada.bpjdet.utils.torch_utils import init_torch_seeds
+from lada.models.bpjdet.utils.metrics import box_iou
+from lada.models.bpjdet.utils.torch_utils import init_torch_seeds
 
 
 # Settings

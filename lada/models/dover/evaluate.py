@@ -11,11 +11,11 @@ import numpy as np
 import torch
 import yaml
 # Importing necessary modules from the DOVER package
-from lada.dover.datasets import (
+from lada.models.dover.datasets import (
     UnifiedFrameSampler,
     spatial_temporal_view_decomposition,
 )
-from lada.dover.models import DOVER
+from lada.models.dover.models import DOVER
 
 
 class VideoQualityEvaluator:

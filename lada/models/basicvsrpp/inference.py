@@ -6,8 +6,8 @@ import os.path
 
 import numpy as np
 import torch
-from lada.basicvsrpp.mmagic.registry import MODELS
-from lada.basicvsrpp import register_all_modules
+from lada.models.basicvsrpp.mmagic.registry import MODELS
+from lada.models.basicvsrpp import register_all_modules
 from mmengine.config import Config
 from mmengine.runner import load_checkpoint
 

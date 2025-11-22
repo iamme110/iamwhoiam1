@@ -19,10 +19,10 @@ import torch.nn as nn
 from PIL import Image
 from torch.cuda import amp
 
-from lada.bpjdet.utils.datasets import exif_transpose
-from lada.bpjdet.utils.augmentations import letterbox
-from lada.bpjdet.utils.general import increment_path, is_ascii, make_divisible, non_max_suppression, scale_coords, xyxy2xywh
-from lada.bpjdet.utils.torch_utils import time_sync
+from lada.models.bpjdet.utils.datasets import exif_transpose
+from lada.models.bpjdet.utils.augmentations import letterbox
+from lada.models.bpjdet.utils.general import increment_path, is_ascii, make_divisible, non_max_suppression, scale_coords, xyxy2xywh
+from lada.models.bpjdet.utils.torch_utils import time_sync
 
 LOGGER = logging.getLogger(__name__)
 

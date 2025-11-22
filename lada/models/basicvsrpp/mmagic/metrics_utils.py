@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from .img_utils import reorder_image
-from lada.basicvsrpp.mmagic.colorspace import rgb2ycbcr, bgr2ycbcr
+from lada.models.basicvsrpp.mmagic.colorspace import rgb2ycbcr, bgr2ycbcr
 
 
 def _assert_ndim(input, name, ndim, shape_hint):

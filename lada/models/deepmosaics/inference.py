@@ -5,7 +5,7 @@
 import numpy as np
 import torch
 
-from lada.deepmosaics.util import data
+from lada.models.deepmosaics.util import data
 
 def restore_video_frames(gpu_id,netG, frames: list[torch.Tensor]) -> list[torch.Tensor]:
     """

@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from lada.bpjdet.models.common import Conv
+from lada.models.bpjdet.models.common import Conv
 
 
 class CrossConv(nn.Module):
@@ -66,7 +66,7 @@ class Ensemble(nn.ModuleList):
         return y, None  # inference, train output
 
 def attempt_load(weights, map_location=None, inplace=True, fuse=True):
-    from lada.bpjdet.models.yolo import Detect, Model
+    from lada.models.bpjdet.models.yolo import Detect, Model
 
     # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
     model = Ensemble()

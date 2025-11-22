@@ -8,7 +8,7 @@ import os.path
 import torch
 import cv2
 
-from lada.basicvsrpp.inference import load_model, inference
+from lada.models.basicvsrpp.inference import load_model, inference
 from lada.lib.image_utils import pad_image, resize
 from lada.lib.video_utils import read_video_frames, get_video_meta_data, write_frames_to_video_file
 

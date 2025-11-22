@@ -9,13 +9,13 @@ from time import sleep
 
 from ultralytics import YOLO
 
-from lada.dover.evaluate import VideoQualityEvaluator
-from lada.lib.mosaic_classifier import MosaicClassifier
+from lada.models.dover.evaluate import VideoQualityEvaluator
+from lada.detectors.mosaic_classifier import MosaicClassifier
 from lada.lib.nsfw_scene_detector import NsfwDetector, FileProcessingOptions
 from lada.lib.nsfw_scene_processor import SceneProcessingOptions, SceneProcessor
-from lada.lib.nudenet_nsfw_detector import NudeNetNsfwDetector
+from lada.detectors.nudenet_nsfw_detector import NudeNetNsfwDetector
 from lada.lib.threading_utils import wait_until_completed, clean_up_completed_futures
-from lada.lib.watermark_detector import WatermarkDetector
+from lada.detectors.watermark_detector import WatermarkDetector
 
 def parse_args():
     parser = argparse.ArgumentParser("Create mosaic restoration dataset")

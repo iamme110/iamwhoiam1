@@ -15,7 +15,7 @@ from ultralytics.engine.results import Results
 from lada.lib import VideoMetadata, threading_utils
 from lada.lib import image_utils
 from lada.lib.box_utils import box_overlap
-from lada.lib.mosaic_detection_model import MosaicDetectionModel
+from lada.detectors.mosaic_detection_model import MosaicDetectionModel
 from lada.lib.scene_utils import crop_to_box_v3
 from lada.lib import video_utils
 from lada import LOG_LEVEL

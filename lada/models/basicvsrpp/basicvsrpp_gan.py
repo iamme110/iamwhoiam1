@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Lada Authors
 # SPDX-License-Identifier: AGPL-3.0
 
-from lada.basicvsrpp.mmagic.registry import MODELS
-from lada.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
-from lada.basicvsrpp.mmagic.real_basicvsr import RealBasicVSR
+from lada.models.basicvsrpp.mmagic.registry import MODELS
+from lada.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
+from lada.models.basicvsrpp.mmagic.real_basicvsr import RealBasicVSR
 
 @MODELS.register_module()
 class BasicVSRPlusPlusGanNet(BasicVSRPlusPlusNet):

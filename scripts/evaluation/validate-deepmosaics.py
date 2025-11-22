@@ -4,8 +4,8 @@
 import argparse
 import glob
 import os.path
-from lada.deepmosaics.models import loadmodel
-from lada.deepmosaics.inference import restore_video_frames
+from lada.models.deepmosaics.models import loadmodel
+from lada.models.deepmosaics.inference import restore_video_frames
 from lada.lib.video_utils import read_video_frames, get_video_meta_data, write_frames_to_video_file
 
 def validate(in_dir, out_dir, gpu_id, model_path):

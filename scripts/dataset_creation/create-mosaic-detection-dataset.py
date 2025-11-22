@@ -13,14 +13,14 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from lada.centerface.centerface import CenterFace
-import lada.bpjdet.inference as bpjdet
+from lada.models.centerface.centerface import CenterFace
+import lada.models.bpjdet.inference as bpjdet
 from lada.lib import visualization_utils, image_utils, transforms as lada_transforms, Detections, DETECTION_CLASSES, \
     Image
 from lada.lib.box_utils import box_overlap
-from lada.lib.face_detector import FaceDetector
-from lada.lib.head_detector import HeadDetector
-from lada.lib.nsfw_frame_detector import NsfwImageDetector
+from lada.detectors.face_detector import FaceDetector
+from lada.detectors.head_detector import HeadDetector
+from lada.detectors.nsfw_frame_detector import NsfwImageDetector
 from lada.lib.threading_utils import clean_up_completed_futures
 from lada.lib.ultralytics_utils import convert_segment_masks_to_yolo_labels
 

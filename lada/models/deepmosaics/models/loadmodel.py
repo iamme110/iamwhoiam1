@@ -3,8 +3,8 @@
 # Code vendored from: https://github.com/HypoX64/DeepMosaics/
 
 import torch
-from lada.deepmosaics.models import model_util
-from lada.deepmosaics.models.BVDNet import define_G as video_G
+from lada.models.deepmosaics.models import model_util
+from lada.models.deepmosaics.models.BVDNet import define_G as video_G
 
 def video(device: torch.device, model_path: str, fp16: bool):
     dtype = torch.float16 if fp16 else torch.float32

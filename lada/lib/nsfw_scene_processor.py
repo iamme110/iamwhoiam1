@@ -11,18 +11,18 @@ from typing import Literal, Optional
 import cv2
 import numpy as np
 
-from lada.basicvsrpp.mosaic_video_dataset import create_degradation_pipeline
+from lada.models.basicvsrpp.mosaic_video_dataset import create_degradation_pipeline
 from lada.lib import mask_utils, restoration_dataset_metadata, Pad, Mask, Image
 from lada.lib import video_utils, image_utils
-from lada.dover.evaluate import VideoQualityEvaluator
+from lada.models.dover.evaluate import VideoQualityEvaluator
 from lada.lib.image_utils import pad_image
-from lada.lib.mosaic_classifier import MosaicClassifier
+from lada.detectors.mosaic_classifier import MosaicClassifier
 from lada.lib.mosaic_utils import get_random_parameter, addmosaic_base, get_mosaic_block_size_v1, \
     get_mosaic_block_size_v2, get_mosaic_block_size_v3
 from lada.lib.nsfw_scene_detector import Scene, CroppedScene
-from lada.lib.nudenet_nsfw_detector import NudeNetNsfwDetector
+from lada.detectors.nudenet_nsfw_detector import NudeNetNsfwDetector
 from lada.lib.threading_utils import wait_until_completed
-from lada.lib.watermark_detector import WatermarkDetector
+from lada.detectors.watermark_detector import WatermarkDetector
 
 
 @dataclass

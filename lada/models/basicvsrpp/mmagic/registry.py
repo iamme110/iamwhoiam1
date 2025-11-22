@@ -44,64 +44,64 @@ from mmengine.registry import Registry
 RUNNERS = Registry(
     'runner',
     parent=MMENGINE_RUNNERS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Runner constructors that define how to initialize runners
 RUNNER_CONSTRUCTORS = Registry(
     'runner constructor',
     parent=MMENGINE_RUNNER_CONSTRUCTORS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Loops which define the training or test process, like `EpochBasedTrainLoop`
 LOOPS = Registry(
     'loop',
     parent=MMENGINE_LOOPS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Hooks to add additional functions during running, like `CheckpointHook`
 HOOKS = Registry(
     'hook',
     parent=MMENGINE_HOOKS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Log processors to process the scalar log data.
 LOG_PROCESSORS = Registry(
     'log processor',
     parent=MMENGINE_LOG_PROCESSORS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Optimizers to optimize the model weights, like `SGD` and `Adam`.
 OPTIMIZERS = Registry(
     'optimizer',
     parent=MMENGINE_OPTIMIZERS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Optimizer wrappers to enhance the optimization process.
 OPTIM_WRAPPERS = Registry(
     'optimizer_wrapper',
     parent=MMENGINE_OPTIM_WRAPPERS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Optimizer constructors to customize the hyper-parameters of optimizers.
 OPTIM_WRAPPER_CONSTRUCTORS = Registry(
     'optimizer wrapper constructor',
     parent=MMENGINE_OPTIM_WRAPPER_CONSTRUCTORS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Parameter schedulers to dynamically adjust optimization parameters.
 PARAM_SCHEDULERS = Registry(
     'parameter scheduler',
     parent=MMENGINE_PARAM_SCHEDULERS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 
 #######################################################################
@@ -112,22 +112,22 @@ PARAM_SCHEDULERS = Registry(
 DATASETS = Registry(
     'dataset',
     parent=MMENGINE_DATASETS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Samplers to sample the dataset.
 DATA_SAMPLERS = Registry(
     'data sampler',
     parent=MMENGINE_DATA_SAMPLERS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Transforms to process the samples from the dataset.
 TRANSFORMS = Registry(
     'transform',
     parent=MMENGINE_TRANSFORMS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 
 #######################################################################
@@ -138,29 +138,29 @@ TRANSFORMS = Registry(
 MODELS = Registry(
     'model',
     parent=MMENGINE_MODELS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Model wrappers like 'MMDistributedDataParallel'
 MODEL_WRAPPERS = Registry(
     'model_wrapper',
     parent=MMENGINE_MODEL_WRAPPERS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Weight initialization methods like uniform, xavier.
 WEIGHT_INITIALIZERS = Registry(
     'weight initializer',
     parent=MMENGINE_WEIGHT_INITIALIZERS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Task-specific modules like anchor generators and box coders
 TASK_UTILS = Registry(
     'task util',
     parent=MMENGINE_TASK_UTILS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 
 #######################################################################
@@ -171,15 +171,15 @@ TASK_UTILS = Registry(
 METRICS = Registry(
     'metric',
     parent=MMENGINE_METRICS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Evaluators to define the evaluation process.
 EVALUATORS = Registry(
     'evaluator',
     parent=MMENGINE_EVALUATOR,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 
 #######################################################################
@@ -190,13 +190,13 @@ EVALUATORS = Registry(
 VISUALIZERS = Registry(
     'visualizer',
     parent=MMENGINE_VISUALIZERS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )
 # Backends to save the visualization results, like TensorBoard, WandB.
 VISBACKENDS = Registry(
     'vis_backend',
     parent=MMENGINE_VISBACKENDS,
-    locations=['lada.basicvsrpp.mmagic'],
-    scope='lada.basicvsrpp.mmagic',
+    locations=['lada.models.basicvsrpp.mmagic'],
+    scope='lada.models.basicvsrpp.mmagic',
 )

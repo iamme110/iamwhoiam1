@@ -4,8 +4,8 @@
 
 import numpy as np
 import torch.nn as nn
-from lada.deepmosaics.models.model_util import *
-from lada.deepmosaics.models import model_util
+from lada.models.deepmosaics.models.model_util import *
+from lada.models.deepmosaics.models import model_util
 
 class UpBlock(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size=3, padding=1):
