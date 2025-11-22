@@ -30,7 +30,7 @@ def get_default_gan_inference_config() -> dict:
         ))
 
 
-def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_length, max_clip_size=1024):
+def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_length, max_image_size=1024):
     register_all_modules()
     if device and type(device) == str:
         device = torch.device(device)
@@ -45,14 +45,15 @@ def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_le
     model.cfg = config
     model = model.to(device).eval()
     model.device = device
-    model.cpu_buffer = torch.empty(1, clip_length, 3, max_clip_size, max_clip_size, dtype=torch.uint8, device='cpu', pin_memory=True)
+    # Allocate larger buffers to support dynamic clip sizes up to 512px
+    model.cpu_buffer = torch.empty(1, clip_length, 3, 512, 512, dtype=torch.uint8, device='cpu', pin_memory=True)
     if fp16:
         model.dtype = torch.float16
         model = model.half()
     else:
         model.dtype = torch.float32
 
-    model.inference_buffer = torch.empty(1, clip_length, 3, max_clip_size, max_clip_size, dtype=model.dtype, device=device, memory_format=torch.channels_last_3d)
+    model.inference_buffer = torch.empty(1, clip_length, 3, max_image_size, max_image_size, dtype=model.dtype, device=device, memory_format=torch.channels_last_3d)
     return model
 
 
@@ -96,14 +97,14 @@ def test():
 
     clip_length = 255
     model = load_model("configs/basicvsrpp/mosaic_restoration_generic_stage2.py",
-                       "experiments/basicvsrpp/mosaic_restoration_generic_stage2/iter_100000.pth", device, clip_length=clip_length)
+                        "experiments/basicvsrpp/mosaic_restoration_generic_stage2/iter_100000.pth", device, True, clip_length)
 
     frame1 = torch.randint(0, clip_length, (256, 256, 3), dtype=torch.uint8, device=device)
     frame2 = torch.randint(0, clip_length, (256, 256, 3), dtype=torch.uint8, device=device)
     frame3 = torch.randint(0, clip_length, (256, 256, 3), dtype=torch.uint8, device=device)
     frame4 = torch.randint(0, clip_length, (256, 256, 3), dtype=torch.uint8, device=device)
     video = [frame1, frame2, frame3, frame4]
-    result = inference(model, video, device)
+    result = inference(model, video)
     print(len(result), result[0].shape)
 
 
