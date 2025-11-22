@@ -190,9 +190,6 @@ class MosaicDetector:
         assert max_clip_length > 0
         self.clip_size = clip_size
         self.pad_mode = pad_mode
-
-        # Calculate dynamic clip size based on typical video resolutions to reduce pixelation
-        self.dynamic_clip_sizes = self._calculate_dynamic_clip_sizes(device)
         self.clip_counter = 0
         self.start_ns = 0
         self.start_frame = 0
@@ -222,55 +219,19 @@ class MosaicDetector:
         self.queue_stats["inference_queue_wait_time_get"] = 0
         self.queue_stats["inference_queue_max_size"] = 0
 
-    def _calculate_dynamic_clip_sizes(self, device):
-        """Calculate safe clip sizes based on device VRAM and typical mosaic sizes."""
-        if device is None or device.type != 'cuda':
-            # CPU or no GPU: use conservative sizes
-            return [256, 384, 512]
-
-        try:
-            # Get available VRAM in MB
-            vram_mb = torch.cuda.get_device_properties(device).total_memory // (1024 * 1024)
-            # Reserve some for other operations
-            available_mb = vram_mb * 0.8
-
-            # Calculate max clip size: assume 3 channels, 30 max_clip_length, float16 (2 bytes)
-            # Formula: clip_size^2 * 3 * 30 * 2 * safety_factor
-            max_clip_size = int((available_mb * 1024 * 1024) / (3 * self.max_clip_length * 2 * 2)) ** 0.5
-            max_clip_size = min(max_clip_size, 1024)  # Cap at 1024 to avoid excessive memory
-            max_clip_size = max(max_clip_size, 256)   # Minimum 256
-
-            # Provide tiered sizes: small, medium, large
-            sizes = []
-            sizes.append(256)  # Always include base size
-            if max_clip_size >= 384:
-                sizes.append(384)
-            if max_clip_size >= 512:
-                sizes.append(512)
-            if max_clip_size >= 768 and max_clip_size >= 768:
-                sizes.append(768)
-            if max_clip_size >= 1024:
-                sizes.append(1024)
-
-            logger.debug(f"Dynamic clip sizes for {vram_mb}MB VRAM: {sizes}")
-            return sizes
-        except Exception as e:
-            logger.warning(f"Failed to calculate dynamic clip sizes: {e}, using defaults")
-            return [256, 384, 512]
-
     def _get_clip_size_for_mosaic_area(self, width, height):
-        """Select appropriate clip size based on mosaic area to minimize pixelation."""
+        """Select balanced clip sizes to reduce pixelation while maintaining performance."""
         area = width * height
 
-        # Thresholds based on common resolutions and pixelation impact
-        if area <= 256 * 256:  # Small mosaics: use base size
-            return self.dynamic_clip_sizes[0]
-        elif area <= 512 * 512:  # Medium mosaics
-            return self.dynamic_clip_sizes[1] if len(self.dynamic_clip_sizes) > 1 else self.dynamic_clip_sizes[0]
-        elif area <= 1024 * 1024:  # Large mosaics
-            return self.dynamic_clip_sizes[2] if len(self.dynamic_clip_sizes) > 2 else self.dynamic_clip_sizes[-1]
-        else:  # Very large mosaics: use largest available
-            return self.dynamic_clip_sizes[-1]
+        # More aggressive scaling for very large mosaics to prevent pixelation
+        if area > 1200 * 1200:  # Extremely large mosaics
+            return 512
+        elif area > 600 * 600:  # Very large mosaics
+            return 384
+        elif area > 300 * 300:  # Large mosaics
+            return 320
+        else:  # Small to medium mosaics
+            return 256
 
     def start(self, start_ns):
         assert self.frame_feeder_queue.empty()
