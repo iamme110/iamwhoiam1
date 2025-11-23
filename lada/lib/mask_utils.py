@@ -67,22 +67,45 @@ def create_blend_mask(crop_mask):
     # Maximum inclusivity: process any pixel with any mosaic content
     blend = torch.maximum(mask, (mask > 0).float())
 
-    # Use 9x9 kernel for extensive connectivity
-    kernel_size = 9
-    kernel = torch.ones(kernel_size, kernel_size, device=blend.device, dtype=blend.dtype)
+    # Multi-scale dilation approach for ultimate edge coverage
 
-    # Three dilation passes for complete edge coverage
-    for _ in range(3):
+    # Phase 1: 13x13 kernel with 5 passes for extensive connectivity
+    kernel_size_1 = 13
+    kernel_1 = torch.ones(kernel_size_1, kernel_size_1, device=blend.device, dtype=blend.dtype)
+    for _ in range(5):
         blend_dilated = F.conv2d(blend.unsqueeze(0).unsqueeze(0),
-                               kernel.unsqueeze(0).unsqueeze(0),
-                               padding=kernel_size//2).squeeze()
-        # Include any area that has any neighboring mosaic content
-        new_coverage = (blend_dilated > 0) & (blend == 0)
+                               kernel_1.unsqueeze(0).unsqueeze(0),
+                               padding=kernel_size_1//2).squeeze()
+        # Include areas with very minimal neighboring content (ultra-aggressive)
+        new_coverage = (blend_dilated >= 0.01) & (blend == 0)  # Very low threshold
         blend = torch.maximum(blend, new_coverage.float())
 
-    # Final safety: ensure absolute comprehensive coverage
+    # Additional morphological operations for edge cases
+    # Second pass with larger kernel for isolated edge squares
+    kernel_size_large = 15
+    kernel_large = torch.ones(kernel_size_large, kernel_size_large, device=blend.device, dtype=blend.dtype)
+
+    blend_dilated_large = F.conv2d(blend.unsqueeze(0).unsqueeze(0),
+                                 kernel_large.unsqueeze(0).unsqueeze(0),
+                                 padding=kernel_size_large//2).squeeze()
+    # Catch any remaining isolated mosaic areas with maximum reach
+    isolated_coverage = (blend_dilated_large > 0) & (blend == 0)
+    blend = torch.maximum(blend, isolated_coverage.float())
+
+    # Phase 3: Final comprehensive connectivity check
+    kernel_size_final = 21
+    kernel_final = torch.ones(kernel_size_final, kernel_size_final, device=blend.device, dtype=blend.dtype)
+    blend_dilated_final = F.conv2d(blend.unsqueeze(0).unsqueeze(0),
+                                 kernel_final.unsqueeze(0).unsqueeze(0),
+                                 padding=kernel_size_final//2).squeeze()
+    # Ensure absolute connectivity across entire mask
+    connectivity_coverage = (blend_dilated_final >= 0.001) & (blend == 0)
+    blend = torch.maximum(blend, connectivity_coverage.float())
+
+    # Ultimate safety checks - multiple thresholds for absolute coverage
     blend = torch.maximum(blend, (mask > 0).float())
-    blend = torch.maximum(blend, (mask > 0.01).float())  # Catch any remaining traces
+    blend = torch.maximum(blend, (mask > 0.0001).float())  # Catch microscopic traces
+    blend = torch.maximum(blend, (blend_dilated >= 0.0001).float())  # Ensure total connectivity
 
     assert blend.shape == mask.shape
     return blend
