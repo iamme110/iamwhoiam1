@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -10,7 +11,6 @@ from fractions import Fraction
 from typing import Callable, Iterator, Tuple
 from collections import deque
 import heapq
-from functools import lru_cache
 
 import av
 import cv2
@@ -19,6 +19,7 @@ import numpy as np
 
 from lada.lib import Image, Mask, VideoMetadata, os_utils
 
+logger = logging.getLogger(__name__)
 
 def read_video_frames(path: str, float32: bool = True, start_idx: int = 0, end_idx: int | None = None, normalize_neg1_pos1 = False, binary_frames=False) -> list[np.ndarray]:
     with VideoReaderOpenCV(path) as video_reader:
@@ -374,14 +375,14 @@ def get_available_video_encoder_codecs():
 
 
 class VideoThumbnailer:
-    """Generate video thumbnails at specific timestamps using OpenCV for fast seeking"""
 
-    def __init__(self, video_path: str):
+    def __init__(self, video_path: str, thumb_width: int, thumb_height: int):
         self.video_path = video_path
         self.cap = None
-        # LRU cache for recently accessed frames to avoid re-seeking for nearby timestamps
-        self._frame_cache = {}
-        self._cache_max_size = 20  # Increased cache size for better performance
+        self.thumb_width = thumb_width
+        self.thumb_height = thumb_height
+        self._frame_cache = {} # LRU cache for recently accessed frames to avoid re-seeking for nearby timestamps
+        self._cache_max_size = 60
         self._cache_access_order = []  # Track access order for LRU
 
     def __enter__(self):
@@ -404,7 +405,10 @@ class VideoThumbnailer:
         self._frame_cache.clear()
         self._cache_access_order.clear()
 
-    def _get_cached_frame(self, timestamp_ms: float) -> np.ndarray | None:
+    def _get_fallback_thumbnail(self):
+        return np.zeros(shape=(self.thumb_height, self.thumb_width, 3), dtype=np.uint8)
+
+    def _get_cached_thumbnail(self, timestamp_ms: float) -> np.ndarray | None:
         """Get frame from cache if available and recent enough"""
         # Round to nearest 100ms for caching (avoids too many cache entries)
         cache_key = round(timestamp_ms / 100) * 100
@@ -417,7 +421,7 @@ class VideoThumbnailer:
             return self._frame_cache[cache_key].copy()
         return None
 
-    def _cache_frame(self, timestamp_ms: float, frame: np.ndarray):
+    def _cache_thumbnail(self, timestamp_ms: float, frame: np.ndarray):
         """Add frame to cache with LRU eviction"""
         cache_key = round(timestamp_ms / 100) * 100
 
@@ -434,42 +438,27 @@ class VideoThumbnailer:
             oldest_key = self._cache_access_order.pop(0)
             del self._frame_cache[oldest_key]
 
-    @lru_cache(maxsize=100)
-    def _get_video_fps(self) -> float:
-        """Get video FPS with caching"""
-        return self.cap.get(cv2.CAP_PROP_FPS)
-
-    def get_thumbnail(self, timestamp_ns: int, width: int = 160, height: int = 90) -> np.ndarray:
-        """Generate thumbnail at specified timestamp in nanoseconds using fast OpenCV seeking"""
+    def get_thumbnail(self, timestamp_ns: int) -> np.ndarray:
         try:
-
             # Convert nanoseconds to milliseconds for OpenCV
             timestamp_ms = timestamp_ns / 1_000_000
 
-            # Check cache first
-            cached_frame = self._get_cached_frame(timestamp_ms)
-            if cached_frame is not None:
-                # Resize cached frame to requested dimensions
-                return cv2.resize(cached_frame, (width, height), interpolation=cv2.INTER_LINEAR)
+            cached_thumbnail = self._get_cached_thumbnail(timestamp_ms)
+            if cached_thumbnail is not None:
+                return cached_thumbnail
 
-            # Fast seek: OpenCV CAP_PROP_POS_MSEC allows direct timestamp seeking
-            # This is much faster than PyAV's frame-by-frame decoding
             self.cap.set(cv2.CAP_PROP_POS_MSEC, timestamp_ms)
 
-            # Read the frame at the exact timestamp
             ret, frame = self.cap.read()
 
             if ret and frame is not None:
-                # Cache the original frame before resizing
-                self._cache_frame(timestamp_ms, frame)
+                thumbnail = cv2.resize(frame, (self.thumb_width, self.thumb_height), interpolation=cv2.INTER_LINEAR)
+                self._cache_thumbnail(timestamp_ms, thumbnail)
 
-                # Resize to target dimensions using fast interpolation
-                thumbnail = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
                 return thumbnail
 
-            return np.zeros(shape=(height, width, 3), dtype=np.uint8)
+            return self._get_fallback_thumbnail()
 
         except Exception as e:
-            # Log error for debugging but don't crash
-            print(f"Error generating thumbnail at {timestamp_ns}: {e}")
-            return np.zeros(shape=(height, width, 3), dtype=np.uint8)
+            logger.error(f"Error generating thumbnail at {timestamp_ns}: {e}")
+            return self._get_fallback_thumbnail()

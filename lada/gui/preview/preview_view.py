@@ -380,10 +380,10 @@ class PreviewView(Gtk.Widget):
                         return
 
                 if self._video_thumbnailer is None:
-                    self._video_thumbnailer = video_utils.VideoThumbnailer(self.video_metadata.video_file)
+                    self._video_thumbnailer = video_utils.VideoThumbnailer(self.video_metadata.video_file, thumb_width=self._current_thumbnail_size[0], thumb_height=self._current_thumbnail_size[1])
                     self._video_thumbnailer.open()
 
-                thumbnail = self._video_thumbnailer.get_thumbnail(timestamp_ns, width=self._current_thumbnail_size[0], height=self._current_thumbnail_size[1])
+                thumbnail = self._video_thumbnailer.get_thumbnail(timestamp_ns)
                 self.seek_preview_popover.set_thumbnail(thumbnail)
 
         with self._thread_counter_lock:
