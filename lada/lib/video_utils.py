@@ -385,28 +385,19 @@ class VideoThumbnailer:
         self._cache_access_order = []  # Track access order for LRU
 
     def __enter__(self):
-        if self.cap is None:
-            self.cap = cv2.VideoCapture(self.video_path)
-            if not self.cap.isOpened():
-                raise Exception(f"Unable to open video file: {self.video_path}")
+        self.open()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.cap:
-            self.cap.release()
-            self.cap = None
-        self._frame_cache.clear()
-        self._cache_access_order.clear()
+        self.close()
 
-    def _ensure_open(self):
-        """Ensure the video capture is open"""
+    def open(self):
         if self.cap is None:
             self.cap = cv2.VideoCapture(self.video_path)
             if not self.cap.isOpened():
                 raise Exception(f"Unable to open video file: {self.video_path}")
 
     def close(self):
-        """Close the video capture"""
         if self.cap:
             self.cap.release()
             self.cap = None
@@ -448,11 +439,9 @@ class VideoThumbnailer:
         """Get video FPS with caching"""
         return self.cap.get(cv2.CAP_PROP_FPS)
 
-    def get_thumbnail(self, timestamp_ns: int, width: int = 160, height: int = 90) -> np.ndarray | None:
+    def get_thumbnail(self, timestamp_ns: int, width: int = 160, height: int = 90) -> np.ndarray:
         """Generate thumbnail at specified timestamp in nanoseconds using fast OpenCV seeking"""
         try:
-            # Ensure video capture is open
-            self._ensure_open()
 
             # Convert nanoseconds to milliseconds for OpenCV
             timestamp_ms = timestamp_ns / 1_000_000
@@ -478,9 +467,9 @@ class VideoThumbnailer:
                 thumbnail = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
                 return thumbnail
 
-            return None
+            return np.zeros(shape=(height, width, 3), dtype=np.uint8)
 
         except Exception as e:
             # Log error for debugging but don't crash
             print(f"Error generating thumbnail at {timestamp_ns}: {e}")
-            return None
+            return np.zeros(shape=(height, width, 3), dtype=np.uint8)

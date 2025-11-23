@@ -61,7 +61,10 @@ class PreviewView(Gtk.Widget):
         self._buffer_queue_min_thresh_time_auto = self._buffer_queue_min_thresh_time_auto_min
         self._shortcuts_manager: ShortcutsManager | None = None
 
-        # Shared VideoThumbnailer instance for seek preview
+        self.seek_preview_popover = SeekPreviewPopover()
+        self.seek_preview_popover.set_parent(self.box_playback_controls)
+        self._last_seek_preview_timestamp_ns = 0
+        self._last_seek_preview_mouse_x = 0.0
         self._video_thumbnailer: video_utils.VideoThumbnailer | None = None
         self._thumbnailer_lock = threading.Lock()
         self._thread_counter = 0
@@ -303,26 +306,20 @@ class PreviewView(Gtk.Widget):
             self.spinner_overlay.set_visible(False)
 
     def show_cursor_position(self, cursor_position_ns: int | None, x: float | None):
-        # Handle seek preview or cursor time display
         if x is not None and cursor_position_ns is not None:
-            seek_preview_enabled = getattr(self._config, 'seek_preview_enabled', False) if self._config else False
-            if seek_preview_enabled:
-                # Hide cursor time label and show seek preview
+            if self._config.seek_preview_enabled:
                 self.label_cursor_time.set_visible(False)
-                self.update_seek_preview(cursor_position_ns, x)
+                if self._should_update_seek_preview(cursor_position_ns, x):
+                    self.update_seek_preview(cursor_position_ns, x)
             else:
-                # Show cursor time label below timeline (original implementation)
                 self.label_cursor_time.set_visible(True)
                 label_text = self.get_time_label_text(cursor_position_ns)
                 self.label_cursor_time.set_text(label_text)
-                # Hide any existing seek preview popover
-                if hasattr(self, 'seek_preview_popover'):
-                    self.seek_preview_popover.popdown()
+                self.seek_preview_popover.popdown()
         else:
             # Hide both cursor time label and seek preview when mouse leaves
             self.label_cursor_time.set_visible(False)
-            if hasattr(self, 'seek_preview_popover'):
-                self.seek_preview_popover.popdown()
+            self.seek_preview_popover.popdown()
 
     def _get_seek_preview_popover_pointing_rect(self, mouse_x: float) -> Gdk.Rectangle:
         # Position popover above the timeline, centered on mouse cursor
@@ -354,15 +351,7 @@ class PreviewView(Gtk.Widget):
 
         return pointing_rect
 
-    def update_seek_preview(self, timestamp_ns: int, mouse_x: float):
-        """Update the seek preview popover at the specified position"""
-        # Performance optimization: only update thumbnail if cursor moved significantly
-        # Initialize tracking variables if they don't exist
-        if not hasattr(self, '_last_seek_preview_timestamp_ns'):
-            self._last_seek_preview_timestamp_ns = 0
-        if not hasattr(self, '_last_seek_preview_mouse_x'):
-            self._last_seek_preview_mouse_x = 0.0
-
+    def _should_update_seek_preview(self, timestamp_ns: int, mouse_x: float):
         # Calculate movement deltas
         time_delta_ns = abs(timestamp_ns - self._last_seek_preview_timestamp_ns)
         position_delta = abs(mouse_x - self._last_seek_preview_mouse_x)
@@ -371,64 +360,32 @@ class PreviewView(Gtk.Widget):
         time_threshold_ns = 2 * Gst.SECOND  # 2 seconds
         position_threshold = 10  # 10 pixels
 
-        if time_delta_ns < time_threshold_ns and position_delta < position_threshold:
-            return  # Skip update to improve performance
+        return time_delta_ns > time_threshold_ns or position_delta > position_threshold
 
-        # Update tracking variables
+    def update_seek_preview(self, timestamp_ns: int, mouse_x: float):
         self._last_seek_preview_timestamp_ns = timestamp_ns
         self._last_seek_preview_mouse_x = mouse_x
 
-        # Hide existing popover if visible
-        if hasattr(self, 'seek_preview_popover'):
-            self.seek_preview_popover.popdown()
-        else:
-            # Create popover if it doesn't exist
-            self.seek_preview_popover = SeekPreviewPopover()
-            self.seek_preview_popover.set_parent(self.box_playback_controls)
-
-        # Set time label
         time_text = self.get_time_label_text(timestamp_ns)
         self.seek_preview_popover.set_text(time_text)
-
-        # Show spinner initially
         self.seek_preview_popover.show_spinner()
-
         self.seek_preview_popover.set_pointing_to(self._get_seek_preview_popover_pointing_rect(mouse_x))
         self.seek_preview_popover.popup()
 
-        # Generate thumbnail asynchronously
         def generate_thumbnail(current_thread_id):
-            try:
-                # Use shared VideoThumbnailer with proper thread synchronization
-                with self._thumbnailer_lock:
-                    with self._thread_counter_lock:
-                        if current_thread_id < self._thread_counter:
-                            return
+            with self._thumbnailer_lock:
+                with self._thread_counter_lock:
+                    if current_thread_id < self._thread_counter:
+                        # This thread / thumbnail request has been outdated by a newer thread. Do not request thumb generation.
+                        return
 
-                    if self._video_thumbnailer is None:
-                        self._video_thumbnailer = video_utils.VideoThumbnailer(self.video_metadata.video_file)
+                if self._video_thumbnailer is None:
+                    self._video_thumbnailer = video_utils.VideoThumbnailer(self.video_metadata.video_file)
+                    self._video_thumbnailer.open()
 
-                    thumbnail = self._video_thumbnailer.get_thumbnail(timestamp_ns, width=self._current_thumbnail_size[0], height=self._current_thumbnail_size[1])
+                thumbnail = self._video_thumbnailer.get_thumbnail(timestamp_ns, width=self._current_thumbnail_size[0], height=self._current_thumbnail_size[1])
+                self.seek_preview_popover.set_thumbnail(thumbnail)
 
-                    if thumbnail is not None:
-                        self.seek_preview_popover.set_thumbnail(thumbnail)
-                    else:
-                        # Failed to get thumbnail, hide spinner
-                        def hide_spinner():
-                            self.seek_preview_popover.hide_spinner()
-                            return False
-                        GLib.idle_add(hide_spinner)
-
-            except Exception as e:
-                logger.error(f"Error generating seek preview thumbnail: {e}")
-                # Hide spinner and show error state if needed
-                def hide_spinner():
-                    if hasattr(self, 'seek_preview_popover'):
-                        self.seek_preview_popover.hide_spinner()
-                    return False
-                GLib.idle_add(hide_spinner)
-
-        # Increment thread counter for this request
         with self._thread_counter_lock:
             self._thread_counter += 1
             threading.Thread(target=generate_thumbnail, args=(self._thread_counter,), daemon=True).start()
@@ -635,10 +592,10 @@ class PreviewView(Gtk.Widget):
         if not self.pipeline_manager:
             return
         self._video_preview_init_done = False
-        # Close VideoThumbnailer
         with self._thumbnailer_lock:
+            self._thread_counter += 1 # Invalidate potentially scheduled thread
             if self._video_thumbnailer:
-                self._video_thumbnailer.__exit__(None, None, None)
+                self._video_thumbnailer.close()
                 self._video_thumbnailer = None
         if block:
             self.pipeline_manager.close_video_file()
