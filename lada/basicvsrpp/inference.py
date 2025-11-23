@@ -3,6 +3,7 @@
 
 import logging
 import os.path
+from typing import Dict, Tuple, Optional
 
 import numpy as np
 import torch
@@ -12,6 +13,32 @@ from mmengine.config import Config
 from mmengine.runner import load_checkpoint
 
 logger = logging.getLogger(__name__)
+
+# Buffer pool for CPU buffers to avoid repeated allocations
+_cpu_buffer_pool: Dict[Tuple[int, int, int, int, int], torch.Tensor] = {}
+_inference_buffer_pool: Dict[Tuple[int, int, int, int, int, torch.dtype, torch.device], torch.Tensor] = {}
+
+
+def _get_cpu_buffer(batch_size: int, frames: int, channels: int, height: int, width: int) -> torch.Tensor:
+    """Get or create a pinned CPU buffer from pool."""
+    key = (batch_size, frames, channels, height, width)
+    if key not in _cpu_buffer_pool:
+        _cpu_buffer_pool[key] = torch.empty(batch_size, frames, channels, height, width,
+                                          dtype=torch.uint8, device='cpu', pin_memory=True)
+        logger.debug(f"Created new CPU buffer: {key}")
+    return _cpu_buffer_pool[key]
+
+
+def _get_inference_buffer(batch_size: int, frames: int, channels: int, height: int, width: int,
+                         dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    """Get or create an inference buffer from pool."""
+    key = (batch_size, frames, channels, height, width, dtype, device)
+    if key not in _inference_buffer_pool:
+        _inference_buffer_pool[key] = torch.empty(batch_size, frames, channels, height, width,
+                                                dtype=dtype, device=device,
+                                                memory_format=torch.channels_last_3d)
+        logger.debug(f"Created new inference buffer: {key}")
+    return _inference_buffer_pool[key]
 
 def get_default_gan_inference_config() -> dict:
     return dict(
@@ -73,8 +100,9 @@ def inference(model, video: list[torch.Tensor], max_frames=-1):
         inference_view.div_(255.0)
 
         if max_frames > 0:
-            for i in range(0, input.shape[1], max_frames):
-                output = model(inputs=model.cpu_buffer[:, i:i + max_frames])
+            result = []
+            for i in range(0, input_frame_count, max_frames):
+                output = model(inputs=inference_view[:, i:i + max_frames])
                 result.append(output)
             result = torch.cat(result, dim=1)
         else:
