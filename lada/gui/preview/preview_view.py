@@ -5,7 +5,7 @@ import logging
 import pathlib
 import threading
 
-from gi.repository import Gtk, GObject, GLib, Gio, Gst, Adw, Gdk, GdkPixbuf, Graphene
+from gi.repository import Gtk, GObject, GLib, Gio, Gst, Adw, Gdk, Graphene
 
 from lada import LOG_LEVEL
 from lada.gui import utils
@@ -69,7 +69,7 @@ class PreviewView(Gtk.Widget):
         self._thumbnailer_lock = threading.Lock()
         self._thread_counter = 0
         self._thread_counter_lock = threading.Lock()
-        self._current_thumbnail_size = (220, 124)
+        self._thumbnail_size = (220, 124)
 
         self.eos = False
 
@@ -321,30 +321,31 @@ class PreviewView(Gtk.Widget):
             self.label_cursor_time.set_visible(False)
             self.seek_preview_popover.popdown()
 
-    def _get_seek_preview_popover_pointing_rect(self, mouse_x: float) -> Gdk.Rectangle:
+    def _get_seek_preview_popover_pointing_rect(self, mouse_x_in_timeline: float) -> Gdk.Rectangle | None:
         # Position popover above the timeline, centered on mouse cursor
         # Transform mouse coordinates from timeline to playback controls coordinate space
-        success, transformed_point = self.widget_timeline.compute_point(self.box_playback_controls, Graphene.Point().init(mouse_x, 0))
+        success, transformed_point = self.widget_timeline.compute_point(self.box_playback_controls, Graphene.Point().init(mouse_x_in_timeline, 0))
         if success:
             mouse_x_in_controls = transformed_point.x
         else:
-            mouse_x_in_controls = mouse_x
+            logger.error(f"Couldn't convert cursor coordinates from timeline to controls box: x: {mouse_x_in_timeline}")
+            return None
 
         # Calculate popover dimensions with space for time label below thumbnail
-        popover_width = self._current_thumbnail_size[0] + 4  # thumbnail + minimal margins
+        controls_width = self.box_playback_controls.get_allocated_width()
+        # popover_width, _, _, _ = self.seek_preview_popover.measure(Gtk.Orientation.HORIZONTAL, controls_width)
+        popover_width = self._thumbnail_size[0] + 18 # TODO: Workaround as measuring the Gtk.Popover does not return the expected value
 
-        controls_allocation = self.box_playback_controls.get_allocation()
-
-        # Center the popover horizontally on the mouse cursor with bounds checking
         pointing_rect = Gdk.Rectangle()
-        # For TOP position, center the popover on mouse cursor
+        # Center the popover horizontally on mouse cursor
         pointing_rect.x = int(mouse_x_in_controls - popover_width // 2)
-        # Ensure popover stays within controls area horizontally
-        pointing_rect.x = max(5, min(pointing_rect.x, controls_allocation.width - popover_width - 5))
+        # Ensure popover stays within horizontal controls area
+        pointing_rect.x = max(0, min(pointing_rect.x, controls_width - popover_width))
 
-        # Position above the timeline - point to the timeline area
+        # Vertical Position slightly above the timeline
         timeline_allocation = self.widget_timeline.get_allocation()
-        pointing_rect.y = timeline_allocation.y - 5  # Point just above the timeline
+        y_offset = 5
+        pointing_rect.y = timeline_allocation.y - y_offset
 
         pointing_rect.width = popover_width
         pointing_rect.height = 1
@@ -369,7 +370,10 @@ class PreviewView(Gtk.Widget):
         time_text = self.get_time_label_text(timestamp_ns)
         self.seek_preview_popover.set_text(time_text)
         self.seek_preview_popover.show_spinner()
-        self.seek_preview_popover.set_pointing_to(self._get_seek_preview_popover_pointing_rect(mouse_x))
+        pointing_rect = self._get_seek_preview_popover_pointing_rect(mouse_x)
+        if pointing_rect is None:
+            return
+        self.seek_preview_popover.set_pointing_to(pointing_rect)
         self.seek_preview_popover.popup()
 
         def generate_thumbnail(current_thread_id):
@@ -380,7 +384,7 @@ class PreviewView(Gtk.Widget):
                         return
 
                 if self._video_thumbnailer is None:
-                    self._video_thumbnailer = video_utils.VideoThumbnailer(self.video_metadata.video_file, thumb_width=self._current_thumbnail_size[0], thumb_height=self._current_thumbnail_size[1])
+                    self._video_thumbnailer = video_utils.VideoThumbnailer(self.video_metadata.video_file, thumb_width=self._thumbnail_size[0], thumb_height=self._thumbnail_size[1])
                     self._video_thumbnailer.open()
 
                 thumbnail = self._video_thumbnailer.get_thumbnail(timestamp_ns)
