@@ -33,7 +33,7 @@ Boxes = List[Box] # [4] int64
 class Scene:
     def __init__(self, file_path: Path, video_meta_data: VideoMetadata):
         self.file_path = file_path
-        self.video_meta_data = video_meta_data
+        # self.video_meta_data = video_meta_data
         self.frames: Images = []
         self.masks: Masks = []
         self.boxes: Boxes = []
@@ -170,7 +170,7 @@ class Clip:
         return self.frames[item], self.masks[item], self.boxes[item]
 
 class MosaicDetector:
-    def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4):
+    def __init__(self, model: MosaicDetectionModel, video_file, frame_detection_queue: queue.Queue, mosaic_clip_queue: queue.Queue, max_clip_length=30, clip_size=256, device=None, pad_mode='reflect', batch_size=4, downscale_size: tuple[int, int] | None = None):
         self.model = model
         self.video_file = video_file
         self.device = torch.device(device) if device is not None else device
@@ -194,6 +194,7 @@ class MosaicDetector:
         self.inference_worker_thread_should_be_running = False
         self.stop_requested = False
         self.batch_size = batch_size
+        self.downscale_size = downscale_size
 
         self.queue_stats = {}
         self.queue_stats["frame_detection_queue_wait_time_put"] = 0
@@ -329,7 +330,7 @@ class MosaicDetector:
 
     def _frame_feeder_worker(self):
         logger.debug("frame feeder: started")
-        with video_utils.VideoReader(self.video_file) as video_reader:
+        with video_utils.VideoReader(self.video_file, downscale_size=self.downscale_size) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
             video_frames_generator = video_reader.frames()

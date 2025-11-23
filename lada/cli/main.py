@@ -13,8 +13,9 @@ import torch
 from lada import MODEL_WEIGHTS_DIR, VERSION
 from lada.cli import utils
 from lada.lib import audio_utils
+from lada.lib import video_utils
 from lada.lib.frame_restorer import load_models, FrameRestorer
-from lada.lib.video_utils import get_video_meta_data, VideoWriter
+from lada.lib.video_utils import VideoWriter
 
 def setup_argparser() -> argparse.ArgumentParser:
     examples_header_text = _("Examples:")
@@ -52,6 +53,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general.add_argument('--list-devices', action='store_true', help=_("List available devices and exit"))
     group_general.add_argument('--version', action='store_true', help=_("Display version and exit"))
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
+    group_general.add_argument('--resolution-limit', type=int, default=None, help=_("Downscale input video if resolution is higher than this value. Value is used to limit width for horizontal and height for vertical videos. (default: %(default)s)"))
 
     export = parser.add_argument_group(_('Export (Encoder settings)'))
     export.add_argument('--codec', type=str, default="h264", help=_('FFmpeg video codec. E.g. "h264, "hevc" or "hevc_nvenc". Use "--list-codecs" to see what\'s available. (default: %(default)s)'))
@@ -75,18 +77,19 @@ def setup_argparser() -> argparse.ArgumentParser:
     return parser
 
 def process_video_file(input_path: str, output_path: str, device: torch.device, mosaic_restoration_model, mosaic_detection_model,
-                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, moov_front, preset, custom_encoder_options):
-    video_metadata = get_video_meta_data(input_path)
-
-    frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
-                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
+                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, moov_front, preset, custom_encoder_options, resolution_limit):
+    video_metadata = video_utils.get_video_meta_data(input_path)
+    rescale_size = video_utils.get_target_resolution(video_metadata, resolution_limit)
+    output_width, output_height = rescale_size if rescale_size is not None else (video_metadata.video_width, video_metadata.video_height)
+    frame_restorer = FrameRestorer(device, video_metadata, max_clip_length, mosaic_restoration_model_name,
+                                   mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode, downscale_size=rescale_size)
     success = True
     video_tmp_file_output_path = os.path.join(tempfile.gettempdir(), f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
     pathlib.Path(output_path).parent.mkdir(exist_ok=True, parents=True)
     try:
         frame_restorer.start()
 
-        with VideoWriter(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
+        with VideoWriter(video_tmp_file_output_path, output_width, output_height,
                          video_metadata.video_fps_exact, codec=codec, crf=crf, moov_front=moov_front,
                          time_base=video_metadata.time_base, preset=preset,
                          custom_encoder_options=custom_encoder_options) as video_writer:
@@ -166,7 +169,7 @@ def main():
         try:
             process_video_file(input_path=input_path, output_path=output_path, device=device, mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
                                mosaic_restoration_model_name=args.mosaic_restoration_model, preferred_pad_mode=preferred_pad_mode, max_clip_length=args.max_clip_length,
-                               codec=args.codec, crf=args.crf, moov_front=args.moov_front, preset=args.preset, custom_encoder_options=args.custom_encoder_options)
+                               codec=args.codec, crf=args.crf, moov_front=args.moov_front, preset=args.preset, custom_encoder_options=args.custom_encoder_options, resolution_limit=args.resolution_limit)
         except KeyboardInterrupt:
             print(_("Received Ctrl-C, stopping restoration."))
             break

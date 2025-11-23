@@ -13,7 +13,7 @@ import torch
 import numpy as np
 
 from lada import LOG_LEVEL
-from lada.lib import image_utils, video_utils, threading_utils, mask_utils
+from lada.lib import image_utils, video_utils, threading_utils, mask_utils, VideoMetadata
 from lada.lib import visualization_utils
 from lada.lib.mosaic_detector import MosaicDetector
 from lada.lib.mosaic_detection_model import MosaicDetectionModel
@@ -50,13 +50,13 @@ def load_models(
 
 
 class FrameRestorer:
-    def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
+    def __init__(self, device, video_meta_data: VideoMetadata, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode,
-                 mosaic_detection=False):
+                 mosaic_detection=False, downscale_size: tuple[int, int] | None = None):
         self.device = torch.device(device)
         self.mosaic_restoration_model_name = mosaic_restoration_model_name
         self.max_clip_length = max_clip_length
-        self.video_meta_data = video_utils.get_video_meta_data(video_file)
+        self.video_meta_data = video_meta_data
         self.mosaic_detection_model = mosaic_detection_model
         self.mosaic_restoration_model = mosaic_restoration_model
         self.preferred_pad_mode = preferred_pad_mode
@@ -65,6 +65,7 @@ class FrameRestorer:
         self.mosaic_detection = mosaic_detection
         self.eof = False
         self.stop_requested = False
+        self.downscale_size = downscale_size
 
         # limit queue size to approx 512MB
         self.frame_restoration_queue = queue.Queue()
@@ -89,7 +90,8 @@ class FrameRestorer:
                                               mosaic_clip_queue=self.mosaic_clip_queue,
                                               device=self.device,
                                               max_clip_length=self.max_clip_length,
-                                              pad_mode=self.preferred_pad_mode)
+                                              pad_mode=self.preferred_pad_mode,
+                                              downscale_size=self.downscale_size)
 
         self.clip_restoration_thread: threading.Thread | None = None
         self.frame_restoration_thread: threading.Thread | None = None
@@ -320,7 +322,7 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with video_utils.VideoReader(self.video_meta_data.video_file) as video_reader:
+        with video_utils.VideoReader(self.video_meta_data.video_file, self.downscale_size) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
 

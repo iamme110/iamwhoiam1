@@ -15,6 +15,7 @@ import av
 import cv2
 import torch
 import numpy as np
+from av.filter.graph import Graph
 
 from lada.lib import Image, Mask, VideoMetadata, os_utils
 
@@ -61,6 +62,15 @@ def pad_to_compatible_size_for_video_codecs(imgs):
     else:
         return [np.pad(img, ((0, pad_h), (0, pad_w), (0,0))).astype(np.uint8) for img in imgs]
 
+def get_target_resolution(video_meta_data: VideoMetadata, resolution_limit: int | None) -> tuple[int, int] | None:
+    if resolution_limit is None or min(video_meta_data.video_width, video_meta_data.video_height) <= resolution_limit:
+        return None
+    aspect_ratio = video_meta_data.video_width / video_meta_data.video_height
+    longer_side = resolution_limit * aspect_ratio
+    longer_side = int(longer_side - longer_side % 4) # round down to nearest divisible by 4 to be compatible with most codecs
+    horizontal_orientation = video_meta_data.video_width > video_meta_data.video_height
+    return (longer_side, resolution_limit) if horizontal_orientation else (resolution_limit, longer_side)
+
 @contextmanager
 def VideoReaderOpenCV(*args, **kwargs):
     cap = cv2.VideoCapture(*args, **kwargs)
@@ -72,9 +82,10 @@ def VideoReaderOpenCV(*args, **kwargs):
         cap.release()
 
 class VideoReader:
-    def __init__(self, file):
+    def __init__(self, file, downscale_size: tuple[int, int] | None = None):
         self.file = file
         self.container = None
+        self.downscale_size = downscale_size
 
     def __enter__(self):
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
@@ -86,10 +97,29 @@ class VideoReader:
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
 
+    @staticmethod
+    def _link_nodes(*nodes):
+        for c, n in zip(nodes, nodes[1:]):
+            c.link_to(n)
+
     def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
         self.container.streams.video[0].thread_type = 'AUTO'
 
+        graph = None
+        if self.downscale_size is not None:
+            w, h = self.downscale_size
+            graph = Graph()
+            self._link_nodes(
+                graph.add_buffer(template=self.container.streams.video[0]),
+                graph.add("scale", f"{w}:{h}:flags=bicubic"),
+                graph.add('buffersink')
+            )
+            graph.configure()
+
         for frame in self.container.decode(video=0):
+            if graph:
+                graph.push(frame)
+                frame = graph.pull()
             nd_frame = frame.to_ndarray(format='bgr24')
             torch_frame = torch.from_numpy(nd_frame)
             yield torch_frame, frame.pts
