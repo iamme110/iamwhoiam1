@@ -45,7 +45,6 @@ def load_model(config: str | dict | None, checkpoint_path, device, fp16, clip_le
     model.cfg = config
     model = model.to(device).eval()
     model.device = device
-    # Allocate larger buffers to support dynamic clip sizes up to 512px
     model.cpu_buffer = torch.empty(1, clip_length, 3, 256, 256, dtype=torch.uint8, device='cpu', pin_memory=True)
     if fp16:
         model.dtype = torch.float16
