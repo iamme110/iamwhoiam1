@@ -104,8 +104,6 @@ class ConfigSidebar(Gtk.Box):
         self.spin_row_clip_max_duration.set_value(config.max_clip_duration)
         self.switch_row_mute_audio.set_active(config.mute_audio)
 
-        # Seek preview size is now auto-scaled based on screen resolution
-
         self.switch_row_seek_preview.set_active(config.seek_preview_enabled)
 
         # init color scheme

@@ -44,7 +44,7 @@ class Config(GObject.Object):
         'post_export_action': PostExportAction.NONE.value,
         'post_export_custom_command': '',
         'preview_buffer_duration': 0,
-        'seek_preview_enabled': False,
+        'seek_preview_enabled': True,
         'show_mosaic_detections': False,
         'temp_directory': tempfile.gettempdir(),
     }
