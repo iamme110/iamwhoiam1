@@ -20,7 +20,7 @@ _inference_buffer_pool: Dict[Tuple[int, int, int, int, int, torch.dtype, torch.d
 
 
 def _get_cpu_buffer(batch_size: int, frames: int, channels: int, height: int, width: int) -> torch.Tensor:
-    """Get or create a pinned CPU buffer from pool."""
+    """Get or create a pinned CPU buffer from pool to avoid repeated allocations."""
     key = (batch_size, frames, channels, height, width)
     if key not in _cpu_buffer_pool:
         _cpu_buffer_pool[key] = torch.empty(batch_size, frames, channels, height, width,
@@ -31,7 +31,7 @@ def _get_cpu_buffer(batch_size: int, frames: int, channels: int, height: int, wi
 
 def _get_inference_buffer(batch_size: int, frames: int, channels: int, height: int, width: int,
                          dtype: torch.dtype, device: torch.device) -> torch.Tensor:
-    """Get or create an inference buffer from pool."""
+    """Get or create an inference buffer from pool to avoid repeated allocations."""
     key = (batch_size, frames, channels, height, width, dtype, device)
     if key not in _inference_buffer_pool:
         _inference_buffer_pool[key] = torch.empty(batch_size, frames, channels, height, width,
@@ -39,6 +39,14 @@ def _get_inference_buffer(batch_size: int, frames: int, channels: int, height: i
                                                 memory_format=torch.channels_last_3d)
         logger.debug(f"Created new inference buffer: {key}")
     return _inference_buffer_pool[key]
+
+
+def clear_buffer_pools():
+    """Clear buffer pools to free memory if needed."""
+    global _cpu_buffer_pool, _inference_buffer_pool
+    _cpu_buffer_pool.clear()
+    _inference_buffer_pool.clear()
+    logger.debug("Buffer pools cleared")
 
 def get_default_gan_inference_config() -> dict:
     return dict(
