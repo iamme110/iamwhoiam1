@@ -29,12 +29,14 @@ def crop_to_box_v3(box: Box, img: Image, mask_img: Mask, target_size: tuple[int,
     target_width, target_height = target_size
     t, l, b, r = box
     width, height = r - l + 1,  b - t + 1
-    # Reduce border for larger mosaics to avoid excessive downscaling that causes pixelation
+    # For complete edge coverage, increase border for large mosaics
+    # This ensures all border mosaic squares are included in processing
     max_dim = max(width, height)
     if max_dim > large_mosaic_threshold:
-        logger.debug(f"Reducing border for large mosaic ({max_dim}px > {large_mosaic_threshold}px) to prevent pixelation")
-        # Reduce border by half for mosaics larger than threshold to prevent pixelation
-        border_size *= 0.5
+        logger.debug(f"Increasing border for large mosaic ({max_dim}px > {large_mosaic_threshold}px) to ensure edge coverage")
+        # Increase border by 50% for large mosaics to capture all edge squares
+        # This may cause some pixelation in distant areas but ensures complete mosaic coverage
+        border_size *= 1.5
     border_size = max(10, int(max(width, height) * border_size)) if border_size > 0. else 0
     t, l, b, r = max(0, t-border_size), max(0, l-border_size), min(img.shape[0]-1, b+border_size), min(img.shape[1]-1, r+border_size)
     width, height = r - l + 1,  b - t + 1
