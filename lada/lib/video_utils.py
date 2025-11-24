@@ -5,7 +5,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from contextlib import contextmanager
 from fractions import Fraction
 from typing import Callable, Iterator, Tuple
@@ -353,6 +355,61 @@ class VideoWriter:
         if out_packet:
             self.output_container.mux(out_packet)
         self.output_container.close()
+
+def parse_srt(content: str) -> list[tuple[float, float, str]]:
+    subtitles = []
+    lines = content.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.isdigit():
+            i += 1
+            if i < len(lines) and '-->' in lines[i]:
+                time_line = lines[i]
+                start, end = time_line.split(' --> ')
+                def parse_time(t: str) -> float:
+                    h, m, s = t.split(':')
+                    if ',' in s:
+                        s, ms = s.split(',')
+                    elif '.' in s:
+                        s, ms = s.split('.')
+                    else:
+                        ms = '0'
+                    return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+                start_time = parse_time(start)
+                end_time = parse_time(end)
+                i += 1
+                text = ''
+                while i < len(lines) and lines[i].strip():
+                    text += lines[i] + '\n'
+                    i += 1
+                text = text.strip()
+                subtitles.append((start_time, end_time, text))
+            else:
+                i += 1
+        else:
+            i += 1
+    return subtitles
+
+def find_subtitle_file(video_path: str) -> str | None:
+    import pathlib
+    import re
+    video_path = pathlib.Path(video_path)
+    srt_path = video_path.with_suffix('.srt')
+    if srt_path.exists():
+        try:
+            with open(srt_path, 'r', encoding='utf-8') as f:
+                content = f.read().lstrip('\ufeff')  # Remove BOM if present
+                # Check for SRT format with timestamps
+                if re.search(r'\d+\n\d{2}:\d{2}:\d{2}[,.]\d{3} --> \d{2}:\d{2}:\d{2}[,.]\d{3}', content):
+                    logger.info(f"Found valid subtitle file: {srt_path}")
+                    return str(srt_path)
+                else:
+                    return None
+        except Exception as e:
+            logger.debug(f"Error reading subtitle file {srt_path}: {e}")
+            return None
+    return None
 
 def is_video_file(file_path):
     SUPPORTED_VIDEO_FILE_EXTENSIONS = {".asf", ".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".wmv",
