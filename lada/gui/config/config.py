@@ -35,6 +35,8 @@ class Config(GObject.Object):
         'export_codec': 'libx264',
         'export_crf': 20,
         'export_directory': None,
+        'export_log_directory': None,
+        'export_logging_enabled': False,
         'file_name_pattern': "{orig_file_name}.restored.mp4",
         'initial_view': 'preview',
         'max_clip_duration': 180,
@@ -69,6 +71,8 @@ class Config(GObject.Object):
         self._post_export_action = self._defaults['post_export_action']
         self._post_export_custom_command = self._defaults['post_export_custom_command']
         self._temp_directory = self._defaults['temp_directory']
+        self._export_log_directory = self._defaults['export_log_directory']
+        self._export_logging_enabled = self._defaults['export_logging_enabled']
 
         self.save_lock = threading.Lock()
         self._style_manager = style_manager
@@ -209,6 +213,28 @@ class Config(GObject.Object):
         self.save()
 
     @GObject.Property()
+    def export_log_directory(self):
+        return self._export_log_directory
+
+    @export_log_directory.setter
+    def export_log_directory(self, value):
+        if value == self._export_log_directory:
+            return
+        self._export_log_directory = value
+        self.save()
+
+    @GObject.Property()
+    def export_logging_enabled(self):
+        return self._export_logging_enabled
+
+    @export_logging_enabled.setter
+    def export_logging_enabled(self, value):
+        if value == self._export_logging_enabled:
+            return
+        self._export_logging_enabled = value
+        self.save()
+
+    @GObject.Property()
     def file_name_pattern(self):
         return self._file_name_pattern
 
@@ -316,6 +342,8 @@ class Config(GObject.Object):
         self.export_codec = self._defaults['export_codec']
         self.export_crf = self._defaults['export_crf']
         self.export_directory = self._defaults['export_directory']
+        self.export_log_directory = self._defaults['export_log_directory']
+        self.export_logging_enabled = self._defaults['export_logging_enabled']
         self.file_name_pattern = self._defaults['file_name_pattern']
         self.initial_view = self._defaults['initial_view']
         self.max_clip_duration = self._defaults['max_clip_duration']
@@ -328,6 +356,8 @@ class Config(GObject.Object):
         self.seek_preview_enabled = self._defaults['seek_preview_enabled']
         self.show_mosaic_detections = self._defaults['show_mosaic_detections']
         self.temp_directory = self._defaults['temp_directory']
+        self.export_log_directory = self._defaults['export_log_directory']
+        self.export_logging_enabled = self._defaults['export_logging_enabled']
         self.validate_and_set_device(self._defaults['device'])
         self.save()
 
@@ -346,6 +376,8 @@ class Config(GObject.Object):
             'export_codec': self._export_codec,
             'export_crf': self._export_crf,
             'export_directory': self._export_directory,
+            'export_log_directory': self._export_log_directory,
+            'export_logging_enabled': self._export_logging_enabled,
             'file_name_pattern': self._file_name_pattern,
             'initial_view': self._initial_view,
             'max_clip_duration': self._max_clip_duration,
@@ -392,6 +424,10 @@ class Config(GObject.Object):
                     self.validate_and_set_export_directory(dict[key])
                 elif key == 'temp_directory':
                     self.validate_and_set_temp_directory(dict[key])
+                elif key == 'export_log_directory':
+                    self.validate_and_set_export_log_directory(dict[key])
+                elif key == 'export_logging_enabled':
+                    self._export_logging_enabled = dict[key]
                 elif key == 'file_name_pattern':
                     self.validate_and_set_file_name_pattern(dict[key])
                 elif key == 'initial_view':
@@ -493,3 +529,14 @@ class Config(GObject.Object):
         else:
             self._initial_view = self.get_default_value('initial_view')
             logger.warning(f"Configured initial view '{initial_view}' is invalid, falling back to '{self._initial_view}'")
+
+    def validate_and_set_export_log_directory(self, export_log_directory: str | None):
+        if export_log_directory is None:
+            self._export_log_directory = None
+        else:
+            path = Path(export_log_directory)
+            if path.is_dir():
+                self._export_log_directory = export_log_directory
+            else:
+                self._export_log_directory = None
+                logger.warning(f"Configured export log directory '{export_log_directory}' does not exist or is not a directory on the filesystem, falling back to '{self._export_log_directory}'")
