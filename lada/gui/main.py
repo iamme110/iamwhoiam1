@@ -46,6 +46,11 @@ class LadaApplication(Adw.Application):
         self._config.load_config()
         self.window: MainWindow | None = None
 
+        # Set console visibility based on config
+        from lada.lib.console_utils import hide_console_window
+        if hasattr(self._config, 'show_console') and not self._config.show_console:
+            hide_console_window()
+
         Gst.init(None)
 
     @GObject.Property(type=ShortcutsManager)
