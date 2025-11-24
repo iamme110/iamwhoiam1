@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import logging
+import os
 import pathlib
+import tempfile
 
 from gi.repository import Gtk, GObject, Adw, Gio, GLib
 
@@ -46,6 +48,9 @@ class ConfigSidebar(Gtk.Box):
     entry_row_post_export_custom_command: Adw.EntryRow = Gtk.Template.Child()
     check_button_show_mosaic_detections: Gtk.CheckButton = Gtk.Template.Child()
     switch_row_seek_preview = Gtk.Template.Child()
+    expander_row_export_logging = Gtk.Template.Child()
+    action_row_export_log_directory: Adw.ActionRow = Gtk.Template.Child()
+    toggle_button_export_log_directory_filepicker: Gtk.Button = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -118,6 +123,11 @@ class ConfigSidebar(Gtk.Box):
         else:
             self.action_row_export_directory.set_subtitle(_("Click the folder button to choose a default"))
             self.check_button_export_directory_alwaysask.set_active(True)
+
+        # init export logging
+        self.expander_row_export_logging.set_enable_expansion(config.export_logging_enabled)
+        log_dir = config.export_log_directory or tempfile.gettempdir()
+        self.action_row_export_log_directory.set_subtitle(log_dir)
 
         self.entry_row_file_name_pattern.set_text(config.file_name_pattern)
 
@@ -353,6 +363,25 @@ class ConfigSidebar(Gtk.Box):
                     raise error
         file_dialog.select_folder(callback=on_select_temp_folder)
 
+    def show_select_log_folder(self):
+        file_dialog = Gtk.FileDialog()
+        file_dialog.set_title(_("Select a folder where export logs should be saved"))
+        if self._config.export_log_directory and os.path.isdir(self._config.export_log_directory):
+            file_dialog.set_initial_folder(Gio.File.new_for_path(self._config.export_log_directory))
+        def on_select_log_folder(_file_dialog, result):
+            try:
+                selected_folder: Gio.File = _file_dialog.select_folder_finish(result)
+                selected_folder_path = selected_folder.get_path()
+                self._config.export_log_directory = selected_folder_path
+                self.action_row_export_log_directory.set_subtitle(selected_folder_path)
+            except GLib.Error as error:
+                if error.message == "Dismissed by user":
+                    logger.debug("FileDialog cancelled: Dismissed by user")
+                else:
+                    logger.error(f"Error selecting folder: {error.message}")
+                    raise error
+        file_dialog.select_folder(callback=on_select_log_folder)
+
     def update_custom_command_visibility(self, action):
         self.entry_row_post_export_custom_command.set_visible(action == "custom_command")
 
@@ -391,3 +420,13 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def switch_row_seek_preview_active_callback(self, switch_row, active):
         self._config.seek_preview_enabled = switch_row.get_property("active")
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def toggle_button_export_log_directory_filepicker_callback(self, button_clicked):
+        self.show_select_log_folder()
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def expander_row_export_logging_enable_callback(self, expander_row, enable_expansion):
+        self._config.export_logging_enabled = expander_row.get_property("enable-expansion")
