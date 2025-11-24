@@ -16,7 +16,7 @@ here = pathlib.Path(__file__).parent.resolve()
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-@Gtk.Template(string=utils.translate_ui_xml(here / 'config_sidebar.ui'))
+@Gtk.Template(string=utils.translate_ui_xml(str(here / 'config_sidebar.ui')))
 class ConfigSidebar(Gtk.Box):
     __gtype_name__ = 'ConfigSidebar'
 
@@ -46,6 +46,7 @@ class ConfigSidebar(Gtk.Box):
     entry_row_post_export_custom_command: Adw.EntryRow = Gtk.Template.Child()
     check_button_show_mosaic_detections: Gtk.CheckButton = Gtk.Template.Child()
     switch_row_seek_preview = Gtk.Template.Child()
+    switch_row_show_console = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -58,6 +59,7 @@ class ConfigSidebar(Gtk.Box):
         self.init_done = False
 
         self.check_button_show_mosaic_detections.props.active = config.show_mosaic_detections
+        self.switch_row_show_console.set_active(config.show_console)
 
         # init device
         combo_row_gpu_list = Gtk.StringList.new([])
@@ -216,13 +218,6 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def switch_row_mute_audio_active_callback(self, switch_row, active):
         self._config.mute_audio = switch_row.get_property("active")
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def button_config_reset_callback(self, button_clicked):
-        self.init_done = False
-        self._config.reset_to_default_values()
-        self.init_sidebar_from_config(self._config)
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
@@ -391,3 +386,25 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def switch_row_seek_preview_active_callback(self, switch_row, active):
         self._config.seek_preview_enabled = switch_row.get_property("active")
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def switch_row_show_console_active_callback(self, switch_row, active):
+        self._config.show_console = switch_row.get_active()
+        # Apply console visibility immediately
+        self._apply_console_visibility()
+
+    def _apply_console_visibility(self):
+        """Apply console window visibility based on current config setting."""
+        from lada.lib.console_utils import hide_console_window, show_console_window
+        if self._config.show_console:
+            show_console_window()
+        else:
+            hide_console_window()
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def button_config_reset_callback(self, button_clicked):
+        self.init_done = False
+        self._config.reset_to_default_values()
+        self.init_sidebar_from_config(self._config)
