@@ -324,6 +324,14 @@ SPDX-License-Identifier: AGPL-3.0
                                     </object>
                                 </child>
                                 <child>
+                                    <object class="AdwSwitchRow" id="switch_row_show_console">
+                                        <property name="title" translatable="true">Show console</property>
+                                        <property name="subtitle" translatable="true">Show console window with debug logging when running GUI application</property>
+                                        <signal name="notify::active"
+                                                handler="switch_row_show_console_active_callback"/>
+                                    </object>
+                                </child>
+                                <child>
                                     <object class="AdwActionRow">
                                         <property name="title" translatable="true">Default View</property>
                                         <property name="subtitle" translatable="true">View shown after opening files</property>
@@ -371,7 +379,7 @@ SPDX-License-Identifier: AGPL-3.0
             <object class="GtkActionBar">
                 <property name="revealed">true</property>
                 <child type="center">
-                    <object class="GtkButton">
+                    <object class="GtkButton" id="button_config_reset">
                         <property name="label" translatable="true">Reset to factory settings</property>
                         <property name="sensitive">True</property>
                         <signal name="clicked" handler="button_config_reset_callback"/>
