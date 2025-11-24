@@ -99,6 +99,23 @@ class PreviewView(Gtk.Widget):
 
         self.drop_down_selected_handler_id = self.drop_down_files.connect("notify::selected", lambda obj, spec: self.play_file(obj.get_property(spec.name)))
 
+        self.label_subtitles = Gtk.Label()
+        self.label_subtitles.set_css_classes(['subtitle-label'])
+        self.label_subtitles.set_halign(Gtk.Align.CENTER)
+        self.label_subtitles.set_valign(Gtk.Align.END)
+        self.label_subtitles.set_margin_bottom(50)
+        self.label_subtitles.set_wrap(True)
+        self.label_subtitles.set_max_width_chars(50)
+        self.label_subtitles.set_justify(Gtk.Justification.CENTER)
+
+        # Wrap the video picture in an overlay for proper subtitle positioning
+        self.picture = self.picture_video_preview
+        self.box_video_preview.remove(self.picture)
+        self.video_overlay = Gtk.Overlay()
+        self.video_overlay.set_child(self.picture)
+        self.video_overlay.add_overlay(self.label_subtitles)
+        self.box_video_preview.append(self.video_overlay)
+
         self.setup_double_click_fullscreen()
 
         drop_target = utils.create_video_files_drop_target(lambda files: self.emit("files-opened", files))
@@ -423,8 +440,17 @@ class PreviewView(Gtk.Widget):
 
 
     def _open_file(self, file: Gio.File):
-        self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, video_utils.get_video_meta_data(file.get_path()), self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False)
         file_path = file.get_path()
+        subtitle_file = video_utils.find_subtitle_file(file_path)
+
+        if subtitle_file:
+            with open(subtitle_file, 'r', encoding='utf-8') as f:
+                content = f.read().lstrip('\ufeff')
+            self.subtitles = video_utils.parse_srt(content)
+        else:
+            self.subtitles = []
+
+        self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, video_utils.get_video_meta_data(file_path), self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False)
 
         assert not self._video_preview_init_done
         self.video_metadata = video_utils.get_video_meta_data(file_path)
@@ -527,6 +553,16 @@ class PreviewView(Gtk.Widget):
             label_text = self.get_time_label_text(position)
             self.label_current_time.set_text(label_text)
             self.widget_timeline.set_property("playhead-position", position)
+
+            # Update subtitles
+            if hasattr(self, 'subtitles') and self.subtitles:
+                current_time_sec = position / Gst.SECOND
+                current_text = ''
+                for start, end, text in self.subtitles:
+                    if start <= current_time_sec < end:
+                        current_text = text
+                        break
+                self.label_subtitles.set_text(current_text)
         return True
 
     def get_time_label_text(self, time_ns):
