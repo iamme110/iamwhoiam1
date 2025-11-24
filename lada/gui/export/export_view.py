@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import traceback
+from datetime import datetime
 
 from gi.repository import Gtk, GObject, Gio, Adw, GLib
 
@@ -50,6 +51,8 @@ class ExportView(Gtk.Widget):
 
         self._view_stack: Adw.ViewStack | None = None
         self._config: Config | None = None
+        self._export_log_file = None
+        self._export_log_stream = None
         self.in_progress_idx: int | None = None
         self.single_file = True
         self.stop_requested = False
@@ -275,6 +278,9 @@ class ExportView(Gtk.Widget):
         model_item = self.model[idx]
         model_item.state = ExportItemState.PROCESSING
 
+        # Initialize logging
+        self.initialize_export_logging(model_item.original_file.get_basename())
+
         if self.single_file:
             self.single_file_page.show_video_export_started(save_file)
         self.multiple_files_page.show_video_export_started(idx)
@@ -289,6 +295,9 @@ class ExportView(Gtk.Widget):
         if self.single_file:
             self.single_file_page.on_video_export_finished()
         self.multiple_files_page.on_video_export_finished(self.in_progress_idx)
+
+        # Finalize logging
+        self.finalize_export_logging("Export finished successfully")
 
         self.continue_next_file()
 
@@ -464,6 +473,7 @@ class ExportView(Gtk.Widget):
             except Exception as e:
                 success = False
                 err_msg = "".join(traceback.format_exception_only(e))
+                self.finalize_export_logging(f"Export failed: {err_msg}")
                 GLib.idle_add(lambda: self.emit('video-export-failed', err_msg))
             finally:
                 if not self.pause_requested:
@@ -605,3 +615,69 @@ class ExportView(Gtk.Widget):
 
     def close(self):
         self.stop_requested = True
+
+    # --- Export logging helpers ---
+    def initialize_export_logging(self, base_name: str):
+        if not self._config or not self._config.export_logging_enabled:
+            return
+        try:
+            log_dir = self._config.export_log_directory or tempfile.gettempdir()
+            os.makedirs(log_dir, exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            safe_base = os.path.splitext(base_name)[0]
+            log_filename = f"{safe_base}_{timestamp}.log"
+            self._export_log_file = os.path.join(log_dir, log_filename)
+            self._export_log_stream = open(self._export_log_file, 'w', encoding='utf-8')
+            self._export_log_stream.write(f"Export started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            self._export_log_stream.write(f"Input file: {base_name}\n")
+            self._export_log_stream.write(f"Detection model: {self._config.mosaic_detection_model}\n")
+            self._export_log_stream.write(f"Restoration model: {self._config.mosaic_restoration_model}\n")
+            gpu_name = "CPU"
+            if self._config.device.startswith("cuda:"):
+                try:
+                    gpu_id = int(self._config.device.split(":")[1])
+                    for id, name in utils.get_available_gpus():
+                        if id == gpu_id:
+                            gpu_name = name
+                            break
+                except:
+                    pass
+            self._export_log_stream.write(f"Device: {gpu_name}\n")
+            self._export_log_stream.write(f"Video codec: {self._config.export_codec}\n")
+            self._export_log_stream.write(f"CRF quality: {self._config.export_crf}\n")
+            self._export_log_stream.write(f"Custom FFmpeg options: {self._config.custom_ffmpeg_encoder_options or 'None'}\n")
+            self._export_log_stream.write(f"Max clip duration: {self._config.max_clip_duration} frames\n")
+            self._export_log_stream.write("\n")
+            self._export_log_stream.flush()
+            logger.info(f"Export logging to {self._export_log_file}")
+        except Exception as e:
+            logger.error(f"Failed to initialize export logging: {e}")
+            self._export_log_file = None
+            self._export_log_stream = None
+
+    def log_export_progress(self, message: str):
+        try:
+            if self._export_log_stream:
+                self._export_log_stream.write(message + "\n")
+                self._export_log_stream.flush()
+        except Exception as e:
+            logger.error(f"Failed writing export log: {e}")
+
+    def finalize_export_logging(self, message: str):
+        try:
+            if self._export_log_stream:
+                if self.progress_calculator:
+                    progress = self.progress_calculator.get_progress()
+                    self._export_log_stream.write(f"Total processing time: {progress.time_done_s:.2f} seconds\n")
+                    self._export_log_stream.write(f"Total frames processed: {progress.frames_done}\n")
+                    if progress.enough_datapoints:
+                        self._export_log_stream.write(f"Average processing speed: {progress.speed_fps:.2f} FPS\n")
+                        self._export_log_stream.write(f"Estimated time remaining at end: {progress.time_remaining_s:.2f} seconds\n")
+                    self._export_log_stream.write("\n")
+                self._export_log_stream.write(message + "\n")
+                self._export_log_stream.write(f"Export finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                self._export_log_stream.flush()
+                self._export_log_stream.close()
+        finally:
+            self._export_log_stream = None
+            self._export_log_file = None
