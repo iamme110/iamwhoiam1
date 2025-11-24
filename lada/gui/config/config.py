@@ -45,6 +45,7 @@ class Config(GObject.Object):
         'post_export_custom_command': '',
         'preview_buffer_duration': 0,
         'seek_preview_enabled': True,
+        'show_console': False,
         'show_mosaic_detections': False,
         'temp_directory': tempfile.gettempdir(),
     }
@@ -65,6 +66,7 @@ class Config(GObject.Object):
         self._mute_audio = self._defaults['mute_audio']
         self._preview_buffer_duration = self._defaults['preview_buffer_duration']
         self._seek_preview_enabled = self._defaults['seek_preview_enabled']
+        self._show_console = self._defaults['show_console']
         self._show_mosaic_detections = self._defaults['show_mosaic_detections']
         self._post_export_action = self._defaults['post_export_action']
         self._post_export_custom_command = self._defaults['post_export_custom_command']
@@ -82,6 +84,17 @@ class Config(GObject.Object):
         if value == self._seek_preview_enabled:
             return
         self._seek_preview_enabled = value
+        self.save()
+
+    @GObject.Property()
+    def show_console(self):
+        return self._show_console
+
+    @show_console.setter
+    def show_console(self, value):
+        if value == self._show_console:
+            return
+        self._show_console = value
         self.save()
 
     # Removed seek_preview_size property - now auto-scaled
@@ -304,6 +317,8 @@ class Config(GObject.Object):
                     self.post_export_action = PostExportAction.NONE.value
                 if 'post_export_custom_command' not in config_dict:
                     self.post_export_custom_command = self._defaults['post_export_custom_command']
+                if 'show_console' not in config_dict:
+                    self.show_console = self._defaults['show_console']
         except Exception as e:
             logger.error(f"Error loading config file {config_file_path}, falling back to defaults: {e}")
         # The config might have changed in case of new or invalid values. Let's save it.
@@ -326,6 +341,7 @@ class Config(GObject.Object):
         self.post_export_custom_command = self._defaults['post_export_custom_command']
         self.preview_buffer_duration = self._defaults['preview_buffer_duration']
         self.seek_preview_enabled = self._defaults['seek_preview_enabled']
+        self.show_console = self._defaults['show_console']
         self.show_mosaic_detections = self._defaults['show_mosaic_detections']
         self.temp_directory = self._defaults['temp_directory']
         self.validate_and_set_device(self._defaults['device'])
@@ -356,6 +372,7 @@ class Config(GObject.Object):
             'post_export_custom_command': self._post_export_custom_command,
             'preview_buffer_duration': self._preview_buffer_duration,
             'seek_preview_enabled': self._seek_preview_enabled,
+            'show_console': self._show_console,
             'show_mosaic_detections': self._show_mosaic_detections,
             'temp_directory': self._temp_directory,
         }
@@ -398,6 +415,8 @@ class Config(GObject.Object):
                     self.validate_and_set_initial_view(dict[key])
                 elif key == 'seek_preview_enabled':
                     self._seek_preview_enabled = dict[key]
+                elif key == 'show_console':
+                    self._show_console = dict[key]
                 else:
                     setattr(self, f"_{key}", dict[key])
 
