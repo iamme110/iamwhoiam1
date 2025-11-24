@@ -92,7 +92,7 @@ class VideoReader:
         self.container.streams.video[0].thread_type = 'AUTO'
 
         for frame in self.container.decode(video=0):
-            nd_frame = frame.to_ndarray(format='bgr24')
+            nd_frame = frame.to_ndarray(format='bgr24', dst_colorspace=av.video.reformatter.Colorspace.ITU601, dst_color_range=av.video.reformatter.ColorRange.MPEG)
             torch_frame = torch.from_numpy(nd_frame)
             yield torch_frame, frame.pts
 
