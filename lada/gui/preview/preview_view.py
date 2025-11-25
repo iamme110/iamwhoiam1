@@ -71,6 +71,9 @@ class PreviewView(Gtk.Widget):
         self._thread_counter_lock = threading.Lock()
         self._thumbnail_size = (220, 124)
 
+        self.subtitles: list[video_utils.Subtitle] | None = None
+        self.current_subtitle_index = -1
+
         self.eos = False
 
         self.frame_restorer_provider: FrameRestorerProvider = FRAME_RESTORER_PROVIDER
@@ -444,11 +447,10 @@ class PreviewView(Gtk.Widget):
         subtitle_file = video_utils.find_subtitle_file(file_path)
 
         if subtitle_file:
-            with open(subtitle_file, 'r', encoding='utf-8') as f:
-                content = f.read().lstrip('\ufeff')
-            self.subtitles = video_utils.parse_srt(content)
+            self.subtitles = video_utils.try_open_subtitle_file(subtitle_file)
         else:
-            self.subtitles = []
+            self.subtitles = None
+        self.current_subtitle_index = -1
 
         self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, video_utils.get_video_meta_data(file_path), self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False)
 
@@ -555,14 +557,19 @@ class PreviewView(Gtk.Widget):
             self.widget_timeline.set_property("playhead-position", position)
 
             # Update subtitles
-            if hasattr(self, 'subtitles') and self.subtitles:
+            if self.subtitles:
                 current_time_sec = position / Gst.SECOND
-                current_text = ''
-                for start, end, text in self.subtitles:
-                    if start <= current_time_sec < end:
-                        current_text = text
-                        break
-                self.label_subtitles.set_text(current_text)
+                # Find current subtitle using binary search
+                import bisect
+                # Find the rightmost subtitle where start <= current_time
+                idx = bisect.bisect_right(self.subtitles, (current_time_sec, float('inf'), '')) - 1
+                if idx >= 0 and self.subtitles[idx][0] <= current_time_sec < self.subtitles[idx][1]:
+                    if self.current_subtitle_index != idx:
+                        self.current_subtitle_index = idx
+                        self.label_subtitles.set_text(self.subtitles[idx][2])
+                elif self.current_subtitle_index != -1:
+                    self.current_subtitle_index = -1
+                    self.label_subtitles.set_text('')
         return True
 
     def get_time_label_text(self, time_ns):
