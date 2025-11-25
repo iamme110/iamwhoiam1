@@ -13,7 +13,8 @@ import torch
 from lada import MODEL_WEIGHTS_DIR, VERSION
 from lada.cli import utils
 from lada.utils import audio_utils
-from lada.restorationpipeline.frame_restorer import load_models, FrameRestorer
+from lada.restorationpipeline.frame_restorer import FrameRestorer
+from lada.restorationpipeline import load_models
 from lada.utils.video_utils import get_video_meta_data, VideoWriter
 
 def setup_argparser() -> argparse.ArgumentParser:

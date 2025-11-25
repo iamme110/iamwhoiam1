@@ -16,38 +16,10 @@ from lada import LOG_LEVEL
 from lada.utils import image_utils, video_utils, threading_utils, mask_utils
 from lada.utils import visualization_utils
 from lada.restorationpipeline.mosaic_detector import MosaicDetector
-from lada.models.yolo.yolo11_segmentation_model import Yolo11SegmentationModel
 from lada.restorationpipeline.mosaic_detector import Clip
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
-
-def load_models(
-    device: torch.device,
-    mosaic_restoration_model_name: str,
-    mosaic_restoration_model_path: str,
-    mosaic_restoration_config_path: str | None,
-    mosaic_detection_model_path: str,
-    fp16: bool,
-    clip_length: int):
-    if mosaic_restoration_model_name.startswith("deepmosaics"):
-        from lada.models.deepmosaics.models import loadmodel
-        from lada.restorers.deepmosaics_mosaic_restorer import DeepmosaicsMosaicRestorer
-        _model = loadmodel.video(device, mosaic_restoration_model_path, fp16)
-        mosaic_restoration_model = DeepmosaicsMosaicRestorer(_model, device)
-        pad_mode = 'reflect'
-    elif mosaic_restoration_model_name.startswith("basicvsrpp"):
-        from lada.models.basicvsrpp.inference import load_model
-        from lada.restorers.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-        _model = load_model(mosaic_restoration_config_path, mosaic_restoration_model_path, device, fp16)
-        mosaic_restoration_model = BasicvsrppMosaicRestorer(_model, device, fp16, clip_length)
-        pad_mode = 'zero'
-    else:
-        raise NotImplementedError()
-    # setting classes=[0] will consider only for class id = 0 as detections (nsfw mosaics) therefore filtering out sfw mosaics (heads, faces)
-    mosaic_detection_model = Yolo11SegmentationModel(mosaic_detection_model_path, device, classes=[0], conf=0.2, fp16=fp16)
-    return mosaic_detection_model, mosaic_restoration_model, pad_mode
-
 
 class FrameRestorer:
     def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
@@ -195,11 +167,11 @@ class FrameRestorer:
 
     def _restore_clip_frames(self, images):
         if self.mosaic_restoration_model_name.startswith("deepmosaics"):
-            from lada.restorers.deepmosaics_mosaic_restorer import DeepmosaicsMosaicRestorer
+            from lada.restorationpipeline.deepmosaics_mosaic_restorer import DeepmosaicsMosaicRestorer
             assert isinstance(self.mosaic_restoration_model, DeepmosaicsMosaicRestorer)
             restored_clip_images = self.mosaic_restoration_model.restore(images)
         elif self.mosaic_restoration_model_name.startswith("basicvsrpp"):
-            from lada.restorers.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
+            from lada.restorationpipeline.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
             assert isinstance(self.mosaic_restoration_model, BasicvsrppMosaicRestorer)
             restored_clip_images = self.mosaic_restoration_model.restore(images)
         else:
