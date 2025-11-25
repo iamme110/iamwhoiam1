@@ -3,9 +3,9 @@
 
 from typing import Optional
 
-from lada.lib.ultralytics_utils import convert_yolo_boxes
-from lada.lib.box_utils import box_overlap
-from lada.lib import Image, Box
+from lada.utils.ultralytics_utils import convert_yolo_boxes
+from lada.utils.box_utils import box_overlap
+from lada.utils import Image, Box
 from lada.models.yolo.yolo import Yolo
 
 class MosaicClassifier:

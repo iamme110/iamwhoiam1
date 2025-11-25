@@ -3,8 +3,8 @@
 
 import cv2
 import numpy as np
-from lada.lib import Mask, Box, Image, Detection, Detections, DETECTION_CLASSES
-from lada.lib import box_utils
+from lada.utils import Mask, Box, Image, Detection, Detections, DETECTION_CLASSES
+from lada.utils import box_utils
 from lada.models.centerface.centerface import CenterFace
 
 def convert_to_boxes(dets) -> list[Box]:

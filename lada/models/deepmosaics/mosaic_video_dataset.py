@@ -9,8 +9,8 @@ import glob
 import numpy as np
 import torch
 import torch.utils.data as data
-import lada.lib.video_utils as video_utils
-from lada.lib import image_utils
+import lada.utils.video_utils as video_utils
+from lada.utils import image_utils
 
 
 class MosaicVideoDataset(data.Dataset):

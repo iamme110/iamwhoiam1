@@ -3,8 +3,8 @@
 
 import cv2
 import numpy as np
-from lada.lib import Mask, Box, Image, Detections, Detection, DETECTION_CLASSES
-from lada.lib import box_utils
+from lada.utils import Mask, Box, Image, Detections, Detection, DETECTION_CLASSES
+from lada.utils import box_utils
 from lada.models.bpjdet.inference import inference
 
 def _create_mask(frame: Image, box: Box) -> Mask:

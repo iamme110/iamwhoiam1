@@ -11,7 +11,7 @@ from ultralytics.utils.ops import scale_image
 import torch.nn.functional as F
 from ultralytics import settings
 
-from lada.lib import Box, Mask, mask_utils
+from lada.utils import Box, Mask, mask_utils
 
 def set_default_settings():
     settings.update({'runs_dir': './experiments/yolo', 'datasets_dir': './datasets', 'tensorboard': True})

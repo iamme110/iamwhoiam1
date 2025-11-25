@@ -11,11 +11,11 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from lada.lib import video_utils, Image, image_utils, mosaic_utils, mask_utils, Mask
-from lada.lib.degradations import circular_lowpass_kernel, random_mixed_kernels, random_add_gaussian_noise_pt, \
+from lada.utils import video_utils, Image, image_utils, mosaic_utils, mask_utils, Mask
+from lada.utils.degradations import circular_lowpass_kernel, random_mixed_kernels, random_add_gaussian_noise_pt, \
     random_add_poisson_noise_pt
-from lada.lib.image_utils import filter2D, UnsharpMaskingSharpener
-from lada.lib.jpeg_utils import DiffJPEG
+from lada.utils.image_utils import filter2D, UnsharpMaskingSharpener
+from lada.utils.jpeg_utils import DiffJPEG
 
 
 class Blur(torch.nn.Module):

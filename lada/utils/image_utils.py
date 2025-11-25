@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from torchvision.utils import make_grid
 from typing import Sequence
 
-from lada.lib import Image, Pad
+from lada.utils import Image, Pad
 
 # pad image with reflect mode even if pad size is greater than image size
 def torch_pad_reflect(image: torch.Tensor, paddings: Sequence[int]) -> torch.Tensor:

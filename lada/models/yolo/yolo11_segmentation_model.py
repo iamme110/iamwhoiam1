@@ -9,7 +9,7 @@ from ultralytics.nn.autobackend import AutoBackend
 from ultralytics.cfg import get_cfg
 from ultralytics.utils import DEFAULT_CFG
 from ultralytics import YOLO
-from lada.lib.torch_letterbox import PyTorchLetterBox
+from lada.utils.torch_letterbox import PyTorchLetterBox
 from typing import List
 
 class Yolo11SegmentationModel:

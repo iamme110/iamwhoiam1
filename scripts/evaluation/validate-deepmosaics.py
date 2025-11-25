@@ -8,8 +8,8 @@ import os.path
 import cv2
 import torch
 
-from lada.lib.image_utils import pad_image, resize
-from lada.lib.video_utils import read_video_frames, get_video_meta_data, write_frames_to_video_file
+from lada.utils.image_utils import pad_image, resize
+from lada.utils.video_utils import read_video_frames, get_video_meta_data, write_frames_to_video_file
 from lada.models.deepmosaics.inference import restore_video_frames
 from lada.models.deepmosaics.models import loadmodel
 

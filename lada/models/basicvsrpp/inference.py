@@ -8,8 +8,8 @@ import torch
 from mmengine.config import Config
 from mmengine.runner import load_checkpoint
 
-from lada.lib import Image
-from lada.lib import image_utils
+from lada.utils import Image
+from lada.utils import image_utils
 from lada.models.basicvsrpp import register_all_modules
 from lada.models.basicvsrpp.basicvsrpp_gan import BasicVSRPlusPlusGan
 from lada.models.basicvsrpp.mmagic.basicvsr import BasicVSR

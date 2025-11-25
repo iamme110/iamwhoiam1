@@ -3,7 +3,7 @@
 
 import cv2
 import torch
-from lada.lib import image_utils
+from lada.utils import image_utils
 from lada.restorationpipeline.mosaic_detector import Clip
 
 def overlay_mask(frame, mask):

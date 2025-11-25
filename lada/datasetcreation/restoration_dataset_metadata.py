@@ -7,7 +7,7 @@ from dataclasses import dataclass, asdict
 import json
 from pathlib import Path
 from typing import Optional
-from lada.lib import Pad, mosaic_utils
+from lada.utils import Pad, mosaic_utils
 
 @dataclass
 class MosaicMetadataV1:

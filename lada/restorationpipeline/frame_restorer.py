@@ -13,8 +13,8 @@ import torch
 import numpy as np
 
 from lada import LOG_LEVEL
-from lada.lib import image_utils, video_utils, threading_utils, mask_utils
-from lada.lib import visualization_utils
+from lada.utils import image_utils, video_utils, threading_utils, mask_utils
+from lada.utils import visualization_utils
 from lada.restorationpipeline.mosaic_detector import MosaicDetector
 from lada.models.yolo.yolo11_segmentation_model import Yolo11SegmentationModel
 from lada.restorationpipeline.mosaic_detector import Clip

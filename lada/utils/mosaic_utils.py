@@ -8,8 +8,8 @@ import random
 import cv2
 import numpy as np
 
-from lada.lib import image_utils, random_utils
-from lada.lib import visualization_utils
+from lada.utils import image_utils, random_utils
+from lada.utils import visualization_utils
 
 
 def get_mask_area_by_contour(mask):

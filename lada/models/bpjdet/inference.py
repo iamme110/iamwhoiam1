@@ -17,7 +17,7 @@ from lada.models.bpjdet.utils.augmentations import letterbox
 from lada.models.bpjdet.utils.general import check_img_size, non_max_suppression, scale_coords
 from lada.models.bpjdet.models.experimental import attempt_load
 from lada.models.bpjdet.data import JointBP_CrowdHuman_head
-from lada.lib import Box
+from lada.utils import Box
 
 here = Path(__file__).parent.resolve()
 

@@ -11,7 +11,7 @@ from scipy import special
 from scipy.stats import multivariate_normal
 from torchvision.transforms.functional import rgb_to_grayscale
 
-from lada.lib import random_utils
+from lada.utils import random_utils
 
 
 # -------------------------------------------------------------------- #

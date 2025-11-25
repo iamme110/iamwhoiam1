@@ -12,15 +12,15 @@ import cv2
 import torch
 
 from ultralytics.engine.results import Results
-from lada.lib import VideoMetadata, threading_utils
-from lada.lib import image_utils
-from lada.lib.box_utils import box_overlap
+from lada.utils import VideoMetadata, threading_utils
+from lada.utils import image_utils
+from lada.utils.box_utils import box_overlap
 from lada.models.yolo.yolo11_segmentation_model import Yolo11SegmentationModel
-from lada.lib.scene_utils import crop_to_box_v3
-from lada.lib import video_utils
+from lada.utils.scene_utils import crop_to_box_v3
+from lada.utils import video_utils
 from lada import LOG_LEVEL
-from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask_tensor
-from lada.lib import Box
+from lada.utils.ultralytics_utils import convert_yolo_box, convert_yolo_mask_tensor
+from lada.utils import Box
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)

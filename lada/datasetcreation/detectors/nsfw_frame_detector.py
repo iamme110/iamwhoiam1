@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import ultralytics.models
-from lada.lib import Detections, Detection, Image
-from lada.lib import mask_utils
-from lada.lib.ultralytics_utils import convert_yolo_box, convert_yolo_mask
+from lada.utils import Detections, Detection, Image
+from lada.utils import mask_utils
+from lada.utils.ultralytics_utils import convert_yolo_box, convert_yolo_mask
 from lada.models.yolo.yolo import Yolo
 
 def get_nsfw_frames(yolo_results: ultralytics.engine.results.Results, random_extend_masks: bool) -> Detections | None:

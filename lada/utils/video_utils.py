@@ -17,7 +17,7 @@ import cv2
 import torch
 import numpy as np
 
-from lada.lib import Image, Mask, VideoMetadata, os_utils
+from lada.utils import Image, Mask, VideoMetadata, os_utils
 
 logger = logging.getLogger(__name__)
 

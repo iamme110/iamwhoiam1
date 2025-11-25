@@ -5,13 +5,13 @@ import logging
 from dataclasses import dataclass
 
 from lada import LOG_LEVEL
-from lada.lib import VideoMetadata
+from lada.utils import VideoMetadata
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 from lada import RESTORATION_MODEL_NAMES_TO_FILES, DETECTION_MODEL_NAMES_TO_FILES
 from lada.restorationpipeline.frame_restorer import load_models, FrameRestorer
-from lada.lib import video_utils
+from lada.utils import video_utils
 
 import gc
 import torch

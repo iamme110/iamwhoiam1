@@ -9,7 +9,7 @@ import os
 import subprocess
 import shutil
 from typing import Optional
-from lada.lib import video_utils, os_utils
+from lada.utils import video_utils, os_utils
 
 logger = logging.getLogger(__name__)
 

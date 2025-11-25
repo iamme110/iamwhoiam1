@@ -7,7 +7,7 @@ import cv2
 from pathlib import Path
 import argparse
 
-from lada.lib.video_utils import process_video_v3
+from lada.utils.video_utils import process_video_v3
 from lada.models.yolo.yolo import Yolo
 
 def process_frame(in_frame, model, threshold, classes, negate=False):

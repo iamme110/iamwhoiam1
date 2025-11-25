@@ -15,11 +15,11 @@ import torch
 import ultralytics.models
 
 from lada import LOG_LEVEL
-from lada.lib import Mask, Image, Box, VideoMetadata, threading_utils, video_utils
-from lada.lib import mask_utils
-from lada.lib.scene_utils import crop_to_box_v3
-from lada.lib.threading_utils import wait_until_completed
-from lada.lib.ultralytics_utils import choose_biggest_detection, convert_yolo_mask, convert_yolo_box
+from lada.utils import Mask, Image, Box, VideoMetadata, threading_utils, video_utils
+from lada.utils import mask_utils
+from lada.utils.scene_utils import crop_to_box_v3
+from lada.utils.threading_utils import wait_until_completed
+from lada.utils.ultralytics_utils import choose_biggest_detection, convert_yolo_mask, convert_yolo_box
 from lada.models.yolo.yolo import Yolo
 
 logger = logging.getLogger(__name__)

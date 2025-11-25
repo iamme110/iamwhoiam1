@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Lada Authors
 # SPDX-License-Identifier: AGPL-3.0
 
-from lada.lib.ultralytics_utils import set_default_settings
+from lada.utils.ultralytics_utils import set_default_settings
 from lada.models.yolo.yolo import Yolo
 
 set_default_settings()

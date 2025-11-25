@@ -1,6 +1,6 @@
 import random
 
-from lada.lib import Box, Image
+from lada.utils import Box, Image
 
 def box_overlap(box1: Box, box2: Box):
     y1min, x1min, y1max, x1max = box1

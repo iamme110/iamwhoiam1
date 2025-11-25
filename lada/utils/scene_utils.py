@@ -3,7 +3,7 @@
 
 import math
 
-from lada.lib import Box, Mask, Image
+from lada.utils import Box, Mask, Image
 
 
 def crop_to_box_v3(box: Box, img: Image, mask_img: Mask, target_size: tuple[int, int], max_box_expansion_factor=1.0, border_size=0):

@@ -7,8 +7,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision.transforms.functional import gaussian_blur as tv_gaussian_blur
-from lada.lib import Box, Mask, box_utils
-from lada.lib import image_utils
+from lada.utils import Box, Mask, box_utils
+from lada.utils import image_utils
 
 
 def get_box(mask: Mask) -> Box:

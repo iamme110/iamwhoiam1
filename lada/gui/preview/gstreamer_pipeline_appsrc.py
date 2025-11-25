@@ -10,7 +10,7 @@ from gi.repository import Gst, GstApp
 
 from lada import LOG_LEVEL
 from lada.gui.frame_restorer_provider import FrameRestorerProvider
-from lada.lib import video_utils, VideoMetadata, threading_utils
+from lada.utils import video_utils, VideoMetadata, threading_utils
 from lada.restorationpipeline.frame_restorer import FrameRestorer
 
 logger = logging.getLogger(__name__)
