@@ -5,12 +5,10 @@ import json
 import logging
 import os
 import re
-import shutil
 import subprocess
-import tempfile
 from contextlib import contextmanager
 from fractions import Fraction
-from typing import Callable, Iterator, Tuple
+from typing import Callable, Iterator, Tuple, List
 from collections import deque
 import heapq
 
@@ -356,7 +354,10 @@ class VideoWriter:
             self.output_container.mux(out_packet)
         self.output_container.close()
 
-def parse_srt(content: str) -> list[tuple[float, float, str]]:
+Subtitle = Tuple[float, float, str]
+
+def parse_srt(content: str) -> List[Subtitle]:
+    content = content.lstrip('\ufeff')  # Remove BOM
     subtitles = []
     lines = content.split('\n')
     i = 0
@@ -391,24 +392,28 @@ def parse_srt(content: str) -> list[tuple[float, float, str]]:
             i += 1
     return subtitles
 
+def try_open_subtitle_file(file_path: str) -> List[Subtitle] | None:
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            # Check for SRT format
+            if re.search(r'\d+\n\d{2}:\d{2}:\d{2}[,.]\d{3} --> \d{2}:\d{2}:\d{2}[,.]\d{3}', content):
+                return parse_srt(content)
+            else:
+                return None
+    except Exception as e:
+        logger.debug(f"Error reading subtitle file {file_path}: {e}")
+        return None
+
 def find_subtitle_file(video_path: str) -> str | None:
     import pathlib
-    import re
-    video_path = pathlib.Path(video_path)
-    srt_path = video_path.with_suffix('.srt')
+    video_path_obj = pathlib.Path(video_path)
+    srt_path = video_path_obj.with_suffix('.srt')
     if srt_path.exists():
-        try:
-            with open(srt_path, 'r', encoding='utf-8') as f:
-                content = f.read().lstrip('\ufeff')  # Remove BOM if present
-                # Check for SRT format with timestamps
-                if re.search(r'\d+\n\d{2}:\d{2}:\d{2}[,.]\d{3} --> \d{2}:\d{2}:\d{2}[,.]\d{3}', content):
-                    logger.info(f"Found valid subtitle file: {srt_path}")
-                    return str(srt_path)
-                else:
-                    return None
-        except Exception as e:
-            logger.debug(f"Error reading subtitle file {srt_path}: {e}")
-            return None
+        subtitles = try_open_subtitle_file(str(srt_path))
+        if subtitles is not None:
+            logger.info(f"Found valid subtitle file: {srt_path}")
+            return str(srt_path)
     return None
 
 def is_video_file(file_path):
