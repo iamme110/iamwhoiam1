@@ -19,7 +19,7 @@ from lada.gui.preview.headerbar_files_drop_down import HeaderbarFilesDropDown
 from lada.gui.preview.seek_preview_popover import SeekPreviewPopover
 from lada.gui.preview.timeline import Timeline
 from lada.gui.shortcuts import ShortcutsManager
-from lada.lib import audio_utils, video_utils
+from lada.lib import audio_utils, video_utils, subtitle_utils
 
 here = pathlib.Path(__file__).parent.resolve()
 
@@ -71,7 +71,7 @@ class PreviewView(Gtk.Widget):
         self._thread_counter_lock = threading.Lock()
         self._thumbnail_size = (220, 124)
 
-        self.subtitles: list[video_utils.Subtitle] | None = None
+        self.subtitles: list[subtitle_utils.Subtitle] | None = None
         self.current_subtitle_index = -1
 
         self.eos = False
@@ -444,10 +444,10 @@ class PreviewView(Gtk.Widget):
 
     def _open_file(self, file: Gio.File):
         file_path = file.get_path()
-        subtitle_file = video_utils.find_subtitle_file(file_path)
+        subtitle_file = subtitle_utils.find_subtitle_file(file_path)
 
         if subtitle_file:
-            self.subtitles = video_utils.try_open_subtitle_file(subtitle_file)
+            self.subtitles = subtitle_utils.try_open_subtitle_file(subtitle_file)
         else:
             self.subtitles = None
         self.current_subtitle_index = -1
