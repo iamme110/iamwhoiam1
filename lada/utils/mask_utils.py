@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import cv2
-import math
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -68,37 +67,6 @@ def get_mask_area(mask: Mask) -> float:
 def smooth_mask(mask: Mask, kernel_size: int) -> Mask:
     return cv2.medianBlur(mask, kernel_size).reshape(mask.shape)
 
-def _box_blur(input: torch.Tensor, kernel_size: tuple[int, int], border_type: str = "reflect") -> torch.Tensor:
-    def get_box_kernel2d(kernel_size: tuple[int, int], device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-        kernel = torch.tensor(1.0 / (kernel_size[0] * kernel_size[1]), device=device, dtype=dtype).expand(1, kernel_size[0], kernel_size[1])
-        return kernel
-
-    def compute_padding(kernel_size: list[int]) -> list[int]:
-        computed = [k - 1 for k in kernel_size]
-        out_padding = 2 * len(kernel_size) * [0]
-
-        for i in range(len(kernel_size)):
-            computed_tmp = computed[-(i + 1)]
-
-            pad_front = computed_tmp // 2
-            pad_rear = computed_tmp - pad_front
-
-            out_padding[2 * i + 0] = pad_front
-            out_padding[2 * i + 1] = pad_rear
-
-        return out_padding
-
-    kernel = get_box_kernel2d(kernel_size, device=input.device, dtype=input.dtype)
-    b, c, h, w = input.shape
-    tmp_kernel = kernel[:, None, ...].expand(-1, c, -1, -1)
-    height, width = tmp_kernel.shape[-2:]
-    padding_shape: list[int] = compute_padding([height, width])
-    input = F.pad(input, padding_shape, mode=border_type)
-
-    tmp_kernel = tmp_kernel.reshape(-1, 1, height, width)
-    input = input.view(-1, tmp_kernel.size(0), input.size(-2), input.size(-1))
-    return F.conv2d(input, tmp_kernel, groups=tmp_kernel.size(0), padding=0, stride=1).view(b, c, h, w)
-
 def create_blend_mask(crop_mask: torch.Tensor, dtype: torch.dtype):
     mask = crop_mask.squeeze().to(dtype=dtype)
     h, w = mask.shape
@@ -119,7 +87,8 @@ def create_blend_mask(crop_mask: torch.Tensor, dtype: torch.dtype):
     blend = F.pad(inner, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
     mask4 = (mask > 0)
     blend = torch.maximum(mask4, blend)
-    blend = _box_blur(blend.unsqueeze(0).unsqueeze(0), (blur_size, blur_size)).squeeze(0).squeeze(0)
+    kernel = torch.tensor(1.0 / (blur_size**2), device=blend.device, dtype=blend.dtype).expand(1, blur_size, blur_size)
+    blend = image_utils.filter2D(blend.unsqueeze(0).unsqueeze(0), kernel).squeeze(0).squeeze(0)
     assert blend.shape == mask.shape
     return blend
 
