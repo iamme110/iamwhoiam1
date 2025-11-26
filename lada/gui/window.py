@@ -110,10 +110,6 @@ class MainWindow(Adw.ApplicationWindow):
     def close(self, *args):
         self.preview_view.close()
         self.export_view.close()
-        # Ensure the application quits when the window is closed
-        app = self.get_application()
-        if app:
-            app.quit()
 
     def _resize_window(self, paintable: Gdk.Paintable, playback_controls: Gtk.Widget, headerbar: Gtk.Widget, initial: bool | None = False) -> None:
         # SPDX-SnippetBegin
