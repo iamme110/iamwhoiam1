@@ -46,7 +46,7 @@ class Yolo11SegmentationModel:
         self.inference_buffer = torch.empty(batch_size, *img_shape, dtype=self.dtype, device=self.device, memory_format=torch.channels_last)
 
     def preprocess(self, imgs: list[torch.Tensor]) -> list[torch.Tensor]:
-        if self.letterbox is None:
+        if self.letterbox is None or imgs[0].shape[:2] != self.letterbox.original_shape:
             self.letterbox = PyTorchLetterBox(self.imgsz, imgs[0].shape[:2], stride=self.stride)
         return [self.letterbox(im.permute(2, 0, 1).unsqueeze(0)).squeeze(0) for im in imgs]
 

@@ -12,6 +12,7 @@ class PyTorchLetterBox:
         else:
             new_shape = imgsz
 
+        self.original_shape = original_shape
         pad_value: float = 114.0/255.0
         h, w = original_shape
         new_h, new_w = new_shape
