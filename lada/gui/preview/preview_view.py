@@ -282,6 +282,10 @@ class PreviewView(Gtk.Widget):
             if self._frame_restorer_options:
                 self.frame_restorer_options = self._frame_restorer_options.with_max_clip_length(self._config.max_clip_duration)
         self._config.connect("notify::max-clip-duration", on_max_clip_duration)
+        def on_re_mosaic_block_size(_object, _spec):
+            if self._video_preview_init_done:
+                self.frame_restorer_options = self._frame_restorer_options.with_re_mosaic_block_size(self._config.re_mosaic_block_size)
+        self._config.connect("notify::re-mosaic-block-size", on_re_mosaic_block_size)
 
     def set_speaker_icon(self, mute: bool):
         icon_name = "speaker-0-symbolic" if mute else "speaker-4-symbolic"
@@ -422,7 +426,7 @@ class PreviewView(Gtk.Widget):
         threading.Thread(target=run, daemon=True).start()
 
     def _open_file(self, file: Gio.File):
-        self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, video_utils.get_video_meta_data(file.get_path()), self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False)
+        self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, video_utils.get_video_meta_data(file.get_path()), self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False, self.config.re_mosaic_block_size)
         file_path = file.get_path()
 
         assert not self._video_preview_init_done
