@@ -33,6 +33,9 @@ class SeekPreviewPopover(Gtk.Popover):
         self.spinner.stop()
         self.spinner.set_visible(False)
 
+    def clear_thumbnail(self):
+        self.picture.set_pixbuf(None)
+
     def set_thumbnail(self, thumbnail: Image):
         # Convert BGR to RGB for GdkPixbuf
         rgb_thumbnail = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2RGB)
