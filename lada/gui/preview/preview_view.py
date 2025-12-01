@@ -413,6 +413,17 @@ class PreviewView(Gtk.Widget):
             self.drop_down_files.handler_unblock(self.drop_down_selected_handler_id)
 
     def _reinit_open_file_async(self, file: Gio.File):
+        # Get new metadata and reset video thumbnailer immediately when switching files
+        new_metadata = video_utils.get_video_meta_data(file.get_path())
+        self.video_metadata = new_metadata
+        with self._thumbnailer_lock:
+            self._thread_counter += 1
+            if self._video_thumbnailer:
+                self._video_thumbnailer.close()
+            self._video_thumbnailer = None
+        self.seek_preview_popover.clear_thumbnail()
+        self.seek_preview_popover.popdown()
+
         def run():
             if self._video_preview_init_done:
                 self._video_preview_init_done = False
@@ -422,11 +433,10 @@ class PreviewView(Gtk.Widget):
         threading.Thread(target=run, daemon=True).start()
 
     def _open_file(self, file: Gio.File):
-        self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, video_utils.get_video_meta_data(file.get_path()), self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False)
+        self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model, self.config.mosaic_detection_model, self.video_metadata, self.config.device, self.config.max_clip_duration, self.config.show_mosaic_detections, False)
         file_path = file.get_path()
 
         assert not self._video_preview_init_done
-        self.video_metadata = video_utils.get_video_meta_data(file_path)
         self._frame_restorer_options = self._frame_restorer_options.with_video_metadata(self.video_metadata)
         self.has_audio = audio_utils.get_audio_codec(self.video_metadata.video_file) is not None
         self.button_mute_unmute.set_sensitive(self.has_audio)
