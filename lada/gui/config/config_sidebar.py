@@ -27,6 +27,7 @@ class ConfigSidebar(Gtk.Box):
     combo_row_export_codec = Gtk.Template.Child()
     spin_row_preview_buffer_duration = Gtk.Template.Child()
     spin_row_clip_max_duration = Gtk.Template.Child()
+    spin_row_re_mosaic_block_size = Gtk.Template.Child()
     switch_row_mute_audio = Gtk.Template.Child()
     preferences_page = Gtk.Template.Child()
     light_color_scheme_button = Gtk.Template.Child()
@@ -102,6 +103,7 @@ class ConfigSidebar(Gtk.Box):
 
         self.spin_row_preview_buffer_duration.set_value(config.preview_buffer_duration)
         self.spin_row_clip_max_duration.set_value(config.max_clip_duration)
+        self.spin_row_re_mosaic_block_size.set_value(config.re_mosaic_block_size if config.re_mosaic_block_size is not None else 0)
         self.switch_row_mute_audio.set_active(config.mute_audio)
 
         self.switch_row_seek_preview.set_active(config.seek_preview_enabled)
@@ -210,6 +212,12 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def spin_row_clip_max_duration_selected_callback(self, spin_row, value):
         self._config.max_clip_duration = int(spin_row.get_property("value"))
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def spin_row_re_mosaic_block_size_selected_callback(self, spin_row, value):
+        val = int(spin_row.get_property("value"))
+        self._config.re_mosaic_block_size = val if val >= 2 else None
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
