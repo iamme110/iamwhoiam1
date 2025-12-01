@@ -23,8 +23,8 @@ logging.basicConfig(level=LOG_LEVEL)
 
 class FrameRestorer:
     def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
-                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode,
-                 mosaic_detection=False):
+                  mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode,
+                  re_mosaic_block_size=None, mosaic_detection=False):
         self.device = torch.device(device)
         self.mosaic_restoration_model_name = mosaic_restoration_model_name
         self.max_clip_length = max_clip_length
@@ -32,6 +32,7 @@ class FrameRestorer:
         self.mosaic_detection_model = mosaic_detection_model
         self.mosaic_restoration_model = mosaic_restoration_model
         self.preferred_pad_mode = preferred_pad_mode
+        self.re_mosaic_block_size = re_mosaic_block_size
         self.start_ns = 0
         self.start_frame = 0
         self.mosaic_detection = mosaic_detection
@@ -216,6 +217,24 @@ class FrameRestorer:
             assert clip.frames[i].shape == restored_clip_images[i].shape
             clip.frames[i] = restored_clip_images[i]
 
+        # Apply re-mosaic if requested
+        if self.re_mosaic_block_size is not None and self.re_mosaic_block_size >= 2:
+            for i in range(len(clip.frames)):
+                # Convert tensor to numpy for mosaic application
+                frame_np = clip.frames[i].cpu().numpy()
+                mask_np = clip.masks[i].cpu().numpy()
+
+                if self.re_mosaic_block_size <= 7:
+                    # Fast method for small block sizes
+                    mosaiced_frame = self._fast_block_mosaic(frame_np, mask_np, self.re_mosaic_block_size)
+                else:
+                    # Accurate method for larger block sizes
+                    from lada.utils.mosaic_utils import addmosaic_base
+                    mosaiced_frame, _ = addmosaic_base(frame_np, mask_np, self.re_mosaic_block_size, model='squa_avg', rect_ratio=1.0, feather=0)
+
+                # Convert back to tensor
+                clip.frames[i] = torch.from_numpy(mosaiced_frame).to(device=clip.frames[i].device, dtype=clip.frames[i].dtype)
+
     def _collect_garbage(self, clip_buffer):
         processed_clips = list(filter(lambda _clip: len(_clip) == 0, clip_buffer))
         has_processed_clips = len(processed_clips) > 0
@@ -360,3 +379,27 @@ class FrameRestorer:
 
     def get_frame_restoration_queue(self):
         return self.frame_restoration_queue
+
+    def _fast_block_mosaic(self, img, mask, n):
+        """Fast block mosaic using resize for small block sizes"""
+        import cv2
+        h, w = img.shape[:2]
+
+        # Create 3D mask for blending
+        mask_3d = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) // 255
+
+        # For small block sizes, use resize-based approximation
+        # Downscale by factor n
+        small_h = max(1, h // n)
+        small_w = max(1, w // n)
+
+        # Downscale the image
+        small_img = cv2.resize(img, (small_w, small_h), interpolation=cv2.INTER_AREA)
+
+        # Upscale back to original size with nearest neighbor for blocky effect
+        blocky_img = cv2.resize(small_img, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        # Blend: keep original where mask is 0, use blocky where mask is 255
+        result = img * (1 - mask_3d) + blocky_img * mask_3d
+
+        return result.astype(np.uint8)
