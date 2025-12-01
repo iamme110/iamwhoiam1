@@ -59,6 +59,22 @@ SPDX-License-Identifier: AGPL-3.0
                                     </object>
                                 </child>
                                 <child>
+                                    <object class="AdwSpinRow" id="spin_row_re_mosaic_block_size">
+                                        <property name="title" translatable="true">Re-mosaic block size</property>
+                                        <property name="subtitle" translatable="true">Apply mosaic again to restored areas with the specified block size. Use values ≥2 for finer mosaic like in older titles. Values 0-1 disable re-mosaic.</property>
+                                        <signal name="notify::value"
+                                                handler="spin_row_re_mosaic_block_size_selected_callback"/>
+                                        <property name="adjustment">
+                                            <object class="GtkAdjustment">
+                                                <property name="lower">0</property>
+                                                <property name="upper">32</property>
+                                                <property name="value">0</property>
+                                                <property name="step-increment">1</property>
+                                            </object>
+                                        </property>
+                                    </object>
+                                </child>
+                                <child>
                                     <object class="AdwComboRow" id="combo_row_gpu">
                                         <property name="title" translatable="true">GPU</property>
                                         <property name="subtitle" translatable="true">Selected GPU for model processing.</property>
