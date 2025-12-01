@@ -44,6 +44,7 @@ class Config(GObject.Object):
         'post_export_action': PostExportAction.NONE,
         'post_export_custom_command': '',
         'preview_buffer_duration': 0,
+        're_mosaic_block_size': None,
         'seek_preview_enabled': True,
         'show_mosaic_detections': False,
         'temp_directory': tempfile.gettempdir(),
@@ -68,6 +69,7 @@ class Config(GObject.Object):
         self._show_mosaic_detections = self._defaults['show_mosaic_detections']
         self._post_export_action = self._defaults['post_export_action']
         self._post_export_custom_command = self._defaults['post_export_custom_command']
+        self._re_mosaic_block_size = self._defaults['re_mosaic_block_size']
         self._temp_directory = self._defaults['temp_directory']
 
         self.save_lock = threading.Lock()
@@ -264,6 +266,17 @@ class Config(GObject.Object):
         self.save()
 
     @GObject.Property()
+    def re_mosaic_block_size(self):
+        return self._re_mosaic_block_size
+
+    @re_mosaic_block_size.setter
+    def re_mosaic_block_size(self, value):
+        if value == self._re_mosaic_block_size:
+            return
+        self._re_mosaic_block_size = value
+        self.save()
+
+    @GObject.Property()
     def temp_directory(self):
         return self._temp_directory
 
@@ -320,6 +333,7 @@ class Config(GObject.Object):
         self.post_export_action = self._defaults['post_export_action']
         self.post_export_custom_command = self._defaults['post_export_custom_command']
         self.preview_buffer_duration = self._defaults['preview_buffer_duration']
+        self.re_mosaic_block_size = self._defaults['re_mosaic_block_size']
         self.seek_preview_enabled = self._defaults['seek_preview_enabled']
         self.show_mosaic_detections = self._defaults['show_mosaic_detections']
         self.temp_directory = self._defaults['temp_directory']
@@ -350,6 +364,7 @@ class Config(GObject.Object):
             'post_export_action': self._post_export_action.value,
             'post_export_custom_command': self._post_export_custom_command,
             'preview_buffer_duration': self._preview_buffer_duration,
+            're_mosaic_block_size': self._re_mosaic_block_size,
             'seek_preview_enabled': self._seek_preview_enabled,
             'show_mosaic_detections': self._show_mosaic_detections,
             'temp_directory': self._temp_directory,
@@ -383,6 +398,8 @@ class Config(GObject.Object):
                     self.validate_and_set_initial_view(dict[key])
                 elif key == 'seek_preview_enabled':
                     self._seek_preview_enabled = dict[key]
+                elif key == 're_mosaic_block_size':
+                    self._re_mosaic_block_size = dict[key]
                 else:
                     setattr(self, f"_{key}", dict[key])
 
