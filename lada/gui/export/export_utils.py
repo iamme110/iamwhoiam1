@@ -135,6 +135,7 @@ class ResumeInformation:
     frame_pts: int
     time_base: Fraction
     frame_num : int
+    total_processing_time_s: float = 0.0  # Total time spent on all parts so far
 
     def get_resume_timestamp_ns(self):
         SECOND = 1_000_000_000
