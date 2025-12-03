@@ -47,6 +47,8 @@ class Config(GObject.Object):
         'seek_preview_enabled': True,
         'show_mosaic_detections': False,
         'temp_directory': tempfile.gettempdir(),
+        'video_splitting_enabled': False,
+        'video_part_duration': 10,
     }
 
     def __init__(self, style_manager: Adw.StyleManager):
@@ -69,6 +71,8 @@ class Config(GObject.Object):
         self._post_export_action = self._defaults['post_export_action']
         self._post_export_custom_command = self._defaults['post_export_custom_command']
         self._temp_directory = self._defaults['temp_directory']
+        self._video_splitting_enabled = self._defaults['video_splitting_enabled']
+        self._video_part_duration = self._defaults['video_part_duration']
 
         self.save_lock = threading.Lock()
         self._style_manager = style_manager
@@ -274,6 +278,28 @@ class Config(GObject.Object):
         self._temp_directory = value
         self.save()
 
+    @GObject.Property()
+    def video_splitting_enabled(self):
+        return self._video_splitting_enabled
+
+    @video_splitting_enabled.setter
+    def video_splitting_enabled(self, value):
+        if value == self._video_splitting_enabled:
+            return
+        self._video_splitting_enabled = value
+        self.save()
+
+    @GObject.Property()
+    def video_part_duration(self) -> int:
+        return int(self._video_part_duration)
+
+    @video_part_duration.setter
+    def video_part_duration(self, value):
+        if value == self._video_part_duration:
+            return
+        self._video_part_duration = value
+        self.save()
+
     def save(self):
         self.save_lock.acquire_lock()
         config_file_path = self.get_config_file_path()
@@ -323,6 +349,8 @@ class Config(GObject.Object):
         self.seek_preview_enabled = self._defaults['seek_preview_enabled']
         self.show_mosaic_detections = self._defaults['show_mosaic_detections']
         self.temp_directory = self._defaults['temp_directory']
+        self.video_splitting_enabled = self._defaults['video_splitting_enabled']
+        self.video_part_duration = self._defaults['video_part_duration']
         self.validate_and_set_device(self._defaults['device'])
         self.save()
 
@@ -353,6 +381,8 @@ class Config(GObject.Object):
             'seek_preview_enabled': self._seek_preview_enabled,
             'show_mosaic_detections': self._show_mosaic_detections,
             'temp_directory': self._temp_directory,
+            'video_splitting_enabled': self._video_splitting_enabled,
+            'video_part_duration': self._video_part_duration,
         }
 
     def get_default_value(self, key):
@@ -383,6 +413,10 @@ class Config(GObject.Object):
                     self.validate_and_set_initial_view(dict[key])
                 elif key == 'seek_preview_enabled':
                     self._seek_preview_enabled = dict[key]
+                elif key == 'video_splitting_enabled':
+                    self._video_splitting_enabled = dict[key]
+                elif key == 'video_part_duration':
+                    self._video_part_duration = dict[key]
                 else:
                     setattr(self, f"_{key}", dict[key])
 
