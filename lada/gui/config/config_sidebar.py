@@ -46,6 +46,8 @@ class ConfigSidebar(Gtk.Box):
     entry_row_post_export_custom_command: Adw.EntryRow = Gtk.Template.Child()
     check_button_show_mosaic_detections: Gtk.CheckButton = Gtk.Template.Child()
     switch_row_seek_preview = Gtk.Template.Child()
+    expander_row_video_splitting: Adw.ExpanderRow = Gtk.Template.Child()
+    spin_row_video_part_duration = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -136,6 +138,11 @@ class ConfigSidebar(Gtk.Box):
         self.expander_row_post_export_action.set_expanded(config.post_export_action != PostExportAction.NONE)
         self.entry_row_post_export_custom_command.set_text(config.post_export_custom_command)
         self.update_custom_command_visibility(config.post_export_action)
+
+        # init video splitting
+        self.expander_row_video_splitting.set_enable_expansion(config.video_splitting_enabled)
+        self.expander_row_video_splitting.set_expanded(config.video_splitting_enabled)
+        self.spin_row_video_part_duration.set_value(config.video_part_duration)
 
         self.init_done = True
 
@@ -327,6 +334,17 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def switch_row_seek_preview_active_callback(self, switch_row, active):
         self._config.seek_preview_enabled = switch_row.get_property("active")
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def expander_row_video_splitting_enable_callback(self, expander_row: Adw.ExpanderRow, param_spec):
+        enabled: bool = expander_row.get_property(param_spec.name)
+        self._config.video_splitting_enabled = enabled
+
+    @Gtk.Template.Callback()
+    @skip_if_uninitialized
+    def spin_row_video_part_duration_selected_callback(self, spin_row, value):
+        self._config.video_part_duration = int(spin_row.get_property("value"))
 
     def set_file_name_pattern_row_styles(self):
         is_valid = validate_file_name_pattern(self.entry_row_file_name_pattern.get_text())
