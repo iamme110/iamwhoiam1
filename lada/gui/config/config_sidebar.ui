@@ -189,6 +189,32 @@ SPDX-License-Identifier: AGPL-3.0
                                     </object>
                                 </child>
                                 <child>
+                                    <object class="AdwExpanderRow" id="expander_row_video_splitting">
+                                        <property name="title" translatable="true">Enable video splitting for crash recovery</property>
+                                        <property name="subtitle" translatable="true">Split videos into parts before processing to avoid losing progress on crashes. Useful for long videos.</property>
+                                        <property name="show-enable-switch">true</property>
+                                        <property name="enable-expansion">false</property>
+                                        <property name="expanded">false</property>
+                                        <signal name="notify::enable-expansion" handler="expander_row_video_splitting_enable_callback"/>
+                                        <child>
+                                            <object class="AdwSpinRow" id="spin_row_video_part_duration">
+                                                <property name="title" translatable="true">Video part duration</property>
+                                                <property name="subtitle" translatable="true">Duration of each video part in minutes when splitting is enabled.</property>
+                                                <signal name="notify::value"
+                                                        handler="spin_row_video_part_duration_selected_callback"/>
+                                                <property name="adjustment">
+                                                    <object class="GtkAdjustment">
+                                                        <property name="lower">1</property>
+                                                        <property name="upper">60</property>
+                                                        <property name="value">10</property>
+                                                        <property name="step-increment">1</property>
+                                                    </object>
+                                                </property>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                                <child>
                                     <object class="AdwActionRow" id="action_row_temp_directory">
                                         <property name="title" translatable="true">Temporary Directory</property>
                                         <property name="tooltip-text" translatable="true">Directory for temporary video files during restoration process</property>
@@ -348,12 +374,12 @@ SPDX-License-Identifier: AGPL-3.0
                                                 </style>
                                             </object>
                                         </child>
-                                    </object>
-                                </child>
-                            </object>
-                        </child>
-                    </object>
-                </child>
+                                   </object>
+                               </child>
+                           </object>
+                       </child>
+                   </object>
+               </child>
             </object>
         </child>
         <child>
