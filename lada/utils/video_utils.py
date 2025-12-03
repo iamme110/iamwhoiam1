@@ -460,3 +460,154 @@ class VideoThumbnailer:
         except Exception as e:
             logger.error(f"Error generating thumbnail at {timestamp_ns}: {e}")
             return self._get_fallback_thumbnail()
+
+
+def split_video_by_duration(input_path: str, output_pattern: str, duration_seconds: int) -> list[str]:
+    """
+    Split a video into parts of specified duration using ffmpeg.
+
+    Args:
+        input_path: Path to the input video file
+        output_pattern: Pattern for output files (e.g., "part_%03d.mp4")
+        duration_seconds: Duration of each part in seconds
+
+    Returns:
+        List of paths to the created video parts
+    """
+    import math
+
+    # Get video duration
+    metadata = get_video_meta_data(input_path)
+    total_duration = metadata.duration
+
+    # Calculate number of parts needed
+    num_parts = math.ceil(total_duration / duration_seconds)
+
+    part_files = []
+    for i in range(num_parts):
+        start_time = i * duration_seconds
+        output_file = output_pattern % (i + 1)
+
+        # Build ffmpeg command
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', input_path,
+            '-ss', str(start_time),
+            '-t', str(duration_seconds),
+            '-c', 'copy',  # Copy streams without re-encoding for speed
+            '-avoid_negative_ts', 'make_zero',
+            output_file
+        ]
+
+        # Execute ffmpeg command
+        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=os_utils.get_subprocess_startup_info())
+        if result.returncode != 0:
+            raise Exception(f"Failed to split video part {i+1}: {result.stderr}")
+
+        part_files.append(output_file)
+
+    return part_files
+
+
+def merge_video_parts(part_files: list[str], output_path: str) -> None:
+    """
+    Merge video parts into a single video file using ffmpeg.
+
+    Args:
+        part_files: List of paths to video parts to merge
+        output_path: Path for the merged output video
+    """
+    logger.info(f"Merging {len(part_files)} video parts to: {output_path}")
+
+    if not part_files:
+        raise ValueError("No part files provided for merging")
+
+    # Ensure output directory exists
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        logger.info(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir, exist_ok=True)
+
+    if len(part_files) == 1:
+        # If only one part, just copy it
+        import shutil
+        logger.info(f"Only one part, copying directly: {part_files[0]} -> {output_path}")
+        shutil.copy2(part_files[0], output_path)
+        return
+
+    # Create a temporary concat file
+    concat_file = output_path + '.concat.txt'
+    try:
+        logger.info(f"Creating concat file: {concat_file}")
+        with open(concat_file, 'w') as f:
+            for part_file in part_files:
+                # Convert backslashes to forward slashes for FFmpeg compatibility
+                safe_path = part_file.replace('\\', '/')
+                f.write(f"file '{safe_path}'\n")
+                logger.debug(f"Added to concat: {safe_path}")
+
+        # Build ffmpeg command for concatenation
+        cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', concat_file,
+            '-c', 'copy',  # Copy streams without re-encoding
+            '-fflags', '+genpts',
+            output_path
+        ]
+
+        logger.info(f"Running ffmpeg merge command: {' '.join(cmd)}")
+
+        # Execute ffmpeg command
+        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=os_utils.get_subprocess_startup_info())
+
+        if result.returncode != 0:
+            logger.error(f"FFmpeg merge failed with return code {result.returncode}")
+            logger.error(f"FFmpeg stdout: {result.stdout}")
+            logger.error(f"FFmpeg stderr: {result.stderr}")
+            raise Exception(f"Failed to merge video parts: {result.stderr}")
+        else:
+            logger.info(f"FFmpeg merge completed with return code 0")
+            # Verify output file exists
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                logger.info(f"Output file exists at: {output_path}")
+                logger.info(f"Output file size: {file_size} bytes")
+                # Additional verification - try to get file metadata
+                try:
+                    import time
+                    mod_time = time.ctime(os.path.getmtime(output_path))
+                    logger.info(f"Output file modification time: {mod_time}")
+                except Exception as e:
+                    logger.warning(f"Could not get file modification time: {e}")
+            else:
+                logger.error(f"CRITICAL: Output file was not created at: {output_path}")
+                logger.error(f"Check if the output directory exists and is writable")
+                logger.error(f"Output directory: {os.path.dirname(output_path)}")
+                logger.error(f"Directory exists: {os.path.exists(os.path.dirname(output_path))}")
+                if os.path.exists(os.path.dirname(output_path)):
+                    logger.error(f"Directory is writable: {os.access(os.path.dirname(output_path), os.W_OK)}")
+
+                # Check if file was created with a different name or in a different location
+                output_basename = os.path.basename(output_path)
+                output_dir = os.path.dirname(output_path)
+                if os.path.exists(output_dir):
+                    files_in_dir = os.listdir(output_dir)
+                    similar_files = [f for f in files_in_dir if output_basename.replace('.mp4', '') in f and f.endswith('.mp4')]
+                    if similar_files:
+                        logger.error(f"Found similar files in output directory: {similar_files}")
+
+                # Check current working directory
+                cwd = os.getcwd()
+                logger.error(f"Current working directory: {cwd}")
+                if os.path.exists(os.path.join(cwd, output_basename)):
+                    logger.error(f"File was created in current working directory: {os.path.join(cwd, output_basename)}")
+
+                raise Exception(f"Output file was not created: {output_path}")
+
+    finally:
+        # Clean up concat file
+        if os.path.exists(concat_file):
+            os.remove(concat_file)
+            logger.debug(f"Cleaned up concat file: {concat_file}")
