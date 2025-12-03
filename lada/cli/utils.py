@@ -107,7 +107,7 @@ def dump_torch_devices():
     description_header_width = max([len(item) for item in descriptions + [description_header]])
     s = _("Available devices:")
     s += f"\n\t{device_header.ljust(device_header_width)}\t{description_header}"
-    s += f"\n\t{device_header_width*"-"}\t{description_header_width*"-"}"
+    s += f"\n\t{device_header_width * '-'}\t{description_header_width * '-'}"
     for device, description in zip(devices, descriptions):
         s += f"\n\t{device.ljust(device_header_width)}\t{description}"
     print(s)
@@ -116,14 +116,15 @@ def dump_available_detection_models():
     s = _("Available detection models:")
     detection_model_names = get_available_detection_models()
     if len(detection_model_names) == 0:
-        s += f"\n\t{_("None!")}"
+        none_text = _("None!")
+        s += f"\n\t{none_text}"
     else:
         model_name_header = _("Name")
         model_path_header = _("Path")
         model_name_column_with = max([len(item) for item in detection_model_names + [model_name_header]])
         model_path_column_with = max([len(item) for item in list(DETECTION_MODEL_FILES_TO_NAMES.keys()) + [model_path_header]])
         s += f"\n\t{model_name_header.ljust(model_name_column_with)}\t{model_path_header}"
-        s += f"\n\t{model_name_column_with * "-"}\t{model_path_column_with * "-"}"
+        s += f"\n\t{model_name_column_with * '-'}\t{model_path_column_with * '-'}"
         for name in detection_model_names:
             s += f"\n\t{name.ljust(model_name_column_with)}\t{DETECTION_MODEL_NAMES_TO_FILES[name]}"
     print(s)
@@ -132,14 +133,15 @@ def dump_available_restoration_models():
     s = _("Available restoration models:")
     restoration_model_names = get_available_restoration_models()
     if len(restoration_model_names) == 0:
-        s += f"\n\t{_("None!")}"
+        none_text2 = _("None!")
+        s += f"\n\t{none_text2}"
     else:
         model_name_header = _("Name")
         model_path_header = _("Path")
         model_name_column_with = max([len(item) for item in restoration_model_names + [model_name_header]])
         model_path_column_with = max([len(item) for item in list(RESTORATION_MODEL_FILES_TO_NAMES.keys()) + [model_path_header]])
         s += f"\n\t{model_name_header.ljust(model_name_column_with)}\t{model_path_header}"
-        s += f"\n\t{model_name_column_with * "-"}\t{model_path_column_with * "-"}"
+        s += f"\n\t{model_name_column_with * '-'}\t{model_path_column_with * '-'}"
         for name in restoration_model_names:
             s += f"\n\t{name.ljust(model_name_column_with)}\t{RESTORATION_MODEL_NAMES_TO_FILES[name]}"
     print(s)
