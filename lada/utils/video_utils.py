@@ -17,7 +17,7 @@ import cv2
 import torch
 import numpy as np
 
-from lada.utils import Image, Mask, VideoMetadata, os_utils
+from lada.utils import Image, Mask, VideoMetadata, os_utils, ImageTensor
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +74,10 @@ def VideoReaderOpenCV(*args, **kwargs):
         cap.release()
 
 class VideoReader:
-    def __init__(self, file):
+    def __init__(self, file, return_image_tensors=False):
         self.file = file
         self.container = None
+        self.return_image_tensors = return_image_tensors
 
     def __enter__(self):
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
@@ -88,11 +89,14 @@ class VideoReader:
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
 
-    def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
+    def frames(self) -> Iterator[Tuple[Image, int]]:
         for frame in self.container.decode(video=0):
             nd_frame = frame.to_ndarray(format='bgr24')
-            torch_frame = torch.from_numpy(nd_frame)
-            yield torch_frame, frame.pts
+            if self.return_image_tensors:
+                torch_frame = torch.from_numpy(nd_frame)
+                yield torch_frame, frame.pts
+            else:
+                yield nd_frame, frame.pts
 
     def seek(self, offset_ns):
         offset = int((offset_ns / 1_000_000_000) * av.time_base)
@@ -322,7 +326,7 @@ class VideoWriter:
                 self.output_container.mux(out_packet)
 
 
-    def write(self, frame, frame_pts=None, bgr2rgb=False):
+    def write(self, frame: Image | ImageTensor, frame_pts=None, bgr2rgb=False):
         # We add the frame and its pts given by PyAV (FFmpeg) to a FIFO queue and a min heap, respectively.
         # Upon a call to write(), if the buffer is full, we pop the head of the queue and the smallest PTS and pair
         # those together. This operation is a no-op for "nicely behaved" videos, where frames and PTS are decoded

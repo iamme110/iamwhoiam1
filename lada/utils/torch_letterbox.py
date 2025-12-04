@@ -5,6 +5,8 @@ import torch
 from torchvision.transforms.v2 import Resize, Pad
 from torchvision.transforms.v2.functional import InterpolationMode
 
+from lada.utils import ImageTensor
+
 class PyTorchLetterBox:
     def __init__(self, imgsz: int | tuple[int, int], original_shape: tuple[int, int], stride: int = 32) -> None:
         if isinstance(imgsz, int):
@@ -13,7 +15,7 @@ class PyTorchLetterBox:
             new_shape = imgsz
 
         self.original_shape = original_shape
-        pad_value: float = 114.0/255.0
+        pad_value: int = 114
         h, w = original_shape
         new_h, new_w = new_shape
 
@@ -30,5 +32,5 @@ class PyTorchLetterBox:
         pad = Pad(padding=(dw // 2, dh // 2, dw - (dw // 2), dh - (dh // 2)), fill=pad_value)
         self.transform = torch.nn.Sequential(resize, pad) if resize is not None else pad
 
-    def __call__(self, image: torch.Tensor) -> torch.Tensor: # (B,C,H,W)
+    def __call__(self, image: ImageTensor) -> torch.Tensor: # (B,C,H,W)
         return self.transform(image)

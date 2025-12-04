@@ -13,7 +13,7 @@ from ultralytics.engine.results import Masks as UltralyticsMasks
 from ultralytics.engine.results import Results as UltralyticsResults
 from ultralytics.utils.ops import scale_image
 
-from lada.utils import Box, Mask
+from lada.utils import Box, Mask, MaskTensor
 
 def set_default_settings():
     settings.update({'runs_dir': './experiments/yolo', 'datasets_dir': './datasets', 'tensorboard': True})
@@ -38,7 +38,7 @@ def convert_yolo_boxes(yolo_box: UltralyticsBoxes, img_shape) -> list[Box]:
         boxes.append(box)
     return boxes
 
-def scale_and_unpad_image(masks, im0_shape):
+def _scale_and_unpad_image(masks, im0_shape):
     h0, w0 = im0_shape[:2]
     h1, w1, _ = masks.shape
     if h1 == h0 and w1 == w0:
@@ -51,11 +51,11 @@ def scale_and_unpad_image(masks, im0_shape):
     y = F.interpolate(x, size=(h0, w0), mode='bilinear', align_corners=False)
     return y.squeeze(0).permute(1, 2, 0).round_().clamp_(0, 255).to(masks.dtype)
 
-def convert_yolo_mask_tensor(yolo_mask: UltralyticsMasks, img_shape) -> torch.Tensor:
+def convert_yolo_mask_tensor(yolo_mask: UltralyticsMasks, img_shape) -> MaskTensor:
     mask_img = _to_mask_img_tensor(yolo_mask.data)
     if mask_img.ndim == 2:
         mask_img = mask_img.unsqueeze(-1)
-    mask_img = scale_and_unpad_image(mask_img, img_shape)
+    mask_img = _scale_and_unpad_image(mask_img, img_shape)
     mask_img = torch.where(mask_img > 127, 255, 0).to(torch.uint8)
     assert mask_img.ndim == 3 and mask_img.shape[2] == 1
     return mask_img

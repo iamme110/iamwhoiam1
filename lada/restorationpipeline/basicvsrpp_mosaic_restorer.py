@@ -1,40 +1,41 @@
+import numpy as np
 import torch
 
 from lada.models.basicvsrpp.basicvsrpp_gan import BasicVSRPlusPlusGan
+from lada.utils import Image, ImageTensor
+from lada.utils.image_utils import img2tensor, tensor2img
 
 class BasicvsrppMosaicRestorer:
     def __init__(self, model: BasicVSRPlusPlusGan, device: torch.device, fp16, clip_length):
         self.model = model
         self.device: torch.device = torch.device(device)
-        is_cuda_device = device.type == 'cuda'
-        self.cpu_buffer = torch.empty(1, clip_length, 3, 256, 256, dtype=torch.uint8, device='cpu', pin_memory=is_cuda_device)
         self.dtype = torch.float16 if fp16 else torch.float32
-        self.inference_buffer = torch.empty(1, clip_length, 3, 256, 256, dtype=self.dtype, device=device, memory_format=torch.channels_last_3d)
 
-    def restore(self, video: list[torch.Tensor], max_frames=-1) -> list[torch.Tensor]:
+    def restore(self, video: list[Image | ImageTensor]) -> list[Image | ImageTensor]:
         input_frame_count = len(video)
+        if input_frame_count == 0:
+            return []
         input_frame_shape = video[0].shape
+        is_image_tensor = isinstance(video[0], torch.Tensor)
         with torch.inference_mode():
-            result = []
-            cpu_buffer_view = self.cpu_buffer[0][:input_frame_count]
-            inference_view = self.inference_buffer[:, :input_frame_count]
-
-            torch.stack([x.permute(2, 0, 1) for x in video], dim=0, out=cpu_buffer_view)
-            inference_view.copy_(cpu_buffer_view, non_blocking=True)
-            inference_view.div_(255.0)
-
-            if max_frames > 0:
-                for i in range(0, input.shape[1], max_frames):
-                    output = self.model(inputs=self.cpu_buffer[:, i:i + max_frames])
-                    result.append(output)
-                result = torch.cat(result, dim=1)
+            if is_image_tensor:
+                input = torch.stack([x.permute(2, 0, 1) for x in video]).to(device=self.device, dtype=self.dtype)
+                input.div_(255.0)
             else:
-                result = self.model(inputs=inference_view)
+                input = torch.stack(img2tensor(video, bgr2rgb=False, float32=True), dim=0).to(device=self.device, dtype=self.dtype)
+            input.unsqueeze_(0)  # TCHW -> BTCHW
 
-            # (H, W, C[BGR]) uint8 images to (B, T, C, H, W) float in [0,1]
-            result = result.squeeze(0)[:input_frame_count] # -> (T, C, H, W)
-            result = result.mul_(255.0).round_().clamp_(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1) # (T, H, W, C)
-            result = list(torch.unbind(result, 0)) # (T, H, W, C) to list of (H, W, C)
+            result = self.model(inputs=input)
+
+            result.squeeze_(0) # BTCHW -> TCHW
+            if is_image_tensor:
+                # (H, W, C[BGR]) uint8 images to (B, T, C, H, W) float in [0,1]
+                result = result.mul_(255.0).round_().clamp_(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1) # (T, H, W, C)
+                result = list(torch.unbind(result, 0)) # (T, H, W, C) to list of (H, W, C)
+            else:
+                result = list(torch.unbind(result, 0))
+                result = tensor2img(result, rgb2bgr=False, out_type=np.uint8, min_max=(0, 1))
+
             output_frame_count = len(result)
             output_frame_shape = result[0].shape
             assert input_frame_count == output_frame_count and input_frame_shape == output_frame_shape

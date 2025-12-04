@@ -37,11 +37,15 @@ def draw_mosaic_detections(clip: Clip, border_color = (255, 0, 255)) -> list[tor
     mosaic_detection_images = []
     box_border_thickness = 2
     border_thickness_half = box_border_thickness // 2
-    device = clip.frames[0].device
+    is_tensor_clip = isinstance(clip.frames[0], torch.Tensor)
+    device = clip.frames[0].device if is_tensor_clip else None
 
     for (cropped_img, cropped_mask, _, orig_crop_shape, pad_after_resize) in clip:
-        mosaic_detection_img = cropped_img.to(device='cpu').contiguous().numpy()
-        cropped_mask = cropped_mask.to(device='cpu').contiguous().numpy()
+        if is_tensor_clip:
+            mosaic_detection_img = cropped_img.to(device='cpu').contiguous().numpy()
+            cropped_mask = cropped_mask.to(device='cpu').contiguous().numpy()
+        else:
+            mosaic_detection_img = cropped_img.copy()
 
         draw_text(f"c:{clip.id},f_start:{clip.frame_start}",(25, cropped_img.shape[1] // 2), mosaic_detection_img)
 
@@ -63,8 +67,9 @@ def draw_mosaic_detections(clip: Clip, border_color = (255, 0, 255)) -> list[tor
 
         mosaic_detection_images.append(mosaic_detection_img)
 
-    mosaic_detection_images = [torch.from_numpy(x) for x in mosaic_detection_images]
-    if device.type == 'cuda':
-        mosaic_detection_images = torch.stack(mosaic_detection_images, dim=0).to(device=device)
-        return torch.unbind(mosaic_detection_images, dim=0)
+    if is_tensor_clip:
+        mosaic_detection_images = [torch.from_numpy(x) for x in mosaic_detection_images]
+        if device.type == 'cuda':
+            mosaic_detection_images = torch.stack(mosaic_detection_images, dim=0).to(device=device)
+            return torch.unbind(mosaic_detection_images, dim=0)
     return mosaic_detection_images

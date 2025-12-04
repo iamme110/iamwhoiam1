@@ -9,34 +9,30 @@ from pathlib import Path
 from typing import List, Tuple
 
 import cv2
+import numpy as np
 import torch
 
 from ultralytics.engine.results import Results
-from lada.utils import VideoMetadata, threading_utils
+from lada.utils import VideoMetadata, threading_utils, ImageTensor, MaskTensor, Image, Mask, Pad
 from lada.utils import image_utils
 from lada.utils.box_utils import box_overlap
 from lada.models.yolo.yolo11_segmentation_model import Yolo11SegmentationModel
 from lada.utils.scene_utils import crop_to_box_v3
 from lada.utils import video_utils
 from lada import LOG_LEVEL
-from lada.utils.ultralytics_utils import convert_yolo_box, convert_yolo_mask_tensor
+from lada.utils.ultralytics_utils import convert_yolo_box, convert_yolo_mask_tensor, convert_yolo_mask
 from lada.utils import Box
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
-Image = torch.Tensor # [H, W, C] fp
-Images = List[torch.Tensor] # [H, W, C] fp
-Mask = torch.Tensor # [H, W] uint8
-Masks = List[torch.Tensor] # [H, W] uint8
-Boxes = List[Box] # [4] int64
 
 class Scene:
     def __init__(self, file_path: Path, video_meta_data: VideoMetadata):
         self.file_path = file_path
         self.video_meta_data = video_meta_data
-        self.frames: Images = []
-        self.masks: Masks = []
-        self.boxes: Boxes = []
+        self.frames: list[Image | ImageTensor] = []
+        self.masks: list[Mask | MaskTensor] = []
+        self.boxes: list[Box] = []
         self.frame_start: int | None = None
         self.frame_end: int | None = None
         self._index: int = 0
@@ -44,7 +40,7 @@ class Scene:
     def __len__(self):
         return len(self.frames)
 
-    def add_frame(self, frame_num: int, img: Image, mask: Mask, box: Box):
+    def add_frame(self, frame_num: int, img: Image | ImageTensor, mask: Mask | MaskTensor, box: Box):
         if self.frame_start is None:
             self.frame_start = frame_num
             self.frame_end = frame_num
@@ -56,7 +52,7 @@ class Scene:
         self.masks.append(mask)
         self.boxes.append(box)
 
-    def merge_mask_box(self, mask: Mask, box: Box):
+    def merge_mask_box(self, mask: Mask | MaskTensor, box: Box):
         assert self.belongs(box)
         current_box = self.boxes[-1]
         t = min(current_box[0], box[0])
@@ -65,9 +61,9 @@ class Scene:
         r = max(current_box[3], box[3])
         new_box = (t, l, b, r)
         self.boxes[-1] = new_box
-        self.masks[-1] = torch.maximum(self.masks[-1], mask)
+        self.masks[-1] = torch.maximum(self.masks[-1], mask) if isinstance(mask, torch.Tensor) else np.maximum(self.masks[-1], mask)
 
-    def belongs(self, box: Box):
+    def belongs(self, box: Box) -> bool:
         if len(self.boxes) == 0:
             return False
         last_scene_box = self.boxes[-1]
@@ -94,11 +90,11 @@ class Clip:
         assert self.frame_start <= self.frame_end
         self.size = size
         self.pad_mode = pad_mode
-        self.frames: Images = []
-        self.masks: Masks = []
-        self.boxes: Boxes = []
+        self.frames: list[Image | ImageTensor] = []
+        self.masks: list[Mask | MaskTensor] = []
+        self.boxes: list[Box] = []
         self.crop_shapes: List[Tuple[int, int]] = []
-        self.pad_after_resizes: List[Tuple[int, int, int, int]] = []
+        self.pad_after_resizes: List[Pad] = []
         self._index: int = 0
 
         # crop scene
@@ -304,8 +300,9 @@ class MosaicDetector:
         if self.stop_requested:
             logger.debug("frame detector worker: frame_detection_queue producer unblocked")
             return
+        should_create_mask_tensor = isinstance(results.orig_img, torch.Tensor)
         for i in range(len(results.boxes)):
-            mask = convert_yolo_mask_tensor(results.masks[i], results.orig_shape)
+            mask = convert_yolo_mask_tensor(results.masks[i], results.orig_shape) if should_create_mask_tensor else convert_yolo_mask(results.masks[i], results.orig_shape)
             box = convert_yolo_box(results.boxes[i], results.orig_shape)
 
             current_scene = None
