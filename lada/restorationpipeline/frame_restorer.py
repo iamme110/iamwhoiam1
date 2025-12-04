@@ -197,8 +197,8 @@ class FrameRestorer:
             frame_roi[:] = temp
 
         def _blend_cpu(blend_mask: torch.Tensor, clip_img: torch.Tensor, orig_clip_box: tuple[int, int, int, int]):
-            blend_mask = blend_mask.to(device='cpu', memory_format=torch.contiguous_format).numpy()
-            clip_img = clip_img.to(device='cpu', memory_format=torch.contiguous_format).numpy()
+            blend_mask = blend_mask.cpu().numpy()
+            clip_img = clip_img.cpu().numpy()
             t, l, b, r = orig_clip_box
             frame_roi = frame[t:b + 1, l:r + 1, :].numpy()
             temp_buffer = np.empty_like(frame_roi, dtype=np.float32)
