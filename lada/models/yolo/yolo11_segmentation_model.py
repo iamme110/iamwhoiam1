@@ -27,7 +27,7 @@ class Yolo11SegmentationModel:
         self.args = get_cfg(DEFAULT_CFG, args)
 
         self.device: torch.device = torch.device(device)
-        self.is_cuda_device: bool = torch.device.type == 'cuda'
+        self.is_cuda_device: bool = self.device.type == 'cuda'
         self.model = AutoBackend(
             model=yolo_model.model,
             device=self.device,
