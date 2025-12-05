@@ -37,7 +37,7 @@ class Config(GObject.Object):
         'export_crf': 20,
         'export_directory': None,
         'file_name_pattern': "{orig_file_name}.restored.mp4",
-        'fp16_enabled': torch.cuda.is_available(),
+        'fp16_enabled': torch.cuda.is_available(),  # Default: True if CUDA is available and GPU is Turing or newer
         'initial_view': 'preview',
         'max_clip_duration': 180,
         'mosaic_detection_model': 'v3.1-fast',
