@@ -72,6 +72,13 @@ SPDX-License-Identifier: AGPL-3.0
                                                 handler="combo_row_gpu_selected_callback"/>
                                     </object>
                                 </child>
+                                <child>
+                                    <object class="AdwSwitchRow" id="switch_row_fp16">
+                                        <property name="title" translatable="true">Enable faster processing with less VRAM on modern GPUs</property>
+                                        <property name="subtitle" translatable="true">Use half-precision (FP16) for model processing. Negligible quality difference, but may be slower on legacy hardware.</property>
+                                        <signal name="notify::active" handler="switch_row_fp16_active_callback"/>
+                                    </object>
+                                </child>
                             </object>
                         </child>
                         <child>
@@ -247,18 +254,6 @@ SPDX-License-Identifier: AGPL-3.0
                                                  <signal name="changed" handler="entry_row_post_export_custom_command_changed_callback"/>
                                              </object>
                                          </child>
-                                     </object>
-                                 </child>
-                             </object>
-                         </child>
-                         <child>
-                             <object class="AdwPreferencesGroup">
-                                 <property name="title" translatable="true">Advanced Settings</property>
-                                 <child>
-                                     <object class="AdwSwitchRow" id="switch_row_fp16">
-                                         <property name="title" translatable="true">Use FP16 Precision</property>
-                                         <property name="subtitle" translatable="true">Use half-precision (FP16) for model processing. Reduces memory usage but may affect quality.</property>
-                                         <signal name="notify::active" handler="switch_row_fp16_active_callback"/>
                                      </object>
                                  </child>
                              </object>
