@@ -45,8 +45,8 @@ def _get_detection(dets: list[Box], frame, random_extend_masks: bool) -> Detecti
         width, height = r - l + 1, b - t + 1
         if min(width, height) < 40:
             # skip tiny detections
-            return None
-        detections.append(Detection("sfw_head", box, mask))
+            continue
+        detections.append(Detection(DETECTION_CLASSES["sfw_head"]["cls"], box, mask))
     return Detections(frame, detections)
 
 class HeadDetector:

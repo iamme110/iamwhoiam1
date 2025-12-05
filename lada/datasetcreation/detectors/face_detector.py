@@ -54,9 +54,9 @@ def get_nsfw_frame(dets: list[Box], frame: Image, random_extend_masks: bool) -> 
         width, height = r - l + 1, b - t + 1
         if min(width, height) < 40:
             # skip tiny detections
-            return None
+            continue
 
-        detections.append(Detection("sfw_face", box, mask))
+        detections.append(Detection(DETECTION_CLASSES["sfw_face"]["cls"], box, mask))
     return Detections(frame, detections)
 
 class FaceDetector:
