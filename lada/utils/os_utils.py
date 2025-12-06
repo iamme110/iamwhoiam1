@@ -17,5 +17,11 @@ def gpu_has_tensor_cores(device_index: int = 0) -> bool:
     if not torch.cuda.is_available():
         return False
     major, minor = torch.cuda.get_device_capability(device_index)
-    # Tensor cores available on compute capability 7.0+ (Volta and newer)
-    return major >= 7
+    if major < 7:
+        return False
+    if major > 7:
+        return True
+    name = torch.cuda.get_device_name(device_index).lower()
+    if "gtx 16" in name:
+        return False
+    return True
