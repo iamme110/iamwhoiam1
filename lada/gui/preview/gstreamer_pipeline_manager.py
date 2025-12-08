@@ -127,10 +127,6 @@ class PipelineManager(GObject.Object):
             logger.debug("Init Gst pipeline")
             self.video_metadata = video_metadata
             self.has_audio = audio_utils.get_audio_codec(self.video_metadata.video_file) is not None
-
-            # Auto-detect subtitle file if not provided
-            if subtitle_path is None:
-                subtitle_path = self._find_subtitle_file(self.video_metadata.video_file)
             self.has_subtitles = subtitle_path is not None
 
             bus = self.pipeline.get_bus()
@@ -339,6 +335,8 @@ class PipelineManager(GObject.Object):
         current_state = self.pipeline.get_state(0)[1]
         if current_state == Gst.State.PLAYING:
             self.pipeline.set_state(Gst.State.PAUSED)
+            # Wait for the pipeline to actually reach PAUSED state
+            self.pipeline.get_state(Gst.SECOND)
 
         # Flush the pipeline to clear any buffered data
         self.pipeline.send_event(Gst.Event.new_flush_start())
@@ -356,12 +354,8 @@ class PipelineManager(GObject.Object):
 
         # Handle subtitles
         subtitle_pipeline_already_added = self.has_subtitles
-
-        # Auto-detect subtitle file if not provided
-        if subtitle_path is None:
-            subtitle_path = self._find_subtitle_file(self.video_metadata.video_file)
-
         self.has_subtitles = subtitle_path is not None
+
         if self.has_subtitles and subtitle_path:
             if subtitle_pipeline_already_added:
                 # Update existing subtitle pipeline with new subtitle file
