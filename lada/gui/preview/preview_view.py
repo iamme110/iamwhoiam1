@@ -450,12 +450,15 @@ class PreviewView(Gtk.Widget):
 
         self.frame_restorer_provider.init(self._frame_restorer_options)
 
+        # Find subtitle file
+        subtitle_path = self._find_subtitle_file(self.video_metadata.video_file)
+
         if self.pipeline_manager:
-            self.pipeline_manager.init_pipeline(self.video_metadata)
+            self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
         else:
             buffer_queue_min_thresh_time, buffer_queue_max_thresh_time = self.get_gst_buffer_bounds()
             self.pipeline_manager = PipelineManager(self.frame_restorer_provider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, self.config.mute_audio)
-            self.pipeline_manager.init_pipeline(self.video_metadata)
+            self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
             self.picture_video_preview.set_paintable(self.pipeline_manager.paintable)
             self.pipeline_manager.connect("paintable-size-changed", lambda obj: self.emit("window-resize-requested", self.pipeline_manager.paintable, self.box_playback_controls, self.header_bar))
             self.pipeline_manager.connect("eos", self.on_eos)
@@ -595,6 +598,16 @@ class PreviewView(Gtk.Widget):
         self._shortcuts_manager.add("preview", "toggle-mute-unmute", "m", lambda *args: self.button_mute_unmute_callback(self.button_mute_unmute), _("Mute/Unmute"))
         self._shortcuts_manager.add("preview", "toggle-play-pause", "<Ctrl>space", lambda *args: self.button_play_pause_callback(self.button_play_pause), _("Play/Pause"))
         self._shortcuts_manager.add("preview", "toggle-fullscreen", "f", lambda *args: self.emit("toggle-fullscreen-requested"), _("Enable/Disable fullscreen"))
+
+    def _find_subtitle_file(self, video_file_path: str) -> str | None:
+        """Find SRT subtitle file with the same name as video file."""
+        video_path = pathlib.Path(video_file_path)
+        srt_path = video_path.with_suffix('.srt')
+
+        if srt_path.exists():
+            logger.info(f"Found SRT subtitle file: {srt_path}")
+            return str(srt_path.resolve())
+        return None
 
     def close_thumbnailer(self):
         with self._thumbnailer_lock:
