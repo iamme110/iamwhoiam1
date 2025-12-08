@@ -165,6 +165,13 @@ SPDX-License-Identifier: AGPL-3.0
                                     </object>
                                 </child>
                                 <child>
+                                    <object class="AdwSwitchRow" id="switch_row_moov_front">
+                                        <property name="title" translatable="true">Optimize for streaming</property>
+                                        <property name="subtitle" translatable="true">Enable fast start MP4 output. Allows playing the video while it's being written.</property>
+                                        <signal name="notify::active" handler="switch_row_moov_front_active_callback"/>
+                                    </object>
+                                </child>
+                                <child>
                                     <object class="AdwExpanderRow">
                                         <property name="title" translatable="true">Output Directory</property>
                                         <property name="show-enable-switch">false</property>
