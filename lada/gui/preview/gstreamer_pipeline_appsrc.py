@@ -151,9 +151,20 @@ class FrameRestorerAppSrc(GstApp.AppSrc):
                 logger.debug(f"appsource worker: requested to start but EOF. Will not start")
                 return
 
+            # Check if worker is already running
             if self.appsource_thread and self.appsource_thread.is_alive():
                 logger.debug(f"appsource worker: requested to start but already started")
                 return
+
+            # If we have a frame restorer but no active thread, we need to restart
+            if self.frame_restorer and (not self.appsource_thread or not self.appsource_thread.is_alive()):
+                logger.debug(f"appsource worker: restarting after pipeline reinitialization")
+                # Clean up the existing frame restorer so we can start fresh
+                try:
+                    self.frame_restorer.stop()
+                    self.frame_restorer = None
+                except:
+                    pass
 
             self.appsource_thread_stop_requested = False
             self.appsource_thread_should_be_running = True
