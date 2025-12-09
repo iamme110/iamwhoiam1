@@ -85,11 +85,13 @@ class FrameRestorerAppSrc(GstApp.AppSrc):
 
     def do_set_property(self, prop: GObject.GParamSpec, value):
         if prop.name == 'video-metadata':
-            self.appsource_thread_eof = False
-            if self.video_metadata is None:
-                self._set_video_metadata(value)
-            else:
-                with self.appsrc_lock:
+            # Reset EOF flag and ensure clean state for new video
+            with self.appsrc_lock:
+                self.appsource_thread_eof = False
+                self.appsource_thread_stop_requested = False
+                if self.video_metadata is None:
+                    self._set_video_metadata(value)
+                else:
                     self._stop_appsource_worker()
                     self.current_timestamp_ns = 0
                     self._set_video_metadata(value)
