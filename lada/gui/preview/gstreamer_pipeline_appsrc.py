@@ -150,12 +150,17 @@ class FrameRestorerAppSrc(GstApp.AppSrc):
             if self.appsource_thread_eof:
                 logger.debug(f"appsource worker: requested to start but EOF. Will not start")
                 return
+
+            # Reset stop flags to ensure worker can start
             self.appsource_thread_stop_requested = False
             self.appsource_thread_should_be_running = True
 
             if self.appsource_thread and self.appsource_thread.is_alive():
                 logger.debug(f"appsource worker: requested to start but already started")
                 return
+
+            # Debug logging to understand worker restart issues
+            logger.debug(f"appsource worker: starting new worker thread (shutdown_requested={self.appsource_thread_shutdown_requested}, eof={self.appsource_thread_eof}, stop_requested={self.appsource_thread_stop_requested}, should_run={self.appsource_thread_should_be_running})")
 
             if seek_position:
                 logger.debug(f"appsource worker: applying pending seek timestamp")
