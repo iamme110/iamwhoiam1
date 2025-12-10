@@ -85,13 +85,11 @@ class FrameRestorerAppSrc(GstApp.AppSrc):
 
     def do_set_property(self, prop: GObject.GParamSpec, value):
         if prop.name == 'video-metadata':
-            # Reset EOF flag and ensure clean state for new video
-            with self.appsrc_lock:
-                self.appsource_thread_eof = False
-                self.appsource_thread_stop_requested = False
-                if self.video_metadata is None:
-                    self._set_video_metadata(value)
-                else:
+            self.appsource_thread_eof = False
+            if self.video_metadata is None:
+                self._set_video_metadata(value)
+            else:
+                with self.appsrc_lock:
                     self._stop_appsource_worker()
                     self.current_timestamp_ns = 0
                     self._set_video_metadata(value)
@@ -151,20 +149,13 @@ class FrameRestorerAppSrc(GstApp.AppSrc):
                 logger.debug(f"appsource worker: requested to start but EOF. Will not start")
                 return
 
-            # Check if worker is already running
             if self.appsource_thread and self.appsource_thread.is_alive():
                 logger.debug(f"appsource worker: requested to start but already started")
                 return
 
-            # If we have a frame restorer but no active thread, we need to restart
-            if self.frame_restorer and (not self.appsource_thread or not self.appsource_thread.is_alive()):
-                logger.debug(f"appsource worker: restarting after pipeline reinitialization")
-                # Clean up the existing frame restorer so we can start fresh
-                try:
-                    self.frame_restorer.stop()
-                    self.frame_restorer = None
-                except:
-                    pass
+            # If thread exists but is not alive, clean it up
+            if self.appsource_thread and not self.appsource_thread.is_alive():
+                self.appsource_thread = None
 
             self.appsource_thread_stop_requested = False
             self.appsource_thread_should_be_running = True
