@@ -10,6 +10,7 @@ from lada import get_available_restoration_models, get_available_detection_model
 from lada.gui import utils
 from lada.gui.config.config import Config, ColorScheme, PostExportAction
 from lada.gui.utils import skip_if_uninitialized, get_available_video_codecs, validate_file_name_pattern
+from lada.utils.os_utils import gpu_has_tensor_cores
 
 here = pathlib.Path(__file__).parent.resolve()
 
@@ -107,6 +108,11 @@ class ConfigSidebar(Gtk.Box):
 
         self.switch_row_seek_preview.set_active(config.seek_preview_enabled)
         self.switch_row_fp16.set_active(config.fp16_enabled)
+
+        # Check if tensor cores are available and lock FP16 option if not
+        if not gpu_has_tensor_cores():
+            self.switch_row_fp16.set_sensitive(False)
+            self.switch_row_fp16.set_tooltip_text("FP16 requires tensor cores (available on RTX 20 series and newer GPUs)")
 
         # init color scheme
         if config.color_scheme == ColorScheme.LIGHT: self.light_color_scheme_button.set_property("active", True)
