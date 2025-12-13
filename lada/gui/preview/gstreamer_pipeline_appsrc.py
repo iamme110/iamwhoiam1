@@ -116,9 +116,14 @@ class FrameRestorerAppSrc(GstApp.AppSrc):
     def _on_need_data(self, src, length):
         logger.debug("appsource need-data")
         with self.appsrc_lock:
-            # Clear EOF flag when we need more data - this ensures worker can restart
-            # after pipeline reinitialization or other stops
-            self.appsource_thread_eof = False
+            # If we're at EOF, we can't provide more data unless we seek or switch videos
+            # However, during pipeline reinitialization, the EOF flag should already be cleared
+            # by do_set_property() and _stop_appsource_worker()
+            # If we're still at EOF here, it means we've truly reached the end of stream
+            if self.appsource_thread_eof:
+                logger.debug("appsource need-data: at EOF, cannot provide more data")
+                return True
+            
             self._start_appsource_worker()
         return True
 
@@ -206,11 +211,6 @@ class FrameRestorerAppSrc(GstApp.AppSrc):
                 # garbage collection
                 threading_utils.empty_out_queue(frame_restorer_thread_queue, "frame_restorer_thread_queue")
                 self.frame_restorer = None
-
-            # Don't set EOF flag when stopping for reinitialization (new video)
-            # Only set it when we actually reach end of stream
-            if not shutdown:
-                self.appsource_thread_eof = False
 
             logger.debug(f"appsource worker: stopped, took {time.time() - start}")
 
