@@ -305,8 +305,8 @@ class MosaicDetector:
             logger.debug("frame detector worker: frame_detection_queue producer unblocked")
             return
         for i in range(len(results.boxes)):
-            mask = convert_yolo_mask_tensor(results.masks[i], results.orig_shape).to(device=results.orig_img.device)
             box = convert_yolo_box(results.boxes[i], results.orig_shape)
+            mask = convert_yolo_mask_tensor(results.masks[i], results.orig_shape, box).to(device=results.orig_img.device)
 
             current_scene = None
             for scene in scenes:
