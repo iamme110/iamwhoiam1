@@ -101,3 +101,82 @@ def box_to_mask(box: Box, shape, mask_value: int):
     t, l, b, r = box
     mask[t:b + 1, l:r + 1] = mask_value
     return mask
+
+
+def fix_mask_top_edge(mask: Mask, box: Box, max_extension: int = 15) -> Mask:
+    """
+    Fixes YOLO mask top edge issue by filling all areas within the bounding box.
+    This addresses the known limitation where YOLO masks can be off by a few pixels at the edges,
+    with special handling for corners.
+
+    Args:
+        mask: Input mask with potential edge gaps
+        box: Bounding box (t, l, b, r) that should contain the mask
+        max_extension: Maximum number of pixels to extend/fill
+
+    Returns:
+        Mask with edges filled to match the bounding box
+    """
+    t, l, b, r = box
+
+    # Create a copy to avoid modifying the original
+    fixed_mask = mask.copy()
+
+    # Step 1: Fill gaps at the top edge by extending downward from existing content
+    for row in range(t, min(b + 1, mask.shape[0])):
+        if np.any(fixed_mask[row, l:r+1, :] > 0):
+            # This row has content, use it to fill upward
+            for fill_row in range(max(t, row - max_extension), row):
+                if not np.any(fixed_mask[fill_row, l:r+1, :] > 0):
+                    # Copy content from the current row to fill the gap
+                    fixed_mask[fill_row, l:r+1, :] = fixed_mask[row, l:r+1, :]
+            break
+
+    # Step 2: Enhanced morphological filling with corner-specific handling
+    bbox_region = fixed_mask[t:b+1, l:r+1, :]
+
+    if np.sum(bbox_region > 0) > 0:
+        # Use morphological closing to fill small gaps
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        filled_region = cv2.morphologyEx(bbox_region.squeeze(), cv2.MORPH_CLOSE, kernel)
+
+        # Step 3: Corner-specific filling - be more aggressive for corners
+        # Check if corners are empty and within bounding box
+        h, w = filled_region.shape
+        corner_fill_distance = min(max_extension, min(h, w) // 4)  # Adaptive corner distance
+
+        # Create distance transform for intelligent filling
+        dist_transform = cv2.distanceTransform((filled_region > 0).astype(np.uint8), cv2.DIST_L2, 3)
+
+        # Fill areas close to existing content
+        fill_mask = (dist_transform <= max_extension) & (filled_region == 0)
+
+        # Additional corner filling - more aggressive for top corners
+        if t > 0:  # If we're not at the very top of the image
+            # Check top-left and top-right corners specifically
+            top_region = filled_region[:corner_fill_distance, :]
+            if np.sum(top_region > 0) > 0:  # If there's some content in the top region
+                # Fill top corners more aggressively
+                top_dist = cv2.distanceTransform((top_region > 0).astype(np.uint8), cv2.DIST_L2, 3)
+                top_fill_mask = (top_dist <= corner_fill_distance * 1.5) & (top_region == 0)
+                top_region[top_fill_mask] = 255
+
+                # Special handling for left top corner - even more aggressive
+                left_corner_region = top_region[:, :corner_fill_distance]
+                if np.sum(left_corner_region > 0) > 0:
+                    left_dist = cv2.distanceTransform((left_corner_region > 0).astype(np.uint8), cv2.DIST_L2, 3)
+                    left_fill_mask = (left_dist <= corner_fill_distance * 2.0) & (left_corner_region == 0)
+                    left_corner_region[left_fill_mask] = 255
+
+        # Apply morphological dilation for final cleanup
+        filled_region = cv2.morphologyEx(filled_region, cv2.MORPH_DILATE, kernel, iterations=1)
+
+        # Smarter safety check: allow filling up to 3x the original content or 60% of bbox, whichever is smaller
+        original_bbox_content = np.sum(bbox_region > 0)
+        bbox_area = (b - t + 1) * (r - l + 1)
+        max_allowed_fill = min(original_bbox_content * 3, bbox_area * 0.6)
+        filled_pixels = np.sum(filled_region > 0)
+        if filled_pixels <= max_allowed_fill:
+            fixed_mask[t:b+1, l:r+1, :] = filled_region[:, :, np.newaxis]
+
+    return fixed_mask
