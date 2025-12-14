@@ -14,7 +14,7 @@ from ultralytics.engine.results import Results as UltralyticsResults
 from ultralytics.utils import JSONDict
 from ultralytics.utils.ops import scale_image
 
-from lada.utils import Box, Mask
+from lada.utils import Box, Mask, mask_utils
 
 def set_default_settings():
     settings.update({'runs_dir': './experiments/yolo', 'datasets_dir': './datasets', 'tensorboard': True})
@@ -58,14 +58,27 @@ def scale_and_unpad_image(masks, im0_shape):
     y = F.interpolate(x, size=(h0, w0), mode='bilinear', align_corners=False)
     return y.squeeze(0).permute(1, 2, 0).round_().clamp_(0, 255).to(masks.dtype)
 
-def convert_yolo_mask_tensor(yolo_mask: UltralyticsMasks, img_shape) -> torch.Tensor:
+def convert_yolo_mask_tensor(yolo_mask: UltralyticsMasks, img_shape, box: Box = None) -> torch.Tensor:
     mask_img = _to_mask_img_tensor(yolo_mask.data)
     if mask_img.ndim == 2:
         mask_img = mask_img.unsqueeze(-1)
-    mask_img = scale_and_unpad_image(mask_img, img_shape)
-    mask_img = torch.where(mask_img > 127, 255, 0).to(torch.uint8)
-    assert mask_img.ndim == 3 and mask_img.shape[2] == 1
-    return mask_img
+
+    # Use the original scale_and_unpad_image function for proper padding handling
+    mask_img_scaled = scale_and_unpad_image(mask_img, img_shape)
+    mask_img_scaled = torch.where(mask_img_scaled > 127, 255, 0).to(torch.uint8)
+
+    # Apply top edge fix for YOLO mask limitation if box is provided
+    if box is not None:
+        try:
+            mask_np = mask_img_scaled.cpu().numpy()
+            mask_fixed = mask_utils.fix_mask_top_edge(mask_np, box, max_extension=12)
+            mask_img_fixed = torch.from_numpy(mask_fixed).to(mask_img_scaled.device)
+            return mask_img_fixed
+        except Exception:
+            # If anything goes wrong, just return the original mask
+            pass
+
+    return mask_img_scaled
 
 def _to_mask_img_tensor(masks: torch.Tensor, class_val=0, pixel_val=255) -> torch.Tensor:
     masks_tensor = torch.where(masks != class_val, pixel_val, 0).to(torch.uint8)
