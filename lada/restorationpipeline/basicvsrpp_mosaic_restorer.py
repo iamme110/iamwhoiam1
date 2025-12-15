@@ -1,12 +1,21 @@
+import logging
+import os
+
 import torch
 
+from lada import LOG_LEVEL, MODEL_WEIGHTS_DIR
 from lada.models.basicvsrpp.basicvsrpp_gan import BasicVSRPlusPlusGan
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=LOG_LEVEL)
 
 class BasicvsrppMosaicRestorer:
     def __init__(self, model: BasicVSRPlusPlusGan, device: torch.device, fp16, clip_length):
         self.model = model
         self.device: torch.device = torch.device(device)
         self.dtype = torch.float16 if fp16 else torch.float32
+        self.clip_length = clip_length
+        self.pad_to_clip = model.__class__.__name__ == "GraphModule"
 
     def restore(self, video: list[torch.Tensor], max_frames=-1) -> list[torch.Tensor]:
         input_frame_count = len(video)
@@ -14,6 +23,10 @@ class BasicvsrppMosaicRestorer:
         with torch.inference_mode():
             result = []
             inference_view = torch.stack([x.permute(2, 0, 1) for x in video], dim=0).to(device=self.device).to(dtype=self.dtype).div_(255.0).unsqueeze(0)
+            if self.pad_to_clip and inference_view.shape[1] < self.clip_length:
+                pad = self.clip_length - inference_view.shape[1]
+                pad_frame = inference_view[:, -1:].repeat(1, pad, 1, 1, 1)
+                inference_view = torch.cat([inference_view, pad_frame], dim=1)
 
             if max_frames > 0:
                 for i in range(0, inference_view.shape[1], max_frames):
@@ -21,7 +34,7 @@ class BasicvsrppMosaicRestorer:
                     result.append(output)
                 result = torch.cat(result, dim=1)
             else:
-                result = self.model(inputs=inference_view)
+                result = self.model(inference_view)
 
             # (H, W, C[BGR]) uint8 images to (B, T, C, H, W) float in [0,1]
             result = result.squeeze(0)[:input_frame_count] # -> (T, C, H, W)
@@ -32,3 +45,41 @@ class BasicvsrppMosaicRestorer:
             assert input_frame_count == output_frame_count and input_frame_shape == output_frame_shape
 
         return result
+
+    def compile(self, model_name: str, max_clip_size: int = 90) -> str:
+        import psutil
+        import torch_tensorrt
+
+        if max_clip_size > 90:
+            logger.warning(f"Max clip size {max_clip_size} is greater than 90. This is not recommended due to increased memory usage.")
+
+        precision = "fp16" if self.dtype == torch.float16 else "fp32"
+        output_path = os.path.join(MODEL_WEIGHTS_DIR, f"{model_name}_clip{max_clip_size}.trt_{precision}.ep")
+
+        workspace_size = int(psutil.virtual_memory().available * 0.8)
+        input = torch.randn(1, max_clip_size, 3, 256, 256, dtype=self.dtype, device=self.device)
+
+        with torch_tensorrt.logging.info():
+            logger.info(f"Compiling BasicVSR++ model (TensorRT workspace_size={workspace_size / (1024 ** 3):.2f} GB)")
+            trt_gm = torch_tensorrt.compile(
+                self.model, 
+                ir="dynamo", 
+                inputs=[input],
+                min_block_size=1,
+                workspace_size=workspace_size,
+                enabled_precisions={self.dtype},
+                use_fp32_acc=False,
+                use_explicit_typing=False,
+                sparse_weights=False,
+                optimization_level=3,
+                hardware_compatible=False,
+                use_python_runtime=False,
+                cache_built_engines=False,
+                reuse_cached_engines=False,
+                truncate_double=True)
+
+            logger.info(f"Saving TensorRT graph module to {output_path}")
+            torch_tensorrt.save(trt_gm, output_path, inputs=[input])
+            logger.info(f"Saved TensorRT graph module to {output_path}")
+
+        return output_path

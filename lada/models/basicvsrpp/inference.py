@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import logging
+import os
+import warnings
 
 import numpy as np
 import torch
@@ -16,6 +18,11 @@ from lada.models.basicvsrpp.mmagic.basicvsr import BasicVSR
 from lada.models.basicvsrpp.mmagic.registry import MODELS
 
 logger = logging.getLogger(__name__)
+warnings.filterwarnings(
+    "ignore",
+    message="The given buffer is not writable, and PyTorch does not support non-writable tensors",
+    module="torch",
+)
 
 def get_default_gan_inference_config() -> dict:
     return dict(
@@ -34,10 +41,24 @@ def get_default_gan_inference_config() -> dict:
         ))
 
 
-def load_model(config: str | dict | None, checkpoint_path, device, fp16=False) -> BasicVSRPlusPlusGan | BasicVSR:
+def load_model(config: str | dict | None, checkpoint_path, device, fp16: bool, max_clip_length: int) -> BasicVSRPlusPlusGan | BasicVSR:
     register_all_modules()
     if device and type(device) == str:
         device = torch.device(device)
+
+    if os.path.splitext(checkpoint_path)[1] == ".ep":
+        logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
+        import torch_tensorrt
+        expected_precision = "fp16" if fp16 else "fp32"
+        expected_name = f"_clip{max_clip_length}.trt_{expected_precision}.ep"
+        if expected_name not in checkpoint_path:
+            raise ValueError(f"TensorRT export name mismatch: expected path containing '{expected_name}', got '{checkpoint_path}'")
+
+        logger.info(f"Loading TensorRT export from {checkpoint_path}")
+        with open(checkpoint_path, "rb") as f:
+            trt_module = torch.export.load(f).module()
+            return trt_module.to(device)
+
     if config is None:
         config = get_default_gan_inference_config()
     elif type(config) == str:

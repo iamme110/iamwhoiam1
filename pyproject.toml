@@ -17,6 +17,7 @@ dependencies = [
     "mmengine==0.10.7", # Pinned as we apply a patch
     "tqdm",
     "torch",
+    "torch_tensorrt",
     "torchvision",
 ]
 
