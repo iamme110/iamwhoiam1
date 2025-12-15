@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import logging
+import os
 import pathlib
 import threading
 
@@ -37,6 +38,8 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         super().__init__(**kwargs)
         self.item: ExportItemData | None = None
         self._handler_id_button_open_clicked = None
+        self._temp_file_path: str | None = None
+        self._mp4_fast_start_enabled: bool = False
 
     @GObject.Signal(name="start-export-requested")
     def start_export_requested_signal(self, start_export_button: Gtk.Button):
@@ -56,6 +59,16 @@ class ExportSingleFileStatusPage(Gtk.Widget):
 
     @Gtk.Template.Callback()
     def on_button_start_export_clicked(self, button_clicked):
+        if self.item and self.item.state == ExportItemState.PROCESSING and self._mp4_fast_start_enabled:
+            # Watch now
+            if self._temp_file_path and os.path.exists(self._temp_file_path):
+                try:
+                    os.startfile(self._temp_file_path)
+                except Exception as e:
+                    logger.error(f"Failed to open file: {e}")
+            else:
+                logger.error("Temp file not ready or path not set")
+            return
         assert self.item.state == ExportItemState.QUEUED
 
         self.emit("start-export-requested", button_clicked)
@@ -90,23 +103,37 @@ class ExportSingleFileStatusPage(Gtk.Widget):
 
         export_utils.open_error_dialog(self, self.item.original_file.get_basename(), self.item.error_details)
 
-    def show_video_export_started(self, save_file: Gio.File):
-        self.status_page.set_title(_("Restoring video…"))
-        self.status_page.set_icon_name("cafe-symbolic")
-        self.progress_bar.set_fraction(MIN_VISIBLE_PROGRESS_FRACTION)
-        self.progress_bar.set_visible(True)
-        self.progress_bar.set_show_text(True)
-        self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
-        self.button_start_export.set_visible(False)
-        self.button_pause_export.set_visible(True)
-        self.button_cancel_export.set_visible(True)
-        file_launcher = Gtk.FileLauncher(
-            always_ask=False,
-            file=save_file
-        )
-        if self._handler_id_button_open_clicked is not None:
-            self.button_open.disconnect(self._handler_id_button_open_clicked)
-        self._handler_id_button_open_clicked = self.button_open.connect("clicked", lambda _: file_launcher.launch())
+    def show_video_export_started(self, save_file: Gio.File, temp_file_path: str | None = None, mp4_fast_start_enabled: bool = False, update_ui: bool = True):
+        self._temp_file_path = temp_file_path
+        self._mp4_fast_start_enabled = mp4_fast_start_enabled
+        if update_ui:
+            self.status_page.set_title(_("Restoring video…"))
+            self.status_page.set_icon_name("cafe-symbolic")
+            self.progress_bar.set_fraction(MIN_VISIBLE_PROGRESS_FRACTION)
+            self.progress_bar.set_visible(True)
+            self.progress_bar.set_show_text(True)
+            self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
+            if mp4_fast_start_enabled:
+                self.button_start_export.set_label("Watch Now")
+                self.button_start_export.set_sensitive(False)  # Disable until file is ready
+                # Check every second if file exists and has content
+                def check_file_ready():
+                    if self._temp_file_path and os.path.exists(self._temp_file_path) and os.path.getsize(self._temp_file_path) > 0:
+                        self.button_start_export.set_sensitive(True)
+                        return GLib.SOURCE_REMOVE
+                    return GLib.SOURCE_CONTINUE
+                GLib.timeout_add_seconds(1, check_file_ready)
+            else:
+                self.button_start_export.set_visible(False)
+            self.button_pause_export.set_visible(True)
+            self.button_cancel_export.set_visible(True)
+            file_launcher = Gtk.FileLauncher(
+                always_ask=False,
+                file=save_file
+            )
+            if self._handler_id_button_open_clicked is not None:
+                self.button_open.disconnect(self._handler_id_button_open_clicked)
+            self._handler_id_button_open_clicked = self.button_open.connect("clicked", lambda _: file_launcher.launch())
 
     def on_video_export_finished(self):
         self.status_page.set_title(_("Finished video restoration!"))
@@ -115,6 +142,7 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
         self.progress_bar.set_visible(True)
         self.button_open.set_visible(True)
+        self.button_start_export.set_visible(False)
         self.button_pause_export.set_visible(False)
         self.button_cancel_export.set_visible(False)
 
@@ -123,6 +151,8 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         self.status_page.set_icon_name("exclamation-mark-symbolic")
 
         self.progress_bar.set_visible(False)
+        self.button_start_export.set_visible(True)
+        self.button_start_export.set_label("Restore")
         self.button_pause_export.set_visible(False)
         self.button_cancel_export.set_visible(False)
         self.button_show_error.set_visible(True)
@@ -137,6 +167,7 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         self.button_cancel_export.set_spinner_visible(False)
 
         self.button_start_export.set_visible(True)
+        self.button_start_export.set_label("Restore")
         self.button_pause_export.set_visible(False)
         self.button_resume_export.set_visible(False)
         self.button_cancel_export.set_visible(False)
@@ -149,6 +180,8 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         self.button_pause_export.set_sensitive(True)
         self.button_pause_export.set_spinner_visible(False)
         self.button_cancel_export.set_sensitive(True)
+        if self._mp4_fast_start_enabled:
+            self.button_start_export.set_sensitive(False)
 
         self.button_resume_export.set_visible(True)
         self.button_pause_export.set_visible(False)
@@ -160,6 +193,8 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         self.button_resume_export.set_sensitive(True)
         self.button_resume_export.set_spinner_visible(False)
         self.button_cancel_export.set_sensitive(True)
+        if self._mp4_fast_start_enabled:
+            self.button_start_export.set_sensitive(True)
 
         self.button_resume_export.set_visible(False)
         self.button_pause_export.set_visible(True)
