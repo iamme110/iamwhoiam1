@@ -25,3 +25,10 @@ def gpu_has_tensor_cores(device_index: int = 0) -> bool:
     if "gtx 16" in name:
         return False
     return True
+
+
+def get_gpu_vram_gb(device: str | torch.device) -> float:
+    device = torch.device(device) if isinstance(device, str) else device
+    assert device.type == "cuda"
+    device_index = 0 if device.index is None else device.index
+    return torch.cuda.get_device_properties(device_index).total_memory / (1024**3)

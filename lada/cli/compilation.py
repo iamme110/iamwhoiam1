@@ -9,6 +9,7 @@ import sys
 import torch
 
 from lada import LOG_LEVEL
+from lada.utils.os_utils import get_gpu_vram_gb
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
@@ -47,6 +48,10 @@ def compile_mosaic_restoration_model(
     )
     if os.path.isfile(output_path):
         return output_path
+
+    if clip_length >= 180 and get_gpu_vram_gb(device) < 23.5:
+        logger.warning("Skipping compilation due to low VRAM. Consider using a lower clip length (30) or a different device to have up to 35% faster execution times.")
+        return mosaic_restoration_model_path
 
     if interactive and sys.stdin.isatty() and clip_length > 30:
         print(
