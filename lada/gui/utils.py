@@ -3,6 +3,7 @@
 
 import logging
 import os
+import re
 import subprocess
 import xml.etree.ElementTree as ET
 
@@ -11,6 +12,9 @@ from gi.repository import Gio
 from gi.repository import Gtk, GLib, Gdk
 
 from lada import LOG_LEVEL
+from lada.gui.config.config import Config
+from lada.utils import video_utils
+from lada.utils.video_utils import EncodingPreset
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
@@ -114,3 +118,31 @@ def dump_encoder_options(encoder: str) -> str:
     result = subprocess.run(["ffmpeg", "-loglevel", "quiet", "-h", f"encoder={encoder}"], capture_output=True, text=True)
     text = result.stdout.strip().replace("Exiting with exit code 0", "").strip()
     return text
+
+def get_next_custom_preset(config: Config) -> EncodingPreset:
+    custom_preset_names = [preset.name for preset in config.custom_encoding_presets]
+    pattern = r"custom-preset-(\d+)$"
+    max_number = 0
+
+    for preset_name in custom_preset_names:
+        match = re.match(pattern, preset_name)
+        if match:
+            number = int(match.group(1))
+            if max_number is None or number > max_number:
+                max_number = number
+
+    num = max_number + 1
+    description = _("Custom Preset {custom_preset_num}").format(custom_preset_num=num)
+    return EncodingPreset(f"custom-preset-{num}", description, "libx264", "")
+
+def get_selected_preset(config: Config) -> EncodingPreset:
+    presets = []
+    presets.extend(video_utils.get_encoding_presets())
+    presets.extend(config.custom_encoding_presets)
+    for preset in presets:
+        if preset.name == config.encoding_preset_name:
+            return preset
+    raise ValueError("Selected preset not found")
+
+def is_unique_preset_description(description) -> bool:
+    return not any([preset.description == description for preset in video_utils.get_encoding_presets()])

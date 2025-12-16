@@ -7,8 +7,10 @@ import pathlib
 from gi.repository import Adw, Gtk, Gio, GObject, GLib
 from lada import LOG_LEVEL
 from lada.gui import utils
+from lada.gui.config.config import Config
 from lada.gui.utils import dump_encoder_options
 from lada.utils import video_utils
+from lada.utils.video_utils import EncodingPreset, Encoder
 
 here = pathlib.Path(__file__).parent.resolve()
 logger = logging.getLogger(__name__)
@@ -20,20 +22,23 @@ class EncodingPresetDialog(Adw.Dialog):
 
     text_view_encoder_options: Gtk.TextView = Gtk.Template.Child()
     drop_down_encoders: Gtk.DropDown = Gtk.Template.Child()
-    input_text: Gtk.Entry = Gtk.Template.Child()
+    entry_encoder_options: Gtk.Entry = Gtk.Template.Child()
+    entry_description: Gtk.Entry = Gtk.Template.Child()
 
-    def __init__(self, **kwargs):
+    def __init__(self, config: Config, **kwargs):
         super().__init__(**kwargs)
         # self.set_follows_content_size(True)
         self.set_content_width(700)
         self.set_content_height(400)
 
-        default_encoder = "libx264"
+        self._encoding_preset = utils.get_next_custom_preset(config)
+
+        self.entry_description.set_text(self._encoding_preset.description)
 
         self.text_view_encoder_options.set_vexpand(True)
         self.text_view_encoder_options.set_hexpand(True)
         self.text_view_encoder_options.set_monospace(True)
-        self.update_text_view_encoder_options(default_encoder)
+        self.update_text_view_encoder_options(self._encoding_preset.encoder_name)
 
         self.encoders = video_utils.get_available_video_encoder_codecs()
         strings = Gtk.StringList()
@@ -41,17 +46,32 @@ class EncodingPresetDialog(Adw.Dialog):
         for i, encoder in enumerate(self.encoders):
             name = f"{encoder.name} ({encoder.long_name}){f" [{" ".join(encoder.hardware_devices)}]" if len(encoder.hardware_devices) > 0 else ""}"
             strings.append(name)
-            if default_encoder == encoder.name:
+            if self._encoding_preset.encoder_name == encoder.name:
                 self.drop_down_encoders.set_selected(i)
         self.drop_down_encoders.connect("notify::selected-item", self.on_encoder_selected)
 
+    @GObject.Property()
+    def encoding_preset(self) -> EncodingPreset:
+        return self._encoding_preset
+
+    @encoding_preset.setter
+    def encoding_preset(self, value: EncodingPreset):
+        self._encoding_preset = value
+
+    @GObject.Signal(name="preset-created", arg_types=(GObject.TYPE_PYOBJECT,))
+    def preset_created_signal(self, encoding_preset: EncodingPreset):
+        pass
 
     def on_encoder_selected(self, dropdown, _pspec):
-        selected_encoder = dropdown.props.selected_item
+        if selected_encoder := self.get_selected_encoder():
+            self.update_text_view_encoder_options(selected_encoder.name)
+
+    def get_selected_encoder(self) -> Encoder | None:
+        selected_encoder = self.drop_down_encoders.props.selected_item
         if selected_encoder is not None:
             idx = self.drop_down_encoders.props.model.find(selected_encoder.props.string)
-            encoder = self.encoders[idx]
-            self.update_text_view_encoder_options(encoder.name)
+            return self.encoders[idx]
+        return None
 
     def update_text_view_encoder_options(self, encoder: str):
         buffer = self.text_view_encoder_options.get_buffer()
@@ -59,6 +79,12 @@ class EncodingPresetDialog(Adw.Dialog):
 
     @Gtk.Template.Callback()
     def button_create_clicked_callback(self, button: Gtk.Button):
-        encoder_options = self.input_text.get_text()
-        print(f"create clicked. options: {encoder_options}")
-        self.close()
+        description = self.entry_description.get_text()
+        encoder_options = self.entry_encoder_options.get_text()
+        encoder = self.get_selected_encoder()
+        if encoder is not None and encoder_options is not None and description is not None and utils.is_unique_preset_description(description):
+            self._encoding_preset.description = description
+            self._encoding_preset.encoder_name = encoder.name
+            self._encoding_preset.encoder_options = encoder_options
+            self.emit("preset-created", self.encoding_preset)
+            self.close()

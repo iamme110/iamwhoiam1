@@ -12,6 +12,7 @@ from lada.gui.config.config import Config, ColorScheme, PostExportAction
 from lada.gui.config.encoding_preset_dialog import EncodingPresetDialog
 from lada.gui.utils import skip_if_uninitialized, validate_file_name_pattern
 from lada.utils import video_utils
+from lada.utils.video_utils import EncodingPreset
 
 here = pathlib.Path(__file__).parent.resolve()
 
@@ -57,6 +58,8 @@ class ConfigSidebar(Gtk.Box):
         self.init_done = False
         self._show_playback_section = True
         self._show_export_section = True
+        self._active_preset_button_group: Gtk.CheckButton | None = None
+        self._create_preset_action_row: Adw.ActionRow | None = None
 
     def init_sidebar_from_config(self, config: Config):
         if self.init_done:
@@ -96,29 +99,24 @@ class ConfigSidebar(Gtk.Box):
 
         # init encoding presets
         presets = video_utils.get_encoding_presets()
-        active_preset_check_button = None
         for preset in presets:
             if preset.name == config.encoding_preset_name:
-                active_preset_check_button = Gtk.CheckButton.new()
+                self._active_preset_button_group = Gtk.CheckButton.new()
                 self.expander_row_encoding_presets.set_subtitle(preset.description)
                 break
-        assert active_preset_check_button is not None
+        assert self._active_preset_button_group is not None
+        presets.extend(config.custom_encoding_presets)
         for preset in presets:
             action_row = Adw.ActionRow.new()
             action_row.set_title(_(preset.description))
             check_button = Gtk.CheckButton.new()
-            check_button.set_group(active_preset_check_button)
+            check_button.set_group(self._active_preset_button_group)
             action_row.add_prefix(check_button)
             # action_row.set_tooltip_text(f"{preset.encoder_name}: {preset.encoder_options}")
             self.expander_row_encoding_presets.add_row(action_row)
         action_row_create_preset = Adw.ActionRow.new()
-        action_row_create_preset.set_title(_("Create Custom Preset"))
-        button_create_preset = Gtk.Button.new()
-        button_create_preset.set_icon_name("edit-symbolic")
-        button_create_preset.set_valign(Gtk.Align.CENTER)
-        button_create_preset.connect("clicked", self.button_create_preset_callback)
-        action_row_create_preset.add_suffix(button_create_preset)
-        self.expander_row_encoding_presets.add_row(action_row_create_preset)
+        self._create_preset_action_row = self.create_custom_preset_action_row()
+        self.expander_row_encoding_presets.add_row(self._create_preset_action_row)
 
         self.spin_row_preview_buffer_duration.set_value(config.preview_buffer_duration)
         self.spin_row_clip_max_duration.set_value(config.max_clip_duration)
@@ -358,8 +356,37 @@ class ConfigSidebar(Gtk.Box):
 
     @skip_if_uninitialized
     def button_create_preset_callback(self, button):
-        dialog = EncodingPresetDialog()
+        dialog = EncodingPresetDialog(self.config)
+        dialog.connect("preset-created", self.on_preset_created)
         dialog.present(self)
+
+    def on_preset_created(self, _dialog, preset: EncodingPreset):
+        updated_presets = set(self._config.custom_encoding_presets)
+        updated_presets.add(preset)
+        self._config.custom_encoding_presets = updated_presets
+
+        self.expander_row_encoding_presets.set_subtitle(preset.description)
+
+        action_row = Adw.ActionRow.new()
+        action_row.set_title(preset.description)
+        check_button = Gtk.CheckButton.new()
+        check_button.set_group(self._active_preset_button_group)
+        check_button.set_active(True)
+        action_row.add_prefix(check_button)
+
+        self.expander_row_encoding_presets.remove(self._create_preset_action_row)
+        self.expander_row_encoding_presets.add_row(action_row)
+        self.expander_row_encoding_presets.add_row(self._create_preset_action_row)
+
+    def create_custom_preset_action_row(self) -> Adw.ActionRow:
+        action_row_create_preset = Adw.ActionRow.new()
+        action_row_create_preset.set_title(_("Create Custom Preset"))
+        button_create_preset = Gtk.Button.new()
+        button_create_preset.set_icon_name("edit-symbolic")
+        button_create_preset.set_valign(Gtk.Align.CENTER)
+        button_create_preset.connect("clicked", self.button_create_preset_callback)
+        action_row_create_preset.add_suffix(button_create_preset)
+        return action_row_create_preset
 
     def set_file_name_pattern_row_styles(self):
         is_valid = validate_file_name_pattern(self.entry_row_file_name_pattern.get_text())

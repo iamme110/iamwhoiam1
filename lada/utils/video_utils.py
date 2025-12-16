@@ -241,6 +241,8 @@ class EncodingPreset:
     encoder_name: str
     encoder_options: str
 
+    def __hash__(self): return hash(self.name)
+
 def get_encoding_presets() -> list[EncodingPreset]:
     presets = []
     encoding_presets_csv_path = os.path.join(os.path.dirname(__file__), 'encoding_presets.csv')
