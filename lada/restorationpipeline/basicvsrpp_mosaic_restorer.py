@@ -1,9 +1,8 @@
 import logging
-import os
 
 import torch
 
-from lada import LOG_LEVEL, MODEL_WEIGHTS_DIR
+from lada import LOG_LEVEL
 from lada.models.basicvsrpp.basicvsrpp_gan import BasicVSRPlusPlusGan
 
 logger = logging.getLogger(__name__)
@@ -46,15 +45,12 @@ class BasicvsrppMosaicRestorer:
 
         return result
 
-    def compile(self, model_name: str, max_clip_size: int = 90) -> str:
+    def compile(self, output_path: str, max_clip_size: int) -> str:
         import psutil
         import torch_tensorrt
 
-        if max_clip_size > 90:
-            logger.warning(f"Max clip size {max_clip_size} is greater than 90. This is not recommended due to increased memory usage.")
-
-        precision = "fp16" if self.dtype == torch.float16 else "fp32"
-        output_path = os.path.join(MODEL_WEIGHTS_DIR, f"{model_name}_clip{max_clip_size}.trt_{precision}.ep")
+        if max_clip_size > 60:
+            logger.warning(f"Max clip size {max_clip_size} is greater than 60. This is not recommended due to increased memory usage and possibly worsened performance for videos with poor mosaic detection.")
 
         workspace_size = int(psutil.virtual_memory().available * 0.8)
         input = torch.randn(1, max_clip_size, 3, 256, 256, dtype=self.dtype, device=self.device)
@@ -78,8 +74,7 @@ class BasicvsrppMosaicRestorer:
                 reuse_cached_engines=False,
                 truncate_double=True)
 
-            logger.info(f"Saving TensorRT graph module to {output_path}")
-            torch_tensorrt.save(trt_gm, output_path, inputs=[input])
-            logger.info(f"Saved TensorRT graph module to {output_path}")
-
+        torch_tensorrt.save(trt_gm, output_path, inputs=[input])
+        del trt_gm
+        del input
         return output_path

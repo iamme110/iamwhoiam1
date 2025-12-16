@@ -49,11 +49,6 @@ def load_model(config: str | dict | None, checkpoint_path, device, fp16: bool, m
     if os.path.splitext(checkpoint_path)[1] == ".ep":
         logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
         import torch_tensorrt
-        expected_precision = "fp16" if fp16 else "fp32"
-        expected_name = f"_clip{max_clip_length}.trt_{expected_precision}.ep"
-        if expected_name not in checkpoint_path:
-            raise ValueError(f"TensorRT export name mismatch: expected path containing '{expected_name}', got '{checkpoint_path}'")
-
         logger.info(f"Loading TensorRT export from {checkpoint_path}")
         with open(checkpoint_path, "rb") as f:
             trt_module = torch.export.load(f).module()
