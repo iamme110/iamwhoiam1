@@ -4,6 +4,7 @@
 import gc
 import logging
 import os
+import sys
 
 import torch
 
@@ -31,6 +32,7 @@ def compile_mosaic_restoration_model(
     device: str | torch.device,
     fp16: bool,
     mosaic_restoration_config_path: str | None = None,
+    interactive: bool = True,
 ) -> str:
     if not mosaic_restoration_model_name.startswith("basicvsrpp"):
         raise ValueError("Only BasicVSR++ restoration models support TensorRT compilation")
@@ -45,6 +47,27 @@ def compile_mosaic_restoration_model(
     )
     if os.path.isfile(output_path):
         return output_path
+
+    if interactive and sys.stdin.isatty() and clip_length > 30:
+        print(
+            "\n".join(
+                [
+                    f"You're about to compile TensorRT with clip length {clip_length}.",
+                    "Large clip lengths can:",
+                    "- require significantly more VRAM (compilation may OOM)",
+                    "- take much longer to compile",
+                    "- on videos with poor mosaic detection the performance may be degraded",
+                    "",
+                    "Continue? [y/N] ",
+                ]
+            ),
+            end="",
+            flush=True,
+        )
+        if input().strip().lower() not in {"y", "yes"}:
+            logger.error("Compilation cancelled")
+            sys.exit(1)
+            
 
     from lada.models.basicvsrpp.inference import load_model
     from lada.restorationpipeline.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
