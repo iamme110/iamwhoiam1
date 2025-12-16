@@ -238,6 +238,7 @@ def approx_max_length_by_memory_limit(video_metadata: VideoMetadata, limit_in_me
 class EncodingPreset:
     name: str
     description: str
+    user_preset: bool
     encoder_name: str
     encoder_options: str
 
@@ -252,7 +253,7 @@ def get_encoding_presets() -> list[EncodingPreset]:
     with open(encoding_presets_csv_path, mode='r', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile, delimiter='|')
         for row in reader:
-            preset = EncodingPreset(row["preset_name"], row["preset_description(translatable)"], row["encoder_name"], row["encoder_options"])
+            preset = EncodingPreset(row["preset_name"], row["preset_description(translatable)"], False, row["encoder_name"], row["encoder_options"])
             presets.append(preset)
         return presets
 

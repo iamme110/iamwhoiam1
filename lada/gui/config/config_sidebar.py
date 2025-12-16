@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Lada Authors
 # SPDX-License-Identifier: AGPL-3.0
-
+import dataclasses
 import logging
 import pathlib
 
@@ -60,6 +60,7 @@ class ConfigSidebar(Gtk.Box):
         self._show_export_section = True
         self._active_preset_button_group: Gtk.CheckButton | None = None
         self._create_preset_action_row: Adw.ActionRow | None = None
+        self._presets_radio_buttons: list[Gtk.CheckButton] = []
 
     def init_sidebar_from_config(self, config: Config):
         if self.init_done:
@@ -106,16 +107,15 @@ class ConfigSidebar(Gtk.Box):
                 break
         assert self._active_preset_button_group is not None
         presets.extend(config.custom_encoding_presets)
-        for preset in presets:
-            action_row = Adw.ActionRow.new()
-            action_row.set_title(_(preset.description))
-            check_button = Gtk.CheckButton.new()
-            check_button.set_group(self._active_preset_button_group)
-            action_row.add_prefix(check_button)
-            # action_row.set_tooltip_text(f"{preset.encoder_name}: {preset.encoder_options}")
+        for idx, preset in enumerate(presets):
+            active = False
+            if preset.name == config.encoding_preset_name:
+                active = True
+            action_row, radio_button = self.get_action_row_for_existing_preset(preset, idx=idx, active=active, localized_description=True)
             self.expander_row_encoding_presets.add_row(action_row)
-        action_row_create_preset = Adw.ActionRow.new()
-        self._create_preset_action_row = self.create_custom_preset_action_row()
+            self._presets_radio_buttons.append(radio_button)
+
+        self._create_preset_action_row = self.get_action_row_for_add_new_preset()
         self.expander_row_encoding_presets.add_row(self._create_preset_action_row)
 
         self.spin_row_preview_buffer_duration.set_value(config.preview_buffer_duration)
@@ -356,37 +356,100 @@ class ConfigSidebar(Gtk.Box):
 
     @skip_if_uninitialized
     def button_create_preset_callback(self, button):
-        dialog = EncodingPresetDialog(self.config)
-        dialog.connect("preset-created", self.on_preset_created)
+        preset = utils.get_next_custom_preset(self.config)
+        dialog = EncodingPresetDialog(preset)
+        dialog.connect("preset-changed", self.on_preset_created)
         dialog.present(self)
+
+    @skip_if_uninitialized
+    def button_edit_preset_callback(self, button, preset: EncodingPreset, action_row: Adw.ActionRow):
+        preset_before = EncodingPreset(**dataclasses.asdict(preset))
+        dialog = EncodingPresetDialog(preset)
+        dialog.connect("preset-changed", self.on_preset_changed, preset_before, action_row)
+        dialog.present(self)
+
+    @skip_if_uninitialized
+    def button_delete_preset_callback(self, button, preset: EncodingPreset, action_row: Adw.ActionRow, radio_button: Gtk.CheckButton):
+        idx = self._presets_radio_buttons.index(radio_button)
+        is_last = len(self._presets_radio_buttons) - 1 == idx
+        new_selection_idx = idx - 1 if is_last else idx + 1
+        new_selected_preset_check_button = self._presets_radio_buttons[new_selection_idx]
+        new_selected_preset_check_button.set_active(True)
+        del self._presets_radio_buttons[idx]
+
+        self.expander_row_encoding_presets.remove(action_row)
+        updated_presets = set(self._config.custom_encoding_presets)
+        updated_presets.remove(preset)
+        self._config.custom_encoding_presets = updated_presets
+
+    def on_preset_selected(self, _check_button, preset: EncodingPreset, idx: int):
+        self.expander_row_encoding_presets.set_subtitle(preset.description)
+
+    def on_preset_changed(self, _dialog, preset: EncodingPreset, preset_old: EncodingPreset, action_row: Adw.ActionRow):
+        assert preset in self._config.custom_encoding_presets
+        self._config.custom_encoding_presets = set(self._config.custom_encoding_presets)
+
+        is_preset_selected = self.expander_row_encoding_presets.get_subtitle() == preset_old.description
+        if is_preset_selected:
+            self.expander_row_encoding_presets.set_subtitle(preset.description)
+
+        action_row.set_title(preset.description)
 
     def on_preset_created(self, _dialog, preset: EncodingPreset):
         updated_presets = set(self._config.custom_encoding_presets)
         updated_presets.add(preset)
         self._config.custom_encoding_presets = updated_presets
 
-        self.expander_row_encoding_presets.set_subtitle(preset.description)
+        idx = len(self._presets_radio_buttons)
 
-        action_row = Adw.ActionRow.new()
-        action_row.set_title(preset.description)
-        check_button = Gtk.CheckButton.new()
-        check_button.set_group(self._active_preset_button_group)
-        check_button.set_active(True)
-        action_row.add_prefix(check_button)
+        action_row, radio_button = self.get_action_row_for_existing_preset(preset, idx=idx, active=True, localized_description=False)
+
+        self._presets_radio_buttons.append(radio_button)
 
         self.expander_row_encoding_presets.remove(self._create_preset_action_row)
         self.expander_row_encoding_presets.add_row(action_row)
         self.expander_row_encoding_presets.add_row(self._create_preset_action_row)
 
-    def create_custom_preset_action_row(self) -> Adw.ActionRow:
-        action_row_create_preset = Adw.ActionRow.new()
-        action_row_create_preset.set_title(_("Create Custom Preset"))
+        self.expander_row_encoding_presets.set_subtitle(preset.description)
+
+    def get_action_row_for_existing_preset(self, preset: EncodingPreset, idx: int, active: bool, localized_description: bool) -> tuple[Adw.ActionRow, Gtk.CheckButton]:
+        action_row = Adw.ActionRow.new()
+        action_row.set_title(_(preset.description) if localized_description else preset.description)
+
+        radio_button = Gtk.CheckButton.new()
+        radio_button.set_group(self._active_preset_button_group)
+        radio_button.set_active(active)
+        radio_button.connect("toggled", self.on_preset_selected, preset, idx)
+        action_row.add_prefix(radio_button)
+
+        if preset.user_preset:
+            edit_button = Gtk.Button.new()
+            edit_button.set_icon_name("edit-symbolic")
+            edit_button.set_valign(Gtk.Align.CENTER)
+            edit_button.connect("clicked", self.button_edit_preset_callback, preset, action_row)
+            context = edit_button.get_style_context()
+            context.add_class("flat")
+            action_row.add_suffix(edit_button)
+
+            delete_button = Gtk.Button.new()
+            delete_button.set_icon_name("cross-large-symbolic")
+            delete_button.set_valign(Gtk.Align.CENTER)
+            delete_button.connect("clicked", self.button_delete_preset_callback, preset, action_row, radio_button)
+            context = delete_button.get_style_context()
+            context.add_class("flat")
+            action_row.add_suffix(delete_button)
+
+        return action_row, radio_button
+
+    def get_action_row_for_add_new_preset(self) -> Adw.ActionRow:
+        action_row = Adw.ActionRow.new()
+        action_row.set_title(_("Create Custom Preset"))
         button_create_preset = Gtk.Button.new()
         button_create_preset.set_icon_name("edit-symbolic")
         button_create_preset.set_valign(Gtk.Align.CENTER)
         button_create_preset.connect("clicked", self.button_create_preset_callback)
-        action_row_create_preset.add_suffix(button_create_preset)
-        return action_row_create_preset
+        action_row.add_suffix(button_create_preset)
+        return action_row
 
     def set_file_name_pattern_row_styles(self):
         is_valid = validate_file_name_pattern(self.entry_row_file_name_pattern.get_text())

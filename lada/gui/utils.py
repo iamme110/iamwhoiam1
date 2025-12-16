@@ -3,7 +3,6 @@
 
 import logging
 import os
-import re
 import subprocess
 import xml.etree.ElementTree as ET
 
@@ -120,20 +119,9 @@ def dump_encoder_options(encoder: str) -> str:
     return text
 
 def get_next_custom_preset(config: Config) -> EncodingPreset:
-    custom_preset_names = [preset.name for preset in config.custom_encoding_presets]
-    pattern = r"custom-preset-(\d+)$"
-    max_number = 0
-
-    for preset_name in custom_preset_names:
-        match = re.match(pattern, preset_name)
-        if match:
-            number = int(match.group(1))
-            if max_number is None or number > max_number:
-                max_number = number
-
-    num = max_number + 1
+    num = len(config.custom_encoding_presets) + 1
     description = _("Custom Preset {custom_preset_num}").format(custom_preset_num=num)
-    return EncodingPreset(f"custom-preset-{num}", description, "libx264", "")
+    return EncodingPreset(f"custom-preset-{num}", description, True, "libx264", "")
 
 def get_selected_preset(config: Config) -> EncodingPreset:
     presets = []

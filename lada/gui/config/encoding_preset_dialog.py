@@ -7,7 +7,6 @@ import pathlib
 from gi.repository import Adw, Gtk, Gio, GObject, GLib
 from lada import LOG_LEVEL
 from lada.gui import utils
-from lada.gui.config.config import Config
 from lada.gui.utils import dump_encoder_options
 from lada.utils import video_utils
 from lada.utils.video_utils import EncodingPreset, Encoder
@@ -25,13 +24,13 @@ class EncodingPresetDialog(Adw.Dialog):
     entry_encoder_options: Gtk.Entry = Gtk.Template.Child()
     entry_description: Gtk.Entry = Gtk.Template.Child()
 
-    def __init__(self, config: Config, **kwargs):
+    def __init__(self, preset: EncodingPreset, **kwargs):
         super().__init__(**kwargs)
         # self.set_follows_content_size(True)
         self.set_content_width(700)
         self.set_content_height(400)
 
-        self._encoding_preset = utils.get_next_custom_preset(config)
+        self._encoding_preset = preset
 
         self.entry_description.set_text(self._encoding_preset.description)
 
@@ -58,8 +57,8 @@ class EncodingPresetDialog(Adw.Dialog):
     def encoding_preset(self, value: EncodingPreset):
         self._encoding_preset = value
 
-    @GObject.Signal(name="preset-created", arg_types=(GObject.TYPE_PYOBJECT,))
-    def preset_created_signal(self, encoding_preset: EncodingPreset):
+    @GObject.Signal(name="preset-changed", arg_types=(GObject.TYPE_PYOBJECT,))
+    def preset_changed_signal(self, encoding_preset: EncodingPreset):
         pass
 
     def on_encoder_selected(self, dropdown, _pspec):
@@ -86,5 +85,5 @@ class EncodingPresetDialog(Adw.Dialog):
             self._encoding_preset.description = description
             self._encoding_preset.encoder_name = encoder.name
             self._encoding_preset.encoder_options = encoder_options
-            self.emit("preset-created", self.encoding_preset)
+            self.emit("preset-changed", self.encoding_preset)
             self.close()
