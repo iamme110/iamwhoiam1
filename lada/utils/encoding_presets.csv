@@ -1,0 +1,6 @@
+preset_name|preset_description(translatable)|encoder_name|encoder_options
+h264-cpu-hq|H.264, libx264 software encoder, High Quality, Medium File Size|libx264|-crf 18
+hevc-cpu-hq|HEVC, libx265 software encoder, High Quality, Medium File Size|libx265|-crf 20 -x265-params log_level=error
+hevc-nvidia-gpu-hq|HEVC, Nvidia hardware encoder, High Quality, Medium File Size|hevc_nvenc|-cq 22 -preset medium
+hevc-nvidia-gpu-uhq|HEVC, Nvidia hardware encoder, Indistinguishable Quality, Large File Size|hevc_nvenc|-cq 18 -preset medium
+hevc-nvidia-gpu-fast|HEVC, Nvidia hardware encoder, Fast, Large File Size|hevc_nvenc|-cq 22 -preset veryfast

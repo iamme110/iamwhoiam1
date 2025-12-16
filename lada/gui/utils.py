@@ -3,8 +3,7 @@
 
 import logging
 import os
-import pathlib
-import sys
+import subprocess
 import xml.etree.ElementTree as ET
 
 import torch
@@ -12,7 +11,6 @@ from gi.repository import Gio
 from gi.repository import Gtk, GLib, Gdk
 
 from lada import LOG_LEVEL
-from lada.utils import video_utils
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
@@ -49,10 +47,6 @@ def skip_if_uninitialized(f):
     def wrapper(*args):
         return f(*args) if args[0].init_done else noop
     return wrapper
-
-def get_available_video_codecs() -> list[str]:
-    filter_list = ['libx264', 'h264_nvenc', 'libx265', 'hevc_nvenc', 'libsvtav1', 'librav1e', 'libaom-av1', 'av1_nvenc']
-    return [codec_short_name for codec_short_name, codec_long_name in video_utils.get_available_video_encoder_codecs() if codec_short_name in filter_list]
 
 def validate_file_name_pattern(file_name_pattern: str) -> bool:
     if not "{orig_file_name}" in file_name_pattern:
@@ -115,3 +109,8 @@ def translate_ui_xml(path: str) -> str:
             del node.attrib["translatable"]
     as_str = ET.tostring(tree, encoding='utf-8', method='xml')
     return as_str
+
+def dump_encoder_options(encoder: str) -> str:
+    result = subprocess.run(["ffmpeg", "-loglevel", "quiet", "-h", f"encoder={encoder}"], capture_output=True, text=True)
+    text = result.stdout.strip().replace("Exiting with exit code 0", "").strip()
+    return text

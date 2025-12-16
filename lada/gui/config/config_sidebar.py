@@ -9,7 +9,9 @@ from gi.repository import Gtk, GObject, Adw, Gio, GLib
 from lada import get_available_restoration_models, get_available_detection_models, LOG_LEVEL
 from lada.gui import utils
 from lada.gui.config.config import Config, ColorScheme, PostExportAction
-from lada.gui.utils import skip_if_uninitialized, get_available_video_codecs, validate_file_name_pattern
+from lada.gui.config.encoding_preset_dialog import EncodingPresetDialog
+from lada.gui.utils import skip_if_uninitialized, validate_file_name_pattern
+from lada.utils import video_utils
 
 here = pathlib.Path(__file__).parent.resolve()
 
@@ -23,7 +25,6 @@ class ConfigSidebar(Gtk.Box):
     combo_row_gpu = Gtk.Template.Child()
     combo_row_mosaic_removal_models = Gtk.Template.Child()
     combo_row_mosaic_detection_models = Gtk.Template.Child()
-    spin_row_export_crf = Gtk.Template.Child()
     combo_row_export_codec = Gtk.Template.Child()
     spin_row_preview_buffer_duration = Gtk.Template.Child()
     spin_row_clip_max_duration = Gtk.Template.Child()
@@ -40,7 +41,6 @@ class ConfigSidebar(Gtk.Box):
     entry_row_file_name_pattern: Adw.EntryRow = Gtk.Template.Child()
     toggle_button_initial_view_preview: Gtk.ToggleButton = Gtk.Template.Child()
     toggle_button_initial_view_export: Gtk.ToggleButton = Gtk.Template.Child()
-    entry_row_custom_ffmpeg_encoder_options: Adw.EntryRow = Gtk.Template.Child()
     expander_row_post_export_action: Adw.ExpanderRow = Gtk.Template.Child()
     check_button_post_export_shutdown: Gtk.CheckButton = Gtk.Template.Child()
     check_button_post_export_custom_command: Gtk.CheckButton = Gtk.Template.Child()
@@ -49,6 +49,7 @@ class ConfigSidebar(Gtk.Box):
     switch_row_seek_preview = Gtk.Template.Child()
     switch_row_fp16: Adw.SwitchRow = Gtk.Template.Child()
     switch_row_detect_faces = Gtk.Template.Child()
+    expander_row_encoding_presets: Adw.ExpanderRow = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -58,7 +59,8 @@ class ConfigSidebar(Gtk.Box):
         self._show_export_section = True
 
     def init_sidebar_from_config(self, config: Config):
-        self.init_done = False
+        if self.init_done:
+            return
 
         self.check_button_show_mosaic_detections.props.active = config.show_mosaic_detections
 
@@ -92,16 +94,31 @@ class ConfigSidebar(Gtk.Box):
         idx = available_detection_models.index(config.mosaic_detection_model)
         self.combo_row_mosaic_detection_models.set_selected(idx)
 
-        # init codec
-        combo_row_export_codec_models_list = Gtk.StringList.new([])
-        codecs = get_available_video_codecs()
-        for codec_name in codecs:
-            combo_row_export_codec_models_list.append(codec_name)
-        self.combo_row_export_codec.set_model(combo_row_export_codec_models_list)
-        idx = codecs.index(config.export_codec)
-        self.combo_row_export_codec.set_selected(idx)
-
-        self.spin_row_export_crf.set_property('value', config.export_crf)
+        # init encoding presets
+        presets = video_utils.get_encoding_presets()
+        active_preset_check_button = None
+        for preset in presets:
+            if preset.name == config.encoding_preset_name:
+                active_preset_check_button = Gtk.CheckButton.new()
+                self.expander_row_encoding_presets.set_subtitle(preset.description)
+                break
+        assert active_preset_check_button is not None
+        for preset in presets:
+            action_row = Adw.ActionRow.new()
+            action_row.set_title(_(preset.description))
+            check_button = Gtk.CheckButton.new()
+            check_button.set_group(active_preset_check_button)
+            action_row.add_prefix(check_button)
+            # action_row.set_tooltip_text(f"{preset.encoder_name}: {preset.encoder_options}")
+            self.expander_row_encoding_presets.add_row(action_row)
+        action_row_create_preset = Adw.ActionRow.new()
+        action_row_create_preset.set_title(_("Create Custom Preset"))
+        button_create_preset = Gtk.Button.new()
+        button_create_preset.set_icon_name("edit-symbolic")
+        button_create_preset.set_valign(Gtk.Align.CENTER)
+        button_create_preset.connect("clicked", self.button_create_preset_callback)
+        action_row_create_preset.add_suffix(button_create_preset)
+        self.expander_row_encoding_presets.add_row(action_row_create_preset)
 
         self.spin_row_preview_buffer_duration.set_value(config.preview_buffer_duration)
         self.spin_row_clip_max_duration.set_value(config.max_clip_duration)
@@ -133,8 +150,6 @@ class ConfigSidebar(Gtk.Box):
 
         self.toggle_button_initial_view_preview.set_active(config.initial_view == "preview")
         self.toggle_button_initial_view_export.set_active(config.initial_view == "export")
-
-        self.entry_row_custom_ffmpeg_encoder_options.set_text(config.custom_ffmpeg_encoder_options)
 
         # init post-export action
         self.check_button_post_export_shutdown.set_active(config.post_export_action == PostExportAction.SHUTDOWN)
@@ -194,11 +209,6 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def combo_row_mosaic_export_codec_selected_callback(self, combo_row, value):
         self._config.export_codec = combo_row.get_property("selected_item").get_string()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
-    def spin_row_preview_export_crf_selected_callback(self, spin_row, value):
-        self._config.export_crf = spin_row.get_property("value")
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
@@ -293,11 +303,6 @@ class ConfigSidebar(Gtk.Box):
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
-    def entry_row_custom_ffmpeg_encoder_options_changed_callback(self, entry_row):
-        self._config.custom_ffmpeg_encoder_options = self.entry_row_custom_ffmpeg_encoder_options.get_text()
-
-    @Gtk.Template.Callback()
-    @skip_if_uninitialized
     def check_button_show_mosaic_detections_callback(self, check_button):
         self._config.show_mosaic_detections = self.check_button_show_mosaic_detections.props.active
 
@@ -350,6 +355,11 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def switch_row_mp4_fast_start_active_callback(self, switch_row, active):
         self._config.mp4_fast_start = switch_row.get_property("active")
+
+    @skip_if_uninitialized
+    def button_create_preset_callback(self, button):
+        dialog = EncodingPresetDialog()
+        dialog.present(self)
 
     def set_file_name_pattern_row_styles(self):
         is_valid = validate_file_name_pattern(self.entry_row_file_name_pattern.get_text())
