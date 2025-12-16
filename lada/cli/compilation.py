@@ -67,8 +67,10 @@ def compile_mosaic_restoration_model(
         if input().strip().lower() not in {"y", "yes"}:
             logger.error("Compilation cancelled")
             sys.exit(1)
-            
 
+    if not fp16:
+        logger.warning("FP32 compilation is not recommended for TensorRT. Consider using FP16 instead to save on VRAM and have faster execution times.")
+            
     from lada.models.basicvsrpp.inference import load_model
     from lada.restorationpipeline.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 
