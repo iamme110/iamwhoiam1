@@ -114,7 +114,7 @@ class ExportSingleFileStatusPage(Gtk.Widget):
             self.progress_bar.set_show_text(True)
             self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
             if mp4_fast_start_enabled:
-                self.button_start_export.set_label("Watch Now")
+                self.button_start_export.set_label("Preview")
                 self.button_start_export.set_sensitive(False)  # Disable until file is ready
                 # Check every second if file exists and has content
                 def check_file_ready():
