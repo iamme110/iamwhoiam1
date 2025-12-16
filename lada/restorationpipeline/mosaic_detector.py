@@ -177,7 +177,7 @@ class MosaicDetector:
         self.max_clip_length = max_clip_length
         assert max_clip_length > 0
         self.clip_size = clip_size
-        self.min_clip_length = 2
+        self.min_clip_length = 3
         self.pad_mode = pad_mode
         self.clip_counter = 0
         self.start_ns = 0
@@ -288,7 +288,7 @@ class MosaicDetector:
                         add_completed_scene(other_scene)
 
         for completed_scene in sorted(completed_scenes, key=lambda s: s.frame_start):
-            if len(completed_scene) <= self.min_clip_length:
+            if len(completed_scene) < self.min_clip_length:
                 scenes.remove(completed_scene)
                 continue
             clip = Clip(completed_scene, self.clip_size, self.pad_mode, self.clip_counter)
