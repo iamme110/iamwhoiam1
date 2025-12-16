@@ -287,8 +287,8 @@ class ExportView(Gtk.Widget):
         assert self.in_progress_idx is not None
 
         model_item = self.model[self.in_progress_idx]
-        model_item.progress.complete()
         model_item.state = ExportItemState.FINISHED
+        model_item.progress.complete()
 
         if self.single_file:
             self.single_file_page.on_video_export_finished()
