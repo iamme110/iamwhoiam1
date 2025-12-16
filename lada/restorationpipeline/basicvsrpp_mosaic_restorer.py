@@ -15,7 +15,7 @@ class BasicvsrppMosaicRestorer:
         self.device: torch.device = torch.device(device)
         self.dtype = torch.float16 if fp16 else torch.float32
         self.clip_length = clip_length
-        self.pad_to_clip = model.__class__.__name__ == "GraphModule"
+        self.is_tensorrt_model = model.__class__.__name__ == "GraphModule"
 
     def restore(self, video: list[torch.Tensor], max_frames=-1) -> list[torch.Tensor]:
         input_frame_count = len(video)
@@ -23,7 +23,7 @@ class BasicvsrppMosaicRestorer:
         with torch.inference_mode():
             result = []
             inference_view = torch.stack([x.permute(2, 0, 1) for x in video], dim=0).to(device=self.device).to(dtype=self.dtype).div_(255.0).unsqueeze(0)
-            if self.pad_to_clip and inference_view.shape[1] < self.clip_length:
+            if self.is_tensorrt_model and inference_view.shape[1] < self.clip_length:
                 pad = self.clip_length - inference_view.shape[1]
                 pad_frame = inference_view[:, -1:].repeat(1, pad, 1, 1, 1)
                 inference_view = torch.cat([inference_view, pad_frame], dim=1)

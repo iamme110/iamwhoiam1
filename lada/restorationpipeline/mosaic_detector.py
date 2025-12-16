@@ -177,6 +177,7 @@ class MosaicDetector:
         self.max_clip_length = max_clip_length
         assert max_clip_length > 0
         self.clip_size = clip_size
+        self.min_clip_length = 2
         self.pad_mode = pad_mode
         self.clip_counter = 0
         self.start_ns = 0
@@ -273,16 +274,23 @@ class MosaicDetector:
         logger.debug(f"MosaicDetector: stopped, took: {time.time() - start}")
 
     def _create_clips_for_completed_scenes(self, scenes, frame_num, eof):
-        completed_scenes = []
+        completed_scenes: list[Scene] = []
+
+        def add_completed_scene(scene: Scene):
+            if scene not in completed_scenes:
+                completed_scenes.append(scene)
+
         for current_scene in scenes:
-            if (current_scene.frame_end < frame_num or len(current_scene) >= self.max_clip_length or eof) and current_scene not in completed_scenes:
-                completed_scenes.append(current_scene)
-                other_scenes = [other for other in scenes if other != current_scene]
-                for other_scene in other_scenes:
-                    if other_scene.frame_start < current_scene.frame_start and other_scene not in completed_scenes:
-                        completed_scenes.append(other_scene)
+            if (current_scene.frame_end < frame_num or len(current_scene) >= self.max_clip_length or eof):
+                add_completed_scene(current_scene)
+                for other_scene in scenes:
+                    if other_scene != current_scene and other_scene.frame_start < current_scene.frame_start:
+                        add_completed_scene(other_scene)
 
         for completed_scene in sorted(completed_scenes, key=lambda s: s.frame_start):
+            if len(completed_scene) <= self.min_clip_length:
+                scenes.remove(completed_scene)
+                continue
             clip = Clip(completed_scene, self.clip_size, self.pad_mode, self.clip_counter)
             self.queue_stats["mosaic_clip_queue_max_size"] = max(self.mosaic_clip_queue.qsize()+1, self.queue_stats["mosaic_clip_queue_max_size"])
             s = time.time()
