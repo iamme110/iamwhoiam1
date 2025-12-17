@@ -1,6 +1,5 @@
 # SPDX-FileCopyrightText: Lada Authors
 # SPDX-License-Identifier: AGPL-3.0
-import dataclasses
 import logging
 import pathlib
 
@@ -102,8 +101,8 @@ class ConfigSidebar(Gtk.Box):
         selected_preset = utils.get_selected_preset(config)
         self._active_preset_button_group = Gtk.CheckButton.new()
         self.expander_row_encoding_presets.set_subtitle(selected_preset.description)
-        for i in range(len(self._presets_action_rows)):
-            self.delete_preset_row(idx)
+        while len(self._presets_action_rows) > 0:
+            self.delete_preset_row(0)
         assert len(self._presets_action_rows) == 0 and len(self._presets_radio_buttons) == 0
         if self._create_preset_action_row:
             self.expander_row_encoding_presets.remove(self._create_preset_action_row)

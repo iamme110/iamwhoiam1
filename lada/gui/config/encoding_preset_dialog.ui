@@ -42,7 +42,7 @@ SPDX-License-Identifier: AGPL-3.0
 
                         <child>
                             <object class="GtkLabel">
-                                <property name="label">&lt;big&gt;Description&lt;&#47;big&gt;</property>
+                                <property name="label" translatable="true">&lt;big&gt;Description&lt;&#47;big&gt;</property>
                                 <property name="xalign">0.5</property>
                                 <property name="use-markup">True</property>
                             </object>
@@ -56,7 +56,7 @@ SPDX-License-Identifier: AGPL-3.0
 
                         <child>
                             <object class="GtkLabel">
-                                <property name="label">&lt;big&gt;Encoder&lt;&#47;big&gt;</property>
+                                <property name="label" translatable="true">&lt;big&gt;Encoder&lt;&#47;big&gt;</property>
                                 <property name="xalign">0.5</property>
                                 <property name="use-markup">True</property>
                             </object>
@@ -72,7 +72,7 @@ SPDX-License-Identifier: AGPL-3.0
 
                         <child>
                             <object class="GtkLabel">
-                                <property name="label">&lt;big&gt;Encoder Help&lt;&#47;big&gt;</property>
+                                <property name="label" translatable="true">&lt;big&gt;Encoder Help&lt;&#47;big&gt;</property>
                                 <property name="xalign">0.5</property>
                                 <property name="use-markup">True</property>
                             </object>
@@ -95,7 +95,7 @@ SPDX-License-Identifier: AGPL-3.0
 
                         <child>
                             <object class="GtkLabel">
-                                <property name="label">&lt;big&gt;Encoder Options&lt;&#47;big&gt;</property>
+                                <property name="label" translatable="true">&lt;big&gt;Encoder Options&lt;&#47;big&gt;</property>
                                 <property name="xalign">0.5</property>
                                 <property name="use-markup">True</property>
                             </object>
@@ -103,7 +103,7 @@ SPDX-License-Identifier: AGPL-3.0
 
                         <child>
                             <object class="GtkEntry" id="entry_encoder_options">
-                                <property name="placeholder_text">Enter encoder options…</property>
+                                <property name="placeholder_text" translatable="true">Enter encoder options…</property>
                             </object>
                         </child>
                     </object>
