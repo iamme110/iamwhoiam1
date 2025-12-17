@@ -146,7 +146,7 @@ def dump_available_restoration_models():
             s += f"\n\t{name.ljust(model_name_column_width)}\t{RESTORATION_MODEL_NAMES_TO_FILES[name]}"
     print(s)
 
-def dump_available_encoding_presets():
+def dump_available_encoding_presets(show_encoder_details=False):
     s = _("Available encoding presets:")
     encoding_presets = video_utils.get_encoding_presets()
     if len(encoding_presets) == 0:
@@ -160,10 +160,16 @@ def dump_available_encoding_presets():
         preset_description_column_width = max([len(preset.description) for preset in encoding_presets] + [len(preset_description_header)])
         encoder_name_column_width = max([len(preset.encoder_name) for preset in encoding_presets] + [len(encoder_name_header)])
         encoder_options_column_width = max([len(preset.encoder_options) for preset in encoding_presets] + [len(encoder_options_header)])
-        s += f"\n\t{preset_name_header.ljust(preset_name_column_width)}\t{preset_description_header.ljust(preset_description_column_width)}\t{encoder_name_header.ljust(encoder_name_column_width)}\t{encoder_options_header}"
-        s += f"\n\t{preset_name_column_width * "-"}\t{preset_description_column_width * "-"}\t{encoder_name_column_width * "-"}\t{encoder_options_column_width * "-"}"
-        for preset in encoding_presets:
-            s += f"\n\t{preset.name.ljust(preset_name_column_width)}\t{preset.description.ljust(preset_description_column_width)}\t{preset.encoder_name.ljust(encoder_name_column_width)}\t{preset.encoder_options}"
+        if show_encoder_details:
+            s += f"\n\t{preset_name_header.ljust(preset_name_column_width)}\t{preset_description_header.ljust(preset_description_column_width)}\t{encoder_name_header.ljust(encoder_name_column_width)}\t{encoder_options_header}"
+            s += f"\n\t{preset_name_column_width * "-"}\t{preset_description_column_width * "-"}\t{encoder_name_column_width * "-"}\t{encoder_options_column_width * "-"}"
+            for preset in encoding_presets:
+                s += f"\n\t{preset.name.ljust(preset_name_column_width)}\t{preset.description.ljust(preset_description_column_width)}\t{preset.encoder_name.ljust(encoder_name_column_width)}\t{preset.encoder_options}"
+        else:
+            s += f"\n\t{preset_name_header.ljust(preset_name_column_width)}\t{preset_description_header}"
+            s += f"\n\t{preset_name_column_width * "-"}\t{preset_description_column_width * "-"}"
+            for preset in encoding_presets:
+                s += f"\n\t{preset.name.ljust(preset_name_column_width)}\t{preset.description.ljust(preset_description_column_width)}"
     print(s)
 
 def dump_encoder_options(encoder: str):
