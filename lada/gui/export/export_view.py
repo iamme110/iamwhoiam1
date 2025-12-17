@@ -80,6 +80,7 @@ class ExportView(Gtk.Widget):
 
         self.multiple_files_page.connect("show-error-requested", self.on_show_error_requested)
         self.multiple_files_page.connect("remove-item-requested", self.on_remove_item_requested)
+        self.multiple_files_page.connect("configure-model-requested", self.on_configure_model_requested)
 
         drop_target = utils.create_video_files_drop_target(lambda files: self.emit("files-added", files))
         self.add_controller(drop_target)
@@ -120,7 +121,9 @@ class ExportView(Gtk.Widget):
             else:
                 # We don't know the output directory yet. This guess needs to be updated after the user set one via FilePicker
                 restored_file = self.get_restored_file_path(original_file, added_files[0].get_parent().get_path())
-            export_item = ExportItemData(original_file, restored_file)
+            # Use default detection model if config is not set yet
+            default_model = getattr(self._config, 'mosaic_detection_model', 'v4-fast') if self._config else 'v4-fast'
+            export_item = ExportItemData(original_file, restored_file, detection_model=default_model)
             self.model.append(export_item)
 
         self.single_file = len(self.model) == 1
@@ -232,6 +235,29 @@ class ExportView(Gtk.Widget):
         self.model.remove(idx)
         self.update_export_buttons()
 
+    def on_configure_model_requested(self, obj, idx):
+        try:
+            from lada.gui.export.model_selection_dialog import ModelSelectionDialog
+            
+            model_item = self.model[idx]
+            current_model = getattr(model_item, 'detection_model', None)
+            dialog = ModelSelectionDialog(current_model=current_model, parent=self)
+            
+            def on_response_selected(_dialog, task):
+                selected_model = dialog.get_selected_model()
+                if selected_model:
+                    model_item.detection_model = selected_model
+            
+            dialog.choose(on_response_selected)
+        except ImportError:
+            # Fallback: show simple alert dialog if model selection dialog is not available
+            dialog = Adw.AlertDialog(
+                heading="Model Selection",
+                body="Model selection dialog is not available.",
+            )
+            dialog.add_response("ok", "OK")
+            dialog.choose(self, None, lambda _dialog, task: _dialog.choose_finish(task))
+
     def on_config_changed(self, *args):
         if self._config.export_directory:
             for idx, model_item in enumerate(self.model):
@@ -263,7 +289,9 @@ class ExportView(Gtk.Widget):
             self.execute_post_export_action()
         else:
             # continue, queued items remaining
-            self._start_export(self.model[next_idx].original_file, self.model[next_idx].restored_file)
+            next_item = self.model[next_idx]
+            detection_model = getattr(next_item, 'detection_model', None)
+            self._start_export(next_item.original_file, next_item.restored_file, detection_model)
 
     def show_video_export_started(self, save_file: Gio.File):
         self.view_switcher.set_sensitive(False)
@@ -395,16 +423,20 @@ class ExportView(Gtk.Widget):
             self.multiple_files_page.on_video_export_started(restored_files)
 
         item = self.model[self.get_next_queued_item_idx()]
-        self._start_export(item.original_file, item.restored_file)
+        detection_model = getattr(item, 'detection_model', None) or self._config.mosaic_detection_model
+        self._start_export(item.original_file, item.restored_file, detection_model)
 
-    def _start_export(self, source_file: Gio.File, restore_file: Gio.File):
+    def _start_export(self, source_file: Gio.File, restore_file: Gio.File, detection_model: str | None = None):
         assert os.path.isfile(source_file.get_path())
         if not self.resume_info:
             self.show_video_export_started(restore_file)
 
         def run_export():
-            frame_restorer_options = FrameRestorerOptions(self._config.mosaic_restoration_model,
-                                                          self._config.mosaic_detection_model,
+            # Use the detection model passed as parameter, or fall back to default
+            final_detection_model = detection_model if detection_model is not None else (self._config.mosaic_detection_model if self._config else 'v4-fast')
+            restoration_model = self._config.mosaic_restoration_model if self._config else 'basicvsrpp-v1.2'
+            frame_restorer_options = FrameRestorerOptions(restoration_model,
+                                                          final_detection_model,
                                                           video_utils.get_video_meta_data(source_file.get_path()),
                                                           self._config.device,
                                                           self._config.max_clip_duration,
