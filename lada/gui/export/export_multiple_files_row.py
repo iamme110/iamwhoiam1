@@ -26,11 +26,13 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
     button_open: Gtk.Button = Gtk.Template.Child()
     button_remove: Gtk.Button = Gtk.Template.Child()
     button_show_error: Gtk.Button = Gtk.Template.Child()
+    button_cog: Gtk.Button = Gtk.Template.Child()
 
-    def __init__(self, original_file: Gio.File, restored_file: Gio.File, **kwargs) -> None:
+    def __init__(self, original_file: Gio.File, restored_file: Gio.File, detection_model: str | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self._restored_file = restored_file
         self.original_file = original_file
+        self._detection_model = detection_model
         self._progress: ExportItemDataProgress = ExportItemDataProgress()
         self._state: ExportItemState = ExportItemState.QUEUED
         self._subtitle = ""
@@ -66,17 +68,20 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self.progressbar.add_css_class("finished")
             self.button_open.set_visible(True)
             self.button_remove.set_visible(True)
+            self.button_cog.set_visible(False)
             self.button_show_error.set_visible(False)
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
             self.progressbar.set_show_text(True)
         elif value == ExportItemState.QUEUED:
             self.button_open.set_visible(False)
             self.button_remove.set_visible(True)
+            self.button_cog.set_visible(True)
             self.button_show_error.set_visible(False)
             self.progressbar.set_show_text(False)
         elif value == ExportItemState.PROCESSING:
             self.button_open.set_visible(False)
             self.button_remove.set_visible(False)
+            self.button_cog.set_visible(False)  # Hide cog for currently processing file
             self.button_show_error.set_visible(False)
             self.progressbar.set_fraction(max(MIN_VISIBLE_PROGRESS_FRACTION, self._progress.fraction))
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
@@ -84,6 +89,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
         elif value == ExportItemState.FAILED:
             self.button_open.set_visible(False)
             self.button_remove.set_visible(True)
+            self.button_cog.set_visible(False)
             self.button_show_error.set_visible(True)
             self.progressbar.add_css_class("failed")
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
@@ -91,6 +97,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
         elif value == ExportItemState.PAUSED:
             self.button_open.set_visible(False)
             self.button_remove.set_visible(False)
+            self.button_cog.set_visible(False)
             self.button_show_error.set_visible(False)
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
             self.progressbar.set_show_text(True)
@@ -115,6 +122,14 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self._restored_file = value
             self._attach_file_launcher_to_open_button()
 
+    @GObject.Property(type=str, default=None)
+    def detection_model(self):
+        return self._detection_model
+
+    @detection_model.setter
+    def detection_model(self, value: str | None):
+        self._detection_model = value
+
     def _attach_file_launcher_to_open_button(self):
         file_launcher = Gtk.FileLauncher(
             always_ask=False,
@@ -132,10 +147,18 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
     def on_button_show_error_clicked(self, button):
         self.emit("show-error-requested")
 
+    @Gtk.Template.Callback()
+    def on_button_cog_clicked(self, button):
+        self.emit("configure-model-requested")
+
     @GObject.Signal(name="remove-requested")
     def video_export_requested_signal(self):
         pass
 
     @GObject.Signal(name="show-error-requested")
     def show_error_requested_signal(self):
+        pass
+
+    @GObject.Signal(name="configure-model-requested")
+    def configure_model_requested_signal(self):
         pass
