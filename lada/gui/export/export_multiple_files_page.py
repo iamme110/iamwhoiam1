@@ -32,6 +32,10 @@ class ExportMultipleFilesPage(Gtk.Widget):
     def pause_export_requested_signal(self, idx: int):
         pass
 
+    @GObject.Signal(name="configure-model-requested", arg_types=(GObject.TYPE_INT64,))
+    def configure_model_requested_signal(self, idx: int):
+        pass
+
     def bind(self, model):
         self.list_box.bind_model(model, self.create_item_for_list_box_fun())
 
@@ -40,9 +44,11 @@ class ExportMultipleFilesPage(Gtk.Widget):
             list_row = ExportMultipleFilesRow(
                 original_file=obj.original_file,
                 restored_file=obj.restored_file,
+                detection_model=obj.detection_model,
             )
             list_row.connect("remove-requested", lambda *args: self.on_export_item_remove_requested(list_row))
             list_row.connect("show-error-requested", lambda *args: self.on_show_error_requested(list_row))
+            list_row.connect("configure-model-requested", lambda *args: self.on_configure_model_requested(list_row))
             return list_row
         return fun
 
@@ -56,6 +62,12 @@ class ExportMultipleFilesPage(Gtk.Widget):
         for idx, list_item in enumerate(self.list_box):
             if list_item.state == ExportItemState.FAILED and list_item.original_file == view_item.original_file:
                 self.emit("show-error-requested", idx)
+                break
+
+    def on_configure_model_requested(self, view_item: ExportMultipleFilesRow):
+        for idx, list_item in enumerate(self.list_box):
+            if list_item.original_file == view_item.original_file:
+                self.emit("configure-model-requested", idx)
                 break
 
     def on_video_export_finished(self, idx: int):
