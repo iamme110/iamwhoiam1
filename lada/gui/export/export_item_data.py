@@ -89,7 +89,7 @@ class ExportItemDataProgress(GObject.Object):
 class ExportItemData(GObject.Object):
     __gtype_name__ = 'ExportItemData'
 
-    def __init__(self, original_file: Gio.File, restored_file: Gio.File):
+    def __init__(self, original_file: Gio.File, restored_file: Gio.File, detection_model: str | None = None):
         super().__init__()
 
         self._progress: ExportItemDataProgress = ExportItemDataProgress()
@@ -97,6 +97,7 @@ class ExportItemData(GObject.Object):
         self._restored_file: Gio.File = restored_file
         self._state: ExportItemState = ExportItemState.QUEUED
         self._error_details: str = ""
+        self._detection_model: str | None = detection_model
 
     @GObject.Property(type=ExportItemDataProgress)
     def progress(self):
@@ -133,6 +134,14 @@ class ExportItemData(GObject.Object):
     @error_details.setter
     def error_details(self, value):
         self._error_details = value
+
+    @GObject.Property(type=str, default=None)
+    def detection_model(self):
+        return self._detection_model
+
+    @detection_model.setter
+    def detection_model(self, value):
+        self._detection_model = value
 
     def __repr__(self):
         return f"{{{self._original_file.get_basename()}, {self._restored_file.get_basename()}, {self._state}, {self._progress.fraction}}}"
