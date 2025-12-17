@@ -152,13 +152,13 @@ SPDX-License-Identifier: AGPL-3.0
                                 </child>
 
                                 <child>
-                                    <object class="AdwExpanderRow">
+                                    <object class="AdwExpanderRow" id="expander_row_export_directory">
                                         <property name="title" translatable="true">Output Directory</property>
-                                        <property name="subtitle" translatable="true">Always ask</property>
+                                        <property name="tooltip-text" translatable="true">Directory where restored files will be saved</property>
                                         <property name="show-enable-switch">false</property>
                                         <property name="expanded">false</property>
                                         <child>
-                                            <object class="AdwActionRow">
+                                            <object class="AdwActionRow" id="action_row_export_directory_alwaysask">
                                                 <property name="title" translatable="true">Always ask</property>
                                                 <child type="prefix">
                                                     <object class="GtkCheckButton" id="check_button_export_directory_alwaysask">

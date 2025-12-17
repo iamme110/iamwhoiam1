@@ -76,8 +76,8 @@ def setup_input_and_output_paths(input_arg, output_arg, output_file_pattern):
     return input_files, output_files
 
 def dump_encoders():
-    from lada.utils.video_utils import get_available_video_encoder_codecs
-    encoders = get_available_video_encoder_codecs()
+    from lada.utils.video_utils import get_video_encoder_codecs
+    encoders = get_video_encoder_codecs()
     is_hardware_accelerated = _("Yes")
     name_header = _("Name")
     description_header = _("Description")

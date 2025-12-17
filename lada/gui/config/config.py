@@ -185,7 +185,7 @@ class Config(GObject.Object):
 
     @custom_encoding_presets.setter
     def custom_encoding_presets(self, value: set[video_utils.EncodingPreset]):
-        if value == self._custom_encoding_presets:
+        if value == self._custom_encoding_presets and all([a == b for a, b in zip(value, self._custom_encoding_presets)]):
             return
         self._custom_encoding_presets = value
         self.save()

@@ -51,6 +51,26 @@ def skip_if_uninitialized(f):
         return f(*args) if args[0].init_done else noop
     return wrapper
 
+def set_validation_css_classes(widget: Gtk.Widget, is_valid: bool):
+    focused = "focused" in widget.get_css_classes()
+    all_classes = {"success", "warning", "error"}
+    def add_if_not_present(class_name):
+        if class_name not in widget.get_css_classes():
+            for other_class_names in all_classes.difference({class_name}):
+                widget.remove_css_class(other_class_names)
+            if class_name:
+                widget.add_css_class(class_name)
+    if is_valid:
+        if focused:
+            add_if_not_present("success")
+        else:
+            add_if_not_present(None)
+    else:
+        if focused:
+            add_if_not_present("warning")
+        else:
+            add_if_not_present("error")
+
 def validate_file_name_pattern(file_name_pattern: str) -> bool:
     if not "{orig_file_name}" in file_name_pattern:
         return False
@@ -60,6 +80,13 @@ def validate_file_name_pattern(file_name_pattern: str) -> bool:
     if file_extension not in [".mp4", ".mkv", ".mov", ".m4v"]:
         return False
     return True
+
+def validate_preset_description(description: str, config: Config, original_description: str | None) -> bool:
+    presets = []
+    presets.extend(config.custom_encoding_presets if original_description is None else [p for p in config.custom_encoding_presets if p.description != original_description])
+    presets.extend(video_utils.get_encoding_presets())
+    presets_descriptions = [preset.description.lower() for preset in presets]
+    return description.lower() not in presets_descriptions
 
 def filter_video_files(files: list[Gio.File]) -> list[Gio.File]:
     def is_video_file(file: Gio.File):
@@ -131,6 +158,15 @@ def get_selected_preset(config: Config) -> EncodingPreset:
         if preset.name == config.encoding_preset_name:
             return preset
     raise ValueError("Selected preset not found")
+
+def get_preset_by_name(config: Config, name: str):
+    presets = []
+    presets.extend(video_utils.get_encoding_presets())
+    presets.extend(config.custom_encoding_presets)
+    for preset in presets:
+        if preset.name == name:
+            return preset
+    raise ValueError("Invalid preset name")
 
 def is_unique_preset_description(description) -> bool:
     return not any([preset.description == description for preset in video_utils.get_encoding_presets()])

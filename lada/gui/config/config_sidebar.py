@@ -35,7 +35,9 @@ class ConfigSidebar(Gtk.Box):
     light_color_scheme_button = Gtk.Template.Child()
     dark_color_scheme_button = Gtk.Template.Child()
     system_color_scheme_button = Gtk.Template.Child()
+    expander_row_export_directory: Adw.ExpanderRow = Gtk.Template.Child()
     action_row_export_directory: Adw.ActionRow = Gtk.Template.Child()
+    action_row_export_directory_alwaysask: Adw.ActionRow = Gtk.Template.Child()
     check_button_export_directory_alwaysask: Gtk.CheckButton = Gtk.Template.Child()
     check_button_export_directory_defaultdir: Gtk.CheckButton = Gtk.Template.Child()
     action_row_temp_directory: Adw.ActionRow = Gtk.Template.Child()
@@ -61,11 +63,9 @@ class ConfigSidebar(Gtk.Box):
         self._active_preset_button_group: Gtk.CheckButton | None = None
         self._create_preset_action_row: Adw.ActionRow | None = None
         self._presets_radio_buttons: list[Gtk.CheckButton] = []
+        self._presets_action_rows: list[Adw.ActionRow] = []
 
     def init_sidebar_from_config(self, config: Config):
-        if self.init_done:
-            return
-
         self.check_button_show_mosaic_detections.props.active = config.show_mosaic_detections
 
         # init device
@@ -99,21 +99,23 @@ class ConfigSidebar(Gtk.Box):
         self.combo_row_mosaic_detection_models.set_selected(idx)
 
         # init encoding presets
-        presets = video_utils.get_encoding_presets()
-        for preset in presets:
-            if preset.name == config.encoding_preset_name:
-                self._active_preset_button_group = Gtk.CheckButton.new()
-                self.expander_row_encoding_presets.set_subtitle(preset.description)
-                break
-        assert self._active_preset_button_group is not None
+        selected_preset = utils.get_selected_preset(config)
+        self._active_preset_button_group = Gtk.CheckButton.new()
+        self.expander_row_encoding_presets.set_subtitle(selected_preset.description)
+        for i in range(len(self._presets_action_rows)):
+            self.delete_preset_row(idx)
+        assert len(self._presets_action_rows) == 0 and len(self._presets_radio_buttons) == 0
+        if self._create_preset_action_row:
+            self.expander_row_encoding_presets.remove(self._create_preset_action_row)
+        presets = []
+        presets.extend(video_utils.get_encoding_presets())
         presets.extend(config.custom_encoding_presets)
-        for idx, preset in enumerate(presets):
+        for preset in presets:
             active = False
             if preset.name == config.encoding_preset_name:
                 active = True
-            action_row, radio_button = self.get_action_row_for_existing_preset(preset, idx=idx, active=active, localized_description=True)
-            self.expander_row_encoding_presets.add_row(action_row)
-            self._presets_radio_buttons.append(radio_button)
+            action_row, radio_button = self.get_action_row_for_existing_preset(preset, active=active, localized_description=True)
+            self.add_preset_row(action_row, radio_button)
 
         self._create_preset_action_row = self.get_action_row_for_add_new_preset()
         self.expander_row_encoding_presets.add_row(self._create_preset_action_row)
@@ -136,9 +138,11 @@ class ConfigSidebar(Gtk.Box):
         # init export directory
         if config.export_directory:
             self.action_row_export_directory.set_subtitle(config.export_directory)
+            self.expander_row_export_directory.set_subtitle(config.export_directory)
             self.check_button_export_directory_defaultdir.set_active(True)
         else:
             self.action_row_export_directory.set_subtitle(_("Click the folder button to choose a default"))
+            self.expander_row_export_directory.set_subtitle(self.action_row_export_directory_alwaysask.get_title())
             self.check_button_export_directory_alwaysask.set_active(True)
 
         self.entry_row_file_name_pattern.set_text(config.file_name_pattern)
@@ -260,6 +264,7 @@ class ConfigSidebar(Gtk.Box):
         if self.check_button_export_directory_alwaysask.get_active():
             self._config.export_directory = None
             self.action_row_export_directory.set_subtitle(_("Click the folder button to choose a default"))
+            self.expander_row_export_directory.set_subtitle(self.action_row_export_directory_alwaysask.get_title())
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
@@ -280,14 +285,16 @@ class ConfigSidebar(Gtk.Box):
     @Gtk.Template.Callback()
     @skip_if_uninitialized
     def entry_row_file_name_pattern_changed_callback(self, entry_row):
-        self.set_file_name_pattern_row_styles()
-        if validate_file_name_pattern(self.entry_row_file_name_pattern.get_text()):
+        is_valid = validate_file_name_pattern(self.entry_row_file_name_pattern.get_text())
+        utils.set_validation_css_classes(self.entry_row_file_name_pattern, is_valid)
+        if is_valid:
             self._config.file_name_pattern = self.entry_row_file_name_pattern.get_text()
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
     def entry_row_file_name_pattern_focused_callback(self, row_entry, param_spec):
-        self.set_file_name_pattern_row_styles()
+        is_valid = validate_file_name_pattern(self.entry_row_file_name_pattern.get_text())
+        utils.set_validation_css_classes(self.entry_row_file_name_pattern, is_valid)
 
     @Gtk.Template.Callback()
     @skip_if_uninitialized
@@ -357,76 +364,87 @@ class ConfigSidebar(Gtk.Box):
     @skip_if_uninitialized
     def button_create_preset_callback(self, button):
         preset = utils.get_next_custom_preset(self.config)
-        dialog = EncodingPresetDialog(preset)
+        dialog = EncodingPresetDialog(preset, self.config, True)
         dialog.connect("preset-changed", self.on_preset_created)
         dialog.present(self)
 
     @skip_if_uninitialized
-    def button_edit_preset_callback(self, button, preset: EncodingPreset, action_row: Adw.ActionRow):
-        preset_before = EncodingPreset(**dataclasses.asdict(preset))
-        dialog = EncodingPresetDialog(preset)
+    def button_edit_preset_callback(self, button, preset_name: str, action_row: Adw.ActionRow):
+        preset_now = utils.get_preset_by_name(self.config, preset_name)
+        preset_before = preset_now.clone()
+        preset_after = preset_now.clone()
+        dialog = EncodingPresetDialog(preset_after, self.config, False)
         dialog.connect("preset-changed", self.on_preset_changed, preset_before, action_row)
         dialog.present(self)
 
     @skip_if_uninitialized
-    def button_delete_preset_callback(self, button, preset: EncodingPreset, action_row: Adw.ActionRow, radio_button: Gtk.CheckButton):
-        idx = self._presets_radio_buttons.index(radio_button)
+    def button_delete_preset_callback(self, button, preset_name: str, action_row: Adw.ActionRow):
+        preset = utils.get_preset_by_name(self.config, preset_name)
+        idx = self._presets_action_rows.index(action_row)
         is_last = len(self._presets_radio_buttons) - 1 == idx
         new_selection_idx = idx - 1 if is_last else idx + 1
         new_selected_preset_check_button = self._presets_radio_buttons[new_selection_idx]
+        self.delete_preset_row(idx)
         new_selected_preset_check_button.set_active(True)
-        del self._presets_radio_buttons[idx]
 
-        self.expander_row_encoding_presets.remove(action_row)
         updated_presets = set(self._config.custom_encoding_presets)
         updated_presets.remove(preset)
         self._config.custom_encoding_presets = updated_presets
 
-    def on_preset_selected(self, _check_button, preset: EncodingPreset, idx: int):
-        self.expander_row_encoding_presets.set_subtitle(preset.description)
+    def add_preset_row(self, action_row, radio_button):
+        self.expander_row_encoding_presets.add_row(action_row)
+        self._presets_action_rows.append(action_row)
+        self._presets_radio_buttons.append(radio_button)
 
-    def on_preset_changed(self, _dialog, preset: EncodingPreset, preset_old: EncodingPreset, action_row: Adw.ActionRow):
-        assert preset in self._config.custom_encoding_presets
-        self._config.custom_encoding_presets = set(self._config.custom_encoding_presets)
+    def delete_preset_row(self, idx):
+        self.expander_row_encoding_presets.remove(self._presets_action_rows[idx])
+        del self._presets_action_rows[idx]
+        del self._presets_radio_buttons[idx]
+
+    def on_preset_selected(self, _check_button, preset_name: str):
+        preset = utils.get_preset_by_name(self.config, preset_name)
+        self.expander_row_encoding_presets.set_subtitle(preset.description)
+        self._config.encoding_preset_name = preset_name
+
+    def on_preset_changed(self, _dialog, preset_now: EncodingPreset, preset_old: EncodingPreset, action_row: Adw.ActionRow):
+        updated_presets = set(self._config.custom_encoding_presets)
+        updated_presets.remove(preset_old)
+        updated_presets.add(preset_now)
+        self._config.custom_encoding_presets = updated_presets
 
         is_preset_selected = self.expander_row_encoding_presets.get_subtitle() == preset_old.description
         if is_preset_selected:
-            self.expander_row_encoding_presets.set_subtitle(preset.description)
+            self.expander_row_encoding_presets.set_subtitle(preset_now.description)
 
-        action_row.set_title(preset.description)
+        action_row.set_title(preset_now.description)
 
     def on_preset_created(self, _dialog, preset: EncodingPreset):
         updated_presets = set(self._config.custom_encoding_presets)
         updated_presets.add(preset)
         self._config.custom_encoding_presets = updated_presets
 
-        idx = len(self._presets_radio_buttons)
-
-        action_row, radio_button = self.get_action_row_for_existing_preset(preset, idx=idx, active=True, localized_description=False)
-
-        self._presets_radio_buttons.append(radio_button)
-
+        action_row, radio_button = self.get_action_row_for_existing_preset(preset, active=True, localized_description=False)
         self.expander_row_encoding_presets.remove(self._create_preset_action_row)
-        self.expander_row_encoding_presets.add_row(action_row)
+        self.add_preset_row(action_row, radio_button)
         self.expander_row_encoding_presets.add_row(self._create_preset_action_row)
 
         self.expander_row_encoding_presets.set_subtitle(preset.description)
 
-    def get_action_row_for_existing_preset(self, preset: EncodingPreset, idx: int, active: bool, localized_description: bool) -> tuple[Adw.ActionRow, Gtk.CheckButton]:
+    def get_action_row_for_existing_preset(self, preset: EncodingPreset, active: bool, localized_description: bool) -> tuple[Adw.ActionRow, Gtk.CheckButton]:
         action_row = Adw.ActionRow.new()
         action_row.set_title(_(preset.description) if localized_description else preset.description)
 
         radio_button = Gtk.CheckButton.new()
         radio_button.set_group(self._active_preset_button_group)
         radio_button.set_active(active)
-        radio_button.connect("toggled", self.on_preset_selected, preset, idx)
+        radio_button.connect("toggled", self.on_preset_selected, preset.name)
         action_row.add_prefix(radio_button)
 
         if preset.user_preset:
             edit_button = Gtk.Button.new()
             edit_button.set_icon_name("edit-symbolic")
             edit_button.set_valign(Gtk.Align.CENTER)
-            edit_button.connect("clicked", self.button_edit_preset_callback, preset, action_row)
+            edit_button.connect("clicked", self.button_edit_preset_callback, preset.name, action_row)
             context = edit_button.get_style_context()
             context.add_class("flat")
             action_row.add_suffix(edit_button)
@@ -434,7 +452,7 @@ class ConfigSidebar(Gtk.Box):
             delete_button = Gtk.Button.new()
             delete_button.set_icon_name("cross-large-symbolic")
             delete_button.set_valign(Gtk.Align.CENTER)
-            delete_button.connect("clicked", self.button_delete_preset_callback, preset, action_row, radio_button)
+            delete_button.connect("clicked", self.button_delete_preset_callback, preset.name, action_row)
             context = delete_button.get_style_context()
             context.add_class("flat")
             action_row.add_suffix(delete_button)
@@ -443,34 +461,13 @@ class ConfigSidebar(Gtk.Box):
 
     def get_action_row_for_add_new_preset(self) -> Adw.ActionRow:
         action_row = Adw.ActionRow.new()
-        action_row.set_title(_("Create Custom Preset"))
+        action_row.set_title(_("Create Preset…"))
         button_create_preset = Gtk.Button.new()
-        button_create_preset.set_icon_name("edit-symbolic")
+        button_create_preset.set_icon_name("plus-large-symbolic")
         button_create_preset.set_valign(Gtk.Align.CENTER)
         button_create_preset.connect("clicked", self.button_create_preset_callback)
         action_row.add_suffix(button_create_preset)
         return action_row
-
-    def set_file_name_pattern_row_styles(self):
-        is_valid = validate_file_name_pattern(self.entry_row_file_name_pattern.get_text())
-        focused = "focused" in self.entry_row_file_name_pattern.get_css_classes()
-        all_classes = {"success", "warning", "error"}
-        def add_if_not_present(class_name):
-            if class_name not in self.entry_row_file_name_pattern.get_css_classes():
-                for other_class_names in all_classes.difference({class_name}):
-                    self.entry_row_file_name_pattern.remove_css_class(other_class_names)
-                if class_name:
-                    self.entry_row_file_name_pattern.add_css_class(class_name)
-        if is_valid:
-            if focused:
-                add_if_not_present("success")
-            else:
-                add_if_not_present(None)
-        else:
-            if focused:
-                add_if_not_present("warning")
-            else:
-                add_if_not_present("error")
 
     def show_select_folder(self):
         file_dialog = Gtk.FileDialog()
@@ -481,6 +478,7 @@ class ConfigSidebar(Gtk.Box):
                 selected_folder_path = selected_folder.get_path()
                 self._config.export_directory = selected_folder_path
                 self.action_row_export_directory.set_subtitle(selected_folder_path)
+                self.expander_row_export_directory.set_subtitle(selected_folder_path)
                 if not self.check_button_export_directory_defaultdir.get_active(): self.check_button_export_directory_defaultdir.set_active(True)
             except GLib.Error as error:
                 if error.code == 2: # "Dismissed by user"

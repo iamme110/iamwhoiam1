@@ -7,6 +7,7 @@ import pathlib
 from gi.repository import Adw, Gtk, Gio, GObject, GLib
 from lada import LOG_LEVEL
 from lada.gui import utils
+from lada.gui.config.config import Config
 from lada.gui.utils import dump_encoder_options
 from lada.utils import video_utils
 from lada.utils.video_utils import EncodingPreset, Encoder
@@ -23,23 +24,31 @@ class EncodingPresetDialog(Adw.Dialog):
     drop_down_encoders: Gtk.DropDown = Gtk.Template.Child()
     entry_encoder_options: Gtk.Entry = Gtk.Template.Child()
     entry_description: Gtk.Entry = Gtk.Template.Child()
+    button_save: Gtk.Button = Gtk.Template.Child()
 
-    def __init__(self, preset: EncodingPreset, **kwargs):
+    def __init__(self, preset: EncodingPreset, config: Config, create_new: bool, **kwargs):
         super().__init__(**kwargs)
-        # self.set_follows_content_size(True)
-        self.set_content_width(700)
-        self.set_content_height(400)
 
+        self._create_new = create_new
+        self._original_description = None if create_new else preset.description
+        self._config = config
         self._encoding_preset = preset
 
+        expression = Gtk.ClosureExpression.new(
+            GObject.TYPE_STRING,
+            lambda obj: obj.get_string(),
+            None,
+        )
+        self.drop_down_encoders.props.expression = expression
+
+        self.set_title(_("Create Preset") if create_new else _("Edit Preset"))
         self.entry_description.set_text(self._encoding_preset.description)
 
-        self.text_view_encoder_options.set_vexpand(True)
-        self.text_view_encoder_options.set_hexpand(True)
-        self.text_view_encoder_options.set_monospace(True)
         self.update_text_view_encoder_options(self._encoding_preset.encoder_name)
 
-        self.encoders = video_utils.get_available_video_encoder_codecs()
+        self.entry_encoder_options.set_text(self._encoding_preset.encoder_options)
+
+        self.encoders = video_utils.get_video_encoder_codecs()
         strings = Gtk.StringList()
         self.drop_down_encoders.props.model = strings
         for i, encoder in enumerate(self.encoders):
@@ -87,3 +96,17 @@ class EncodingPresetDialog(Adw.Dialog):
             self._encoding_preset.encoder_options = encoder_options
             self.emit("preset-changed", self.encoding_preset)
             self.close()
+
+    @Gtk.Template.Callback()
+    def entry_description_changed_callback(self, entry):
+        is_valid = utils.validate_preset_description(self.entry_description.get_text(), self._config, self._original_description)
+        self.button_save.set_sensitive(is_valid)
+        utils.set_validation_css_classes(self.entry_description, is_valid)
+
+
+    def present(self, parent):
+        super().present(parent)
+        if self._create_new:
+            self.entry_description.grab_focus()
+        else:
+            self.entry_encoder_options.grab_focus()

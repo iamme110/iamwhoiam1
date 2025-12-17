@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Lada Authors
 # SPDX-License-Identifier: AGPL-3.0
 import csv
+import dataclasses
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
 from fractions import Fraction
+from functools import cache
 from typing import Callable, Iterator, Tuple
 from collections import deque
 import heapq
@@ -244,6 +246,9 @@ class EncodingPreset:
 
     def __hash__(self): return hash(self.name)
 
+    def clone(self): return EncodingPreset(**dataclasses.asdict(self))
+
+@cache
 def get_encoding_presets() -> list[EncodingPreset]:
     presets = []
     encoding_presets_csv_path = os.path.join(os.path.dirname(__file__), 'encoding_presets.csv')
@@ -363,9 +368,8 @@ class Encoder:
 
     def __hash__(self): return hash(self.name)
 
-def get_available_video_encoder_codecs() -> list[Encoder]:
+def get_video_encoder_codecs() -> list[Encoder]:
     codecs = set()
-    image_codec_pattern =  r'\bimage\b'
     for name in av.codec.codecs_available:
         try:
             codec = av.codec.Codec(name, "w")
@@ -373,7 +377,11 @@ def get_available_video_encoder_codecs() -> list[Encoder]:
             continue
         if codec.type != 'video':
             continue
-        if re.search(image_codec_pattern, codec.long_name, re.IGNORECASE):
+        if re.search(r'\bimage\b', codec.long_name, re.IGNORECASE):
+            continue
+        codec_long_name = codec.long_name.lower()
+        whitelist_video_codecs = ['hevc', 'h265', "h.265", "h264", "h.264", "vp9", "av1", "ffmpeg video codec #1", "huffyuv", "prores", "mpeg-2"]
+        if not any(name in codec_long_name for name in whitelist_video_codecs):
             continue
         is_hardware_encoder = bool(codec.capabilities & av.codec.Capabilities.hardware)
         encoder = Encoder(codec.name, codec.long_name, is_hardware_encoder, set([hwconfig.device_type.name for hwconfig in codec.hardware_configs] if is_hardware_encoder else []))
