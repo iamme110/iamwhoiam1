@@ -10,7 +10,7 @@ import textwrap
 
 import torch
 
-from lada import VERSION, DETECTION_MODEL_NAMES_TO_FILES, RESTORATION_MODEL_NAMES_TO_FILES
+from lada import VERSION, ModelFiles
 from lada.cli import utils
 from lada.utils import audio_utils, video_utils
 from lada.utils.os_utils import gpu_has_tensor_cores
@@ -53,7 +53,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general = parser.add_argument_group(_('General'))
     group_general.add_argument('--input', type=str, help=_('Path to pixelated video file or directory containing video files'))
     group_general.add_argument('--output', type=str, help=_('Path used to save output file(s). If path is a directory then file name will be chosen automatically (see --output-file-pattern). If no output path was given then the directory of the input file will be used'))
-    group_general.add_argument('--temp-directory', type=str, default=tempfile.gettempdir(), help=_('Directory for temporary video files during restoration process. Alternatively, you can use the environment variable TMPDIR. (default: %(default)s)'))
+    group_general.add_argument('--temporary-directory', type=str, default=tempfile.gettempdir(), help=_('Directory for temporary video files during restoration process. Alternatively, you can use the environment variable TMPDIR. (default: %(default)s)'))
     group_general.add_argument('--output-file-pattern', type=str, default="{orig_file_name}.restored.mp4", help=_("Pattern used to determine output file name(s). Used when input is a directory, or a file but no output path was specified. Must include the placeholder '{orig_file_name}'. (default: %(default)s)"))
     group_general.add_argument('--device', type=str, default="cuda:0", help=_('Device used for running Restoration and Detection models. Use "cpu" or "cuda". If you have multiple GPUs you can select a specific one via index e.g. "cuda:0" (default: %(default)s)'))
     group_general.add_argument('--fp16', action=argparse.BooleanOptionalAction, default=gpu_has_tensor_cores(), help=_("Reduces VRAM usage and may increase speed on modern GPUs, with negligible quality difference. (default: %(default)s)"))
@@ -62,7 +62,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
 
     export = parser.add_argument_group(_('Export'))
-    export.add_argument('--encoding-preset', type=str, default="h264-cpu-hq", help=_('Select encoding preset by name. Ignored if "--encoder" and "--encoder-options" are used. (default: %(default)s)'))
+    export.add_argument('--encoding-preset', type=str, default="h264-cpu-hq", help=_('Select encoding preset by name. Use "--list-encoding-presets" to see what\'s available. Ignored if "--encoder" and "--encoder-options" are used (default: %(default)s)'))
     export.add_argument('--list-encoding-presets', action='store_true', help=_("List available encoding presets and exit"))
     export.add_argument('--encoder', type=str, help=_('Select video encoder by name. Use "--list-encoders" to see what\'s available. (default: %(default)s)'))
     export.add_argument('--list-encoders', action='store_true', help=_("List available encoders and exit"))
@@ -79,7 +79,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_detection = parser.add_argument_group(_('Mosaic Detection'))
     group_detection.add_argument('--mosaic-detection-model', type=str, default='v4-fast', help=_('Name of detection model or path to model weights file. Use "--list-mosaic-detection-models" to see what\'s available. (default: %(default)s)'))
     group_detection.add_argument('--list-mosaic-detection-models', action='store_true', help=_("List available detection models found in model weights directory and exit (default location is './model_weights' if not overwritten by environment variable LADA_MODEL_WEIGHTS_DIR)"))
-    group_detection.add_argument('--detect-face-mosaics', action=argparse.BooleanOptionalAction, default=False, help=_("Detect and ignore areas of pixelated faces. Prevents restoration artifacts if the source includes these types of mosaics. Available for models v3 and newer. (default: %(default)s)"))
+    group_detection.add_argument('--detect-face-mosaics', action=argparse.BooleanOptionalAction, default=False, help=_("Detect and ignore areas of pixelated faces. Can prevent restoration artifacts but may worsen detection of NSFW mosaics. Available for models v3 and newer. (default: %(default)s)"))
 
     return parser
 
@@ -165,17 +165,17 @@ def main():
         print(_("Invalid input. No file or directory at {input_path}").format(input_path=args.input))
         sys.exit(1)
 
-    if args.mosaic_detection_model in utils.get_available_detection_models():
-        mosaic_detection_model_path = DETECTION_MODEL_NAMES_TO_FILES[args.mosaic_detection_model]
+    if detection_modelfile := ModelFiles.get_detection_model_by_name(args.mosaic_detection_model):
+        mosaic_detection_model_path = detection_modelfile.path
     elif os.path.isfile(args.mosaic_detection_model):
         mosaic_detection_model_path = args.mosaic_detection_model
     else:
         print(_("Invalid mosaic detection model"))
         sys.exit(1)
 
-    if args.mosaic_restoration_model in utils.get_available_restoration_models():
+    if restoration_modelfile := ModelFiles.get_restoration_model_by_name(args.mosaic_restoration_model):
         mosaic_restoration_model_name = args.mosaic_restoration_model
-        mosaic_restoration_model_path = RESTORATION_MODEL_NAMES_TO_FILES[args.mosaic_restoration_model]
+        mosaic_restoration_model_path = restoration_modelfile.path
     elif os.path.isfile(args.mosaic_restoration_model):
         mosaic_restoration_model_path = args.mosaic_restoration_model
         mosaic_restoration_model_name = 'basicvsrpp' # Assume custom model is basicvsrpp. DeepMosaics custom path is not supported
