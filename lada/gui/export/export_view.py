@@ -132,6 +132,9 @@ class ExportView(Gtk.Widget):
             self.single_file_page.on_add_file(self.model[0])
         else:
             self.stack.set_visible_child_name("multiple-files")
+            # When switching to multi-file mode, ensure the binding is refreshed
+            # This helps synchronize model state with UI components
+            self.multiple_files_page.bind(self.model)
             self.update_export_buttons()
 
     def update_export_buttons(self):
@@ -529,6 +532,9 @@ class ExportView(Gtk.Widget):
                     def on_success():
                         progress = self.progress_calculator.get_progress()
                         progress.complete()
+                        # Emit progress signal first to update progress bar to 100%
+                        # before emitting finished signal - this fixes the progress bar
+                        # display issue when switching from single-file to multi-file mode
                         self.emit('video-export-progress', progress)
                         self.emit('video-export-finished')
                     GLib.idle_add(on_success)
