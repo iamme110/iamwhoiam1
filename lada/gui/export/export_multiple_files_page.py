@@ -65,8 +65,6 @@ class ExportMultipleFilesPage(Gtk.Widget):
 
     def on_video_export_finished(self, idx: int):
         view_item = self.list_box.get_row_at_index(idx)
-        # First update progress to 100%, then set state to FINISHED
-        # This ensures the progress bar shows 100% before the finished styling is applied
         view_item.progress.complete()
         view_item.state = ExportItemState.FINISHED
 
