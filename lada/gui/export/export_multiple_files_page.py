@@ -41,6 +41,11 @@ class ExportMultipleFilesPage(Gtk.Widget):
                 original_file=obj.original_file,
                 restored_file=obj.restored_file,
             )
+            # Sync UI state with model state when creating the row
+            # Set progress first, then state, so FINISHED state uses correct progress data
+            list_row.progress = obj.progress
+            list_row.state = obj.state
+
             list_row.connect("remove-requested", lambda *args: self.on_export_item_remove_requested(list_row))
             list_row.connect("show-error-requested", lambda *args: self.on_show_error_requested(list_row))
             return list_row
@@ -60,6 +65,8 @@ class ExportMultipleFilesPage(Gtk.Widget):
 
     def on_video_export_finished(self, idx: int):
         view_item = self.list_box.get_row_at_index(idx)
+        # First update progress to 100%, then set state to FINISHED
+        # This ensures the progress bar shows 100% before the finished styling is applied
         view_item.progress.complete()
         view_item.state = ExportItemState.FINISHED
 
