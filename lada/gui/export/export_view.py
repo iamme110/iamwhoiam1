@@ -312,7 +312,8 @@ class ExportView(Gtk.Widget):
             self.button_preview.set_visible(False)
         if self.single_file:
             self.single_file_page.show_video_export_started(save_file, self.temp_file_path, self._config.mp4_fast_start)
-        self.multiple_files_page.show_video_export_started(idx)
+        else:
+            self.multiple_files_page.show_video_export_started(idx)
 
     def on_video_export_finished(self, obj):
         assert self.in_progress_idx is not None
