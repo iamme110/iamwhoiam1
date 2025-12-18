@@ -51,6 +51,12 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
     @progress.setter
     def progress(self, value: ExportItemDataProgress):
         self._progress = value
+        # If state is FINISHED, always show 100% progress to maintain correct styling
+        if self._state == ExportItemState.FINISHED:
+            fraction = 1.0
+            self.progressbar.set_fraction(fraction)
+            # Don't override text when FINISHED - let state setter handle it
+            return
         fraction = max(MIN_VISIBLE_PROGRESS_FRACTION, self._progress.fraction) if self._state != ExportItemState.QUEUED else self._progress.fraction
         self.progressbar.set_fraction(fraction)
         self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
@@ -63,6 +69,8 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
     def state(self, value: ExportItemState):
         self._state = value
         if value == ExportItemState.FINISHED:
+            # Ensure progress bar shows 100% when finished to display correct green styling
+            self.progressbar.set_fraction(1.0)
             self.progressbar.add_css_class("finished")
             self.button_open.set_visible(True)
             self.button_remove.set_visible(True)
@@ -70,11 +78,15 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
             self.progressbar.set_show_text(True)
         elif value == ExportItemState.QUEUED:
+            self.progressbar.remove_css_class("finished")
+            self.progressbar.remove_css_class("failed")
             self.button_open.set_visible(False)
             self.button_remove.set_visible(True)
             self.button_show_error.set_visible(False)
             self.progressbar.set_show_text(False)
         elif value == ExportItemState.PROCESSING:
+            self.progressbar.remove_css_class("finished")
+            self.progressbar.remove_css_class("failed")
             self.button_open.set_visible(False)
             self.button_remove.set_visible(False)
             self.button_show_error.set_visible(False)
@@ -82,13 +94,16 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
             self.progressbar.set_show_text(True)
         elif value == ExportItemState.FAILED:
+            self.progressbar.remove_css_class("finished")
+            self.progressbar.add_css_class("failed")
             self.button_open.set_visible(False)
             self.button_remove.set_visible(True)
             self.button_show_error.set_visible(True)
-            self.progressbar.add_css_class("failed")
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
             self.progressbar.set_show_text(True)
         elif value == ExportItemState.PAUSED:
+            self.progressbar.remove_css_class("finished")
+            self.progressbar.remove_css_class("failed")
             self.button_open.set_visible(False)
             self.button_remove.set_visible(False)
             self.button_show_error.set_visible(False)
