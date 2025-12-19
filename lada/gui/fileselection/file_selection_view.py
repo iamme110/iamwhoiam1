@@ -17,6 +17,7 @@ class FileSelectionView(Gtk.Widget):
     __gtype_name__ = 'FileSelectionView'
 
     button_open_file: Gtk.Button = Gtk.Template.Child()
+    button_download_file: Gtk.Button = Gtk.Template.Child()
     status_page: Adw.StatusPage = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
@@ -46,6 +47,14 @@ class FileSelectionView(Gtk.Widget):
         dismissed_callback = lambda *args: self.button_open_file.set_sensitive(True)
         utils.show_open_files_dialog(callback, dismissed_callback)
 
+    @Gtk.Template.Callback()
+    def button_download_file_callback(self, button_clicked):
+        self.emit("url-download-requested")
+
     @GObject.Signal(name="files-selected", arg_types=(GObject.TYPE_PYOBJECT,))
     def files_opened_signal(self, files: list[Gio.File]):
+        pass
+
+    @GObject.Signal(name="url-download-requested")
+    def url_download_requested_signal(self):
         pass
