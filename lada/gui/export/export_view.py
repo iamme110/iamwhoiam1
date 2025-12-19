@@ -22,6 +22,7 @@ from lada.gui.export.export_utils import ResumeInformation
 from lada.gui.export.shutdown_manager import ShutdownManager, ShutdownError
 from lada.gui.export.spinner_button import SpinnerButton
 from lada.gui.frame_restorer_provider import FrameRestorerOptions, FRAME_RESTORER_PROVIDER
+from lada.gui.download import URLDownloader
 from lada.utils import audio_utils, video_utils
 
 here = pathlib.Path(__file__).parent.resolve()
@@ -58,6 +59,9 @@ class ExportView(Gtk.Widget):
         self.video_writer: video_utils.VideoWriter | None = None
         self.progress_calculator: export_utils.ProgressCalculator | None = None
 
+        # URL downloader will be initialized when config is set
+        self.url_downloader = None
+
         self.connect("video-export-finished", self.on_video_export_finished)
         self.connect("video-export-failed", self.on_video_export_failed)
         self.connect("video-export-progress", self.on_video_export_progress)
@@ -65,13 +69,16 @@ class ExportView(Gtk.Widget):
         self.connect("video-export-paused", self.on_video_export_paused)
         self.connect("video-export-stopped", self.on_video_export_stopped)
 
-        self.model =  Gio.ListStore(item_type=ExportItemData)
+        self.model = Gio.ListStore(item_type=ExportItemData)
         self.multiple_files_page.bind(self.model)
 
         def on_files_added(obj, files):
             self.button_add_files.set_sensitive(True)
             self.add_files(files)
         self.connect("files-added", on_files_added)
+
+        # Ensure the add files button is always visible
+        self.button_add_files.set_visible(True)
 
         self.single_file_page.connect("start-export-requested", lambda page, button: self.on_button_start_export_clicked(button))
         self.single_file_page.connect("stop-export-requested", self.on_button_cancel_export_clicked)
@@ -94,6 +101,10 @@ class ExportView(Gtk.Widget):
         self._config.connect("notify::export-directory", self.on_config_changed)
         self._config.connect("notify::file-name-pattern", self.on_config_changed)
         self.set_restore_button_label()
+
+        # Initialize URL downloader now that we have config
+        if self._config:
+            self.url_downloader = URLDownloader(self._config, self)
 
     @GObject.Property(type=Adw.ViewStack)
     def view_stack(self):
@@ -186,16 +197,37 @@ class ExportView(Gtk.Widget):
             item = self.model[self.get_next_queued_item_idx()]
             self.emit("video-export-requested", item.restored_file)
         else:
-            start_export_button.set_sensitive(False)
-            dismissed_callback = lambda *args: start_export_button.set_sensitive(True)
+            if start_export_button:
+                start_export_button.set_sensitive(False)
+            dismissed_callback = lambda *args: start_export_button.set_sensitive(True) if start_export_button else None
             self.show_export_dialog(dismissed_callback)
 
-    @Gtk.Template.Callback()
     def button_add_files_callback(self, button_clicked):
         self.button_add_files.set_sensitive(False)
         callback = lambda files: self.emit("files-added", files)
         dismissed_callback = lambda *args: self.button_add_files.set_sensitive(True)
         utils.show_open_files_dialog(callback, dismissed_callback)
+
+    def on_add_files_action(self, action, param):
+        self.button_add_files.set_sensitive(False)
+        callback = lambda files: self.emit("files-added", files)
+        dismissed_callback = lambda *args: self.button_add_files.set_sensitive(True)
+        utils.show_open_files_dialog(callback, dismissed_callback)
+
+    def on_add_url_action(self, action, param):
+        if self.url_downloader:
+            self.button_add_files.set_sensitive(False)
+            def on_files_added(files):
+                self.emit("files-added", files)
+                # Auto-start export after files are added
+                def auto_start():
+                    if self.in_progress_idx is None and len(self.model) > 0 and self._config.export_directory:
+                        queued_idx = self.get_next_queued_item_idx()
+                        if queued_idx is not None:
+                            self.on_button_start_export_clicked(None)
+                GLib.idle_add(auto_start)
+            self.url_downloader.show_url_input_dialog(on_files_added)
+            self.button_add_files.set_sensitive(True)
 
     @Gtk.Template.Callback()
     def on_button_cancel_export_clicked(self, button_clicked):
