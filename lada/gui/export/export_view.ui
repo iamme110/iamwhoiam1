@@ -38,10 +38,11 @@ SPDX-License-Identifier: AGPL-3.0
                             </object>
                         </child>
                         <child type="end">
-                            <object class="GtkButton" id="button_add_files">
+                            <object class="GtkMenuButton" id="button_add_files">
                                 <property name="icon-name">plus-large-symbolic</property>
                                 <property name="tooltip-text" translatable="true">Add Files…</property>
-                                <signal name="clicked" handler="button_add_files_callback"/>
+                                <property name="menu-model">add_files_menu</property>
+                                <property name="primary">True</property>
                             </object>
                         </child>
                         <child type="end">
@@ -143,6 +144,19 @@ SPDX-License-Identifier: AGPL-3.0
             <item>
                 <attribute name="label" translatable="true">About Lada</attribute>
                 <attribute name="action">app.about</attribute>
+            </item>
+        </section>
+    </menu>
+
+    <menu id="add_files_menu">
+        <section>
+            <item>
+                <attribute name="label" translatable="true">Add Files…</attribute>
+                <attribute name="action">win.add-files</attribute>
+            </item>
+            <item>
+                <attribute name="label" translatable="true">Download Files…</attribute>
+                <attribute name="action">win.add-url</attribute>
             </item>
         </section>
     </menu>
