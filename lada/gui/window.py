@@ -57,8 +57,18 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.set_title("Lada")
 
+        # Create actions for export view
+        add_files_action = Gio.SimpleAction.new("add-files", None)
+        add_files_action.connect("activate", lambda action, param: self.export_view.on_add_files_action(action, param))
+        self.add_action(add_files_action)
+
+        add_url_action = Gio.SimpleAction.new("add-url", None)
+        add_url_action.connect("activate", lambda action, param: self.export_view.on_add_url_action(action, param))
+        self.add_action(add_url_action)
+
         self.connect("close-request", self.close)
         self.file_selection_view.connect("files-selected", lambda obj, files: self.on_files_selected(files))
+        self.file_selection_view.connect("url-download-requested", lambda obj: self.on_url_download_requested())
         self.preview_view.connect("toggle-fullscreen-requested", lambda *args: self.on_toggle_fullscreen())
         self.preview_view.connect("window-resize-requested", self.on_window_resize_requested)
         self.connect("notify::fullscreened", lambda object, spec: self.on_fullscreened(object.get_property(spec.name)))
@@ -83,6 +93,11 @@ class MainWindow(Adw.ApplicationWindow):
         if self.view_stack.props.visible_child_name == "preview":
             self.preview_view.play_file(0)
         self.export_view.add_files(files)
+
+    def on_url_download_requested(self):
+        self.stack.props.visible_child_name = "main"
+        self.view_stack.props.visible_child_name = "export"
+        self.export_view.on_add_url_action(None, None)
 
     def on_fullscreened(self, fullscreened: bool):
         if self.stack.props.visible_child_name == "main" and self.view_stack.props.visible_child_name == "preview":
