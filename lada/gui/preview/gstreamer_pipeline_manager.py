@@ -306,14 +306,15 @@ class PipelineManager(GObject.Object):
         self.pipeline_subtitle_elements = [filesrc, subparse, textoverlay]
 
     def pipeline_remove_subtitles(self):
+        for subtitle_element in self.pipeline_subtitle_elements:
+            subtitle_element.set_state(Gst.State.NULL)
+
         # Unlink the subtitle pipeline and restore original video pipeline
         self.video_buffer_queue.unlink(self.subtitle_textoverlay)
         self.subtitle_textoverlay.unlink(self.video_sink)
         self.video_buffer_queue.link(self.video_sink)
 
-        # Remove subtitle elements from pipeline
         for subtitle_element in self.pipeline_subtitle_elements:
-            subtitle_element.set_state(Gst.State.NULL)
             self.pipeline.remove(subtitle_element)
 
         self.subtitle_filesrc = None
@@ -331,18 +332,6 @@ class PipelineManager(GObject.Object):
     def adjust_pipeline_with_new_source_file(self, video_metadata: VideoMetadata, subtitle_path: str | None = None):
         self.video_metadata = video_metadata
         self.frame_restorer_app_src.set_property('video-metadata', self.video_metadata)
-
-        # Pause the pipeline and flush to safely make changes
-        current_state = self.pipeline.get_state(0)[1]
-        if current_state == Gst.State.PLAYING:
-            self.pipeline.set_state(Gst.State.PAUSED)
-            # Wait for the pipeline to actually reach PAUSED state
-            self.pipeline.get_state(Gst.SECOND)
-
-        # Flush the pipeline to clear any buffered data
-        self.pipeline.send_event(Gst.Event.new_flush_start())
-        self.pipeline.send_event(Gst.Event.new_flush_stop(True))
-
         audio_pipeline_already_added = self.has_audio
         self.has_audio = audio_utils.get_audio_codec(self.video_metadata.video_file) is not None
         if self.has_audio:
@@ -368,10 +357,6 @@ class PipelineManager(GObject.Object):
                 self.has_subtitles = False
         elif subtitle_pipeline_already_added:
             self.pipeline_remove_subtitles()
-
-        # Restore pipeline state if it was playing before
-        if current_state == Gst.State.PLAYING:
-            self.pipeline.set_state(Gst.State.PLAYING)
 
     def reinit_appsrc(self):
         self.frame_restorer_app_src.set_property('video-metadata', self.video_metadata)

@@ -462,7 +462,6 @@ class PreviewView(Gtk.Widget):
 
         self.frame_restorer_provider.init(self._frame_restorer_options)
 
-        # Find subtitle file
         subtitle_path = self._find_subtitle_file(self.video_metadata.video_file)
 
         if self.pipeline_manager:
