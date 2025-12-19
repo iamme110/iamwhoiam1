@@ -12,7 +12,6 @@ from gi.repository import GObject, GLib, Gst, GstApp, Gdk, Gio
 from lada import LOG_LEVEL
 from lada.gui.frame_restorer_provider import FrameRestorerProvider
 from lada.gui.preview.gstreamer_pipeline_appsrc import FrameRestorerAppSrc
-from lada.gui.preview.gstreamer_subtitle_utils import create_subtitle_elements, remove_subtitle_elements
 from lada.utils import VideoMetadata, audio_utils
 
 logger = logging.getLogger(__name__)
@@ -43,9 +42,8 @@ class PipelineManager(GObject.Object):
         self.pipeline_audio_elements = []
         self.pipeline_subtitle_elements = []
         self.video_sink: Gst.Element | None = None
-        self.filesrc: Gst.Element | None = None
-        self.subparse: Gst.Element | None = None
-        self.textoverlay: Gst.Element | None = None
+        self.subtitle_filesrc: Gst.Element | None = None
+        self.subtitle_textoverlay: Gst.Element | None = None
         self.has_subtitles: bool = False
 
     @GObject.Property(type=Gdk.Paintable)
@@ -135,8 +133,12 @@ class PipelineManager(GObject.Object):
             self.pipeline_add_video()
             if self.has_audio:
                 self.pipeline_add_audio()
-            if self.has_subtitles and subtitle_path:
-                self.pipeline_add_subtitles(subtitle_path)
+            if self.has_subtitles:
+                try:
+                    self.pipeline_add_subtitles(subtitle_path)
+                except Exception as e:
+                    logger.error("Error while adding subtitle. Continue without subs.", e)
+                    self.has_subtitles = False
 
     def close_video_file(self):
         if self.audio_volume:
@@ -274,49 +276,48 @@ class PipelineManager(GObject.Object):
         self.paintable.connect("invalidate-size", lambda obj: GLib.idle_add(lambda: self.emit("paintable-size-changed")))
 
     def pipeline_add_subtitles(self, subtitle_path: str):
-        if not self.video_metadata or not subtitle_path:
-            return
+        textoverlay = Gst.ElementFactory.make('textoverlay', None)
+        textoverlay.set_property('font-desc', 'Sans 18')
+        textoverlay.set_property('halignment', 'center')
+        textoverlay.set_property('valignment', 'bottom')
+        textoverlay.set_property('shaded-background', True)
 
-        # Create subtitle elements using utility function
-        subtitle_elements = create_subtitle_elements(self.pipeline, subtitle_path)
-        if not subtitle_elements:
-            return
+        subparse = Gst.ElementFactory.make('subparse', None)
 
-        filesrc, subparse, textoverlay = subtitle_elements
-        self.filesrc = filesrc
-        self.subparse = subparse
-        self.textoverlay = textoverlay
-        self.pipeline_subtitle_elements = [filesrc, subparse, textoverlay]
+        filesrc = Gst.ElementFactory.make('filesrc', None)
+        filesrc.set_property('location', subtitle_path)
+
+        # Add all elements to pipeline
+        self.pipeline.add(textoverlay)
+        self.pipeline.add(subparse)
+        self.pipeline.add(filesrc)
+
+        # Link the subtitle pipeline: filesrc -> subparse -> textoverlay (text sink)
+        filesrc.link(subparse)
+        subparse.link(textoverlay)
 
         # Insert textoverlay into video pipeline
-        if self.video_buffer_queue and self.video_sink:
-            try:
-                self.video_buffer_queue.unlink(self.video_sink)
-                self.video_buffer_queue.link(textoverlay)
-                textoverlay.link(self.video_sink)
-            except Exception as e:
-                logger.error(f"Error linking subtitle pipeline: {e}")
-                return
+        self.video_buffer_queue.unlink(self.video_sink)
+        self.video_buffer_queue.link(textoverlay)
+        textoverlay.link(self.video_sink)
 
+        self.subtitle_filesrc = filesrc
+        self.subtitle_textoverlay = textoverlay
+        self.pipeline_subtitle_elements = [filesrc, subparse, textoverlay]
 
     def pipeline_remove_subtitles(self):
-        # First, try to restore the original video pipeline if it was modified for subtitles
-        if self.video_buffer_queue and self.video_sink and self.textoverlay:
-            try:
-                # Try to unlink the subtitle pipeline and restore original video pipeline
-                self.video_buffer_queue.unlink(self.textoverlay)
-                self.textoverlay.unlink(self.video_sink)
-                self.video_buffer_queue.link(self.video_sink)
-            except Exception:
-                # It's okay if this fails - it means the elements weren't linked
-                pass
+        # Unlink the subtitle pipeline and restore original video pipeline
+        self.video_buffer_queue.unlink(self.subtitle_textoverlay)
+        self.subtitle_textoverlay.unlink(self.video_sink)
+        self.video_buffer_queue.link(self.video_sink)
 
         # Remove subtitle elements from pipeline
-        if self.filesrc and self.subparse and self.textoverlay:
-            remove_subtitle_elements(self.pipeline, (self.filesrc, self.subparse, self.textoverlay))
-        self.filesrc = None
-        self.subparse = None
-        self.textoverlay = None
+        for subtitle_element in self.pipeline_subtitle_elements:
+            subtitle_element.set_state(Gst.State.NULL)
+            self.pipeline.remove(subtitle_element)
+
+        self.subtitle_filesrc = None
+        self.subtitle_textoverlay = None
         self.pipeline_subtitle_elements = []
 
     def pipeline_remove_audio(self):
@@ -356,14 +357,16 @@ class PipelineManager(GObject.Object):
         subtitle_pipeline_already_added = self.has_subtitles
         self.has_subtitles = subtitle_path is not None
 
-        if self.has_subtitles and subtitle_path:
-            if subtitle_pipeline_already_added:
-                # Update existing subtitle pipeline with new subtitle file
-                if self.filesrc:
-                    self.filesrc.set_property('location', subtitle_path)
-            else:
-                self.pipeline_add_subtitles(subtitle_path)
-        else:
+        if self.has_subtitles:
+            try:
+                if subtitle_pipeline_already_added:
+                    self.subtitle_filesrc.set_property('location', subtitle_path)
+                else:
+                    self.pipeline_add_subtitles(subtitle_path)
+            except Exception as e:
+                logger.error("Error while adding subtitle. Continue without subs.", e)
+                self.has_subtitles = False
+        elif subtitle_pipeline_already_added:
             self.pipeline_remove_subtitles()
 
         # Restore pipeline state if it was playing before
