@@ -269,8 +269,6 @@ class PipelineManager(GObject.Object):
 
         self.video_sink = video_sink
         self.video_buffer_queue = buffer_queue
-
-        self.video_buffer_queue = buffer_queue
         self.frame_restorer_app_src = appsrc
         self.paintable = paintable
         self.paintable.connect("invalidate-size", lambda obj: GLib.idle_add(lambda: self.emit("paintable-size-changed")))
@@ -372,16 +370,6 @@ class PipelineManager(GObject.Object):
         if self.has_audio:
             self.audio_buffer_queue.set_property('max-size-time', buffer_queue_max_thresh_time * Gst.SECOND)
             self.audio_buffer_queue.set_property('min-threshold-time', buffer_queue_min_thresh_time * Gst.SECOND)
-
-    def _find_subtitle_file(self, video_file_path: str) -> str | None:
-        """Find SRT subtitle file with the same name as video file."""
-        video_path = pathlib.Path(video_file_path)
-        srt_path = video_path.with_suffix('.srt')
-
-        if srt_path.exists():
-            logger.info(f"Found SRT subtitle file: {srt_path}")
-            return str(srt_path.resolve())
-        return None
 
     def path_to_gst_uri(self, path: str):
         # On Windows Gst expects 4-slash URI format syntax. So \\1.2.3.4\share\file.mp4 needs to end up as file:////1.2.3.4/share/file.mp4
