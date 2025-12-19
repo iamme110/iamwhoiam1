@@ -308,9 +308,13 @@ class PipelineManager(GObject.Object):
             subtitle_element.set_state(Gst.State.NULL)
 
         # Unlink the subtitle pipeline and restore original video pipeline
-        self.video_buffer_queue.unlink(self.subtitle_textoverlay)
-        self.subtitle_textoverlay.unlink(self.video_sink)
-        self.video_buffer_queue.link(self.video_sink)
+        try:
+            self.video_buffer_queue.unlink(self.subtitle_textoverlay)
+            self.subtitle_textoverlay.unlink(self.video_sink)
+            self.video_buffer_queue.link(self.video_sink)
+        except Exception as e:
+            # This could be fine if there was an error while adding subtitle elements and these aren't actually linked
+            logger.debug("Couldn't unlink subtitle elements",e )
 
         for subtitle_element in self.pipeline_subtitle_elements:
             self.pipeline.remove(subtitle_element)
@@ -352,6 +356,7 @@ class PipelineManager(GObject.Object):
                     self.pipeline_add_subtitles(subtitle_path)
             except Exception as e:
                 logger.error("Error while adding subtitle. Continue without subs.", e)
+                self.pipeline_remove_subtitles()
                 self.has_subtitles = False
         elif subtitle_pipeline_already_added:
             self.pipeline_remove_subtitles()
