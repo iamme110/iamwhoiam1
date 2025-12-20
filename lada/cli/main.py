@@ -11,9 +11,9 @@ import textwrap
 
 import torch
 
-from lada import VERSION, DETECTION_MODEL_NAMES_TO_FILES, RESTORATION_MODEL_NAMES_TO_FILES
+from lada import VERSION, ModelFiles
 from lada.cli import utils
-from lada.utils import audio_utils
+from lada.utils import audio_utils, video_utils
 from lada.utils.os_utils import gpu_has_tensor_cores
 from lada.restorationpipeline.frame_restorer import FrameRestorer
 from lada.restorationpipeline import load_models
@@ -29,8 +29,11 @@ def setup_argparser() -> argparse.ArgumentParser:
     example2_text = _("Restore all videos found in the specified directory and save them to a different folder:")
     example2_command = _("%(prog)s --input path/to/input/dir/ --output /path/to/output/dir/")
 
-    example3_text = _("Use a GPU-accelerated codec for encoding the restored video:")
-    example3_command = _("%(prog)s --input input.mp4 --codec hevc_nvenc --crf 20")
+    example3_text = _("Use Nvidia hardware-accelerated encoder by selecting a preset:")
+    example3_command = _("%(prog)s --input input.mp4 --encoding-preset hevc-nvidia-gpu-hq")
+
+    example4_text = _("Set encoding parameters directly without using an encoding preset:")
+    example4_command = _("%(prog)s --input input.mp4 --encoder libx265 --encoder-options '-crf 26 -preset fast -x265-params log_level=error'")
 
     parser = argparse.ArgumentParser(
         usage=_('%(prog)s [options]'),
@@ -43,6 +46,8 @@ def setup_argparser() -> argparse.ArgumentParser:
                      {example2_command}
                 * {example3_text}
                     {example3_command}
+                * {example4_text}
+                    {example4_command}
             ''')),
         formatter_class=utils.TranslatableHelpFormatter,
         add_help=False)
@@ -50,7 +55,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general = parser.add_argument_group(_('General'))
     group_general.add_argument('--input', type=str, help=_('Path to pixelated video file or directory containing video files'))
     group_general.add_argument('--output', type=str, help=_('Path used to save output file(s). If path is a directory then file name will be chosen automatically (see --output-file-pattern). If no output path was given then the directory of the input file will be used'))
-    group_general.add_argument('--temp-directory', type=str, default=tempfile.gettempdir(), help=_('Directory for temporary video files during restoration process. Alternatively, you can use the environment variable TMPDIR. (default: %(default)s)'))
+    group_general.add_argument('--temporary-directory', type=str, default=tempfile.gettempdir(), help=_('Directory for temporary video files during restoration process. Alternatively, you can use the environment variable TMPDIR. (default: %(default)s)'))
     group_general.add_argument('--output-file-pattern', type=str, default="{orig_file_name}.restored.mp4", help=_("Pattern used to determine output file name(s). Used when input is a directory, or a file but no output path was specified. Must include the placeholder '{orig_file_name}'. (default: %(default)s)"))
     group_general.add_argument('--device', type=str, default="cuda:0", help=_('Device used for running Restoration and Detection models. Use "cpu" or "cuda". If you have multiple GPUs you can select a specific one via index e.g. "cuda:0" (default: %(default)s)'))
     group_general.add_argument('--fp16', action=argparse.BooleanOptionalAction, default=gpu_has_tensor_cores(), help=_("Reduces VRAM usage and may increase speed on modern GPUs, with negligible quality difference. (default: %(default)s)"))
@@ -58,13 +63,14 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general.add_argument('--version', action='store_true', help=_("Display version and exit"))
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
 
-    export = parser.add_argument_group(_('Export (Encoder settings)'))
-    export.add_argument('--codec', type=str, default="h264", help=_('FFmpeg video codec. E.g. "h264, "hevc" or "hevc_nvenc". Use "--list-codecs" to see what\'s available. (default: %(default)s)'))
-    export.add_argument('--list-codecs', action='store_true', help=_("List available codecs and hardware devices / GPUs for hardware-accelerated video encoding"))
-    export.add_argument('--crf', type=int, default=None, help=_('Constant rate factor (CRF). Quality setting of the video encoder. Lower values will result in higher quality but larger file sizes. If you have selected GPU codecs "h264_nvenc" or "hevc_nvenc" then the option "qp" will be used instead as those encoders don\'t support the "crf" option. (default: %(default)s)'))
-    export.add_argument('--preset', type=str, default=None, help=_('Encoder preset. Mostly affects file-size and speed. (default: %(default)s)'))
-    export.add_argument('--mp4-fast-start',  default=False, action=argparse.BooleanOptionalAction, help=_("Allows playing the file while it's being written. Sets .mp4 mov flags 'frag_keyframe+empty_moov+faststart'. (default: %(default)s)"))
-    export.add_argument('--custom-encoder-options', type=str, help=_("Pass arbitrary encoder options. Pass it like you'd specify them using ffmpeg. For example: --custom-encoder-options \"-rc-lookahead 32 -rc vbr_hq\". Official FFmpeg Codecs Documentation: https://ffmpeg.org/ffmpeg-codecs.html"))
+    export = parser.add_argument_group(_('Export'))
+    export.add_argument('--encoding-preset', type=str, default="h264-cpu-hq", help=_('Select encoding preset by name. Use "--list-encoding-presets" to see what\'s available. Ignored if "--encoder" and "--encoder-options" are used (default: %(default)s)'))
+    export.add_argument('--list-encoding-presets', action='store_true', help=_("List available encoding presets and exit"))
+    export.add_argument('--encoder', type=str, help=_('Select video encoder by name. Use "--list-encoders" to see what\'s available. (default: %(default)s)'))
+    export.add_argument('--list-encoders', action='store_true', help=_("List available encoders and exit"))
+    export.add_argument('--encoder-options', type=str, help=_("Space-separated list of options for the encoder set via \"--encoder\". Use \"--list-encoder-options\" to see what's available. (default: %(default)s)"))
+    export.add_argument('--list-encoder-options', metavar='ENCODER', type=str, help=_("List available options of the given encoder and exit"))
+    export.add_argument('--mp4-fast-start',  default=False, action=argparse.BooleanOptionalAction, help=_("Allows playing the file while it's being written. Sets .mp4 mov flags \"frag_keyframe+empty_moov+faststart\". (default: %(default)s)"))
 
     group_restoration = parser.add_argument_group(_('Mosaic Restoration'))
     group_restoration.add_argument('--list-mosaic-restoration-models', action='store_true', help=_("List available restoration models found in model weights directory and exit (default location is './model_weights' if not overwritten by environment variable LADA_MODEL_WEIGHTS_DIR)"))
@@ -76,12 +82,12 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_detection = parser.add_argument_group(_('Mosaic Detection'))
     group_detection.add_argument('--mosaic-detection-model', type=str, default='v4-fast', help=_('Name of detection model or path to model weights file. Use "--list-mosaic-detection-models" to see what\'s available. (default: %(default)s)'))
     group_detection.add_argument('--list-mosaic-detection-models', action='store_true', help=_("List available detection models found in model weights directory and exit (default location is './model_weights' if not overwritten by environment variable LADA_MODEL_WEIGHTS_DIR)"))
-    group_detection.add_argument('--detect-face-mosaics', action=argparse.BooleanOptionalAction, default=False, help=_("Detect and ignore areas of pixelated faces. Prevents restoration artifacts if the source includes these types of mosaics. Available for models v3 and newer. (default: %(default)s)"))
+    group_detection.add_argument('--detect-face-mosaics', action=argparse.BooleanOptionalAction, default=False, help=_("Detect and ignore areas of pixelated faces. Can prevent restoration artifacts but may worsen detection of NSFW mosaics. Available for models v3 and newer. (default: %(default)s)"))
 
     return parser
 
 def process_video_file(input_path: str, output_path: str, temp_dir_path: str, device: torch.device, mosaic_restoration_model, mosaic_detection_model,
-                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, codec, crf, mp4_fast_start, preset, custom_encoder_options):
+                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, encoder: str, encoder_options: str, mp4_fast_start):
     video_metadata = get_video_meta_data(input_path)
 
     frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
@@ -93,9 +99,8 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
         frame_restorer.start()
 
         with VideoWriter(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
-                         video_metadata.video_fps_exact, codec=codec, crf=crf, mp4_fast_start=mp4_fast_start,
-                         time_base=video_metadata.time_base, preset=preset,
-                         custom_encoder_options=custom_encoder_options) as video_writer:
+                         video_metadata.video_fps_exact, encoder=encoder, encoder_options=encoder_options,
+                         time_base=video_metadata.time_base, mp4_fast_start=mp4_fast_start) as video_writer:
             frame_restorer_progressbar = utils.Progressbar(video_metadata, frame_restorer)
             for elem in frame_restorer_progressbar:
                 if elem is None:
@@ -129,8 +134,8 @@ def main():
     if args.version:
         print("Lada: ", VERSION)
         sys.exit(0)
-    if args.list_codecs:
-        utils.dump_pyav_codecs()
+    if args.list_encoders:
+        utils.dump_encoders()
         sys.exit(0)
     if args.list_mosaic_detection_models:
         utils.dump_available_detection_models()
@@ -140,6 +145,12 @@ def main():
         sys.exit(0)
     if args.list_devices:
         utils.dump_torch_devices()
+        sys.exit(0)
+    if args.list_encoding_presets:
+        utils.dump_available_encoding_presets()
+        sys.exit(0)
+    if args.list_encoder_options:
+        utils.dump_encoder_options(args.list_encoder_options)
         sys.exit(0)
     if args.help or not args.input:
         argparser.print_help()
@@ -156,18 +167,21 @@ def main():
     if not (os.path.isfile(args.input) or os.path.isdir(args.input)):
         print(_("Invalid input. No file or directory at {input_path}").format(input_path=args.input))
         sys.exit(1)
+    if args.temporary_directory and not os.path.isdir(args.temporary_directory):
+        print(_("Temporary directory {temporary_path} doesn't exist. Creating…").format(temporary_path=args.temporary_directory))
+        os.makedirs(args.temporary_directory)
 
-    if args.mosaic_detection_model in utils.get_available_detection_models():
-        mosaic_detection_model_path = DETECTION_MODEL_NAMES_TO_FILES[args.mosaic_detection_model]
+    if detection_modelfile := ModelFiles.get_detection_model_by_name(args.mosaic_detection_model):
+        mosaic_detection_model_path = detection_modelfile.path
     elif os.path.isfile(args.mosaic_detection_model):
         mosaic_detection_model_path = args.mosaic_detection_model
     else:
         print(_("Invalid mosaic detection model"))
         sys.exit(1)
 
-    if args.mosaic_restoration_model in utils.get_available_restoration_models():
+    if restoration_modelfile := ModelFiles.get_restoration_model_by_name(args.mosaic_restoration_model):
         mosaic_restoration_model_name = args.mosaic_restoration_model
-        mosaic_restoration_model_path = RESTORATION_MODEL_NAMES_TO_FILES[args.mosaic_restoration_model]
+        mosaic_restoration_model_path = restoration_modelfile.path
     elif os.path.isfile(args.mosaic_restoration_model):
         mosaic_restoration_model_path = args.mosaic_restoration_model
         mosaic_restoration_model_name = 'basicvsrpp' # Assume custom model is basicvsrpp. DeepMosaics custom path is not supported
@@ -184,10 +198,32 @@ def main():
             mosaic_restoration_config_path=args.mosaic_restoration_config_path,
         )
 
+    encoder = None
+    encoder_options = None
+    if args.encoder:
+        encoder = args.encoder
+        encoder_options = args.encoder_options if args.encoder_options else ''
+    elif args.encoding_preset:
+        encoding_presets = video_utils.get_encoding_presets()
+        found = False
+        for preset in encoding_presets:
+            if preset.name == args.encoding_preset:
+                found = True
+                encoder = preset.encoder_name
+                encoder_options = preset.encoder_options
+                break
+        if not found:
+            print(_("Invalid encoding preset"))
+            sys.exit(1)
+    else:
+        print(_('Either "--encoding-preset" or "--encoder" together with "--encoding-options" must be used'))
+        sys.exit(1)
+    assert encoder is not None and encoder_options is not None
+
     device = torch.device(args.device)
     mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode = load_models(
         device, mosaic_restoration_model_name, mosaic_restoration_model_path, args.mosaic_restoration_config_path,
-        mosaic_detection_model_path, args.fp16, args.max_clip_length, args.detect_face_mosaics
+        mosaic_detection_model_path, args.fp16, args.detect_face_mosaics, args.max_clip_length
     )
 
     input_files, output_files = utils.setup_input_and_output_paths(args.input, args.output, args.output_file_pattern)
@@ -198,9 +234,9 @@ def main():
         if not single_file_input:
             print(f"{os.path.basename(input_path)}:")
         try:
-            process_video_file(input_path=input_path, output_path=output_path, temp_dir_path=args.temp_directory, device=device, mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
+            process_video_file(input_path=input_path, output_path=output_path, temp_dir_path=args.temporary_directory, device=device, mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
                                mosaic_restoration_model_name=mosaic_restoration_model_name, preferred_pad_mode=preferred_pad_mode, max_clip_length=args.max_clip_length,
-                               codec=args.codec, crf=args.crf, mp4_fast_start=args.mp4_fast_start, preset=args.preset, custom_encoder_options=args.custom_encoder_options)
+                               encoder=encoder, encoder_options=encoder_options, mp4_fast_start=args.mp4_fast_start)
         except KeyboardInterrupt:
             print(_("Received Ctrl-C, stopping restoration."))
             break

@@ -4,19 +4,20 @@ import torch
 
 from lada import LOG_LEVEL
 from lada.models.basicvsrpp.basicvsrpp_gan import BasicVSRPlusPlusGan
+from lada.utils import ImageTensor
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
 class BasicvsrppMosaicRestorer:
-    def __init__(self, model: BasicVSRPlusPlusGan, device: torch.device, fp16, clip_length):
+    def __init__(self, model: BasicVSRPlusPlusGan, device: torch.device, fp16: bool, clip_length: int):
         self.model = model
         self.device: torch.device = torch.device(device)
         self.dtype = torch.float16 if fp16 else torch.float32
         self.clip_length = clip_length
         self.is_tensorrt_model = model.__class__.__name__ == "GraphModule"
 
-    def restore(self, video: list[torch.Tensor], max_frames=-1) -> list[torch.Tensor]:
+    def restore(self, video: list[ImageTensor], max_frames=-1) -> list[ImageTensor]:
         input_frame_count = len(video)
         input_frame_shape = video[0].shape
         with torch.inference_mode():
