@@ -6,6 +6,12 @@ import sys
 
 import torch
 
+import logging
+from lada import LOG_LEVEL
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=LOG_LEVEL)
+
 def get_subprocess_startup_info():
     if sys.platform != "win32":
         return None
@@ -26,6 +32,16 @@ def gpu_has_tensor_cores(device_index: int = 0) -> bool:
         return False
     return True
 
+def supports_tensorrt() -> bool:
+    if not gpu_has_tensor_cores():
+        return False
+
+    try:
+        logging.getLogger("torch_tensorrt").setLevel(logging.ERROR) 
+        import torch_tensorrt
+        return True
+    except ImportError:
+        return False
 
 def get_gpu_vram_gb(device: str | torch.device) -> float:
     device = torch.device(device) if isinstance(device, str) else device

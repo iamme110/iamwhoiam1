@@ -15,7 +15,8 @@ def load_models(
     mosaic_restoration_config_path: str | None,
     mosaic_detection_model_path: str,
     fp16: bool,
-    detect_face_mosaics: bool):
+    detect_face_mosaics: bool,
+    clip_length: int):
     if mosaic_restoration_model_name.startswith("deepmosaics"):
         from lada.models.deepmosaics.models import loadmodel
         from lada.restorationpipeline.deepmosaics_mosaic_restorer import DeepmosaicsMosaicRestorer

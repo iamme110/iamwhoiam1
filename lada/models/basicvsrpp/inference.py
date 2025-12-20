@@ -41,18 +41,14 @@ def get_default_gan_inference_config() -> dict:
         ))
 
 
-def load_model(config: str | dict | None, checkpoint_path, device, fp16: bool, max_clip_length: int) -> BasicVSRPlusPlusGan | BasicVSR:
+def load_model(config: str | dict | None, checkpoint_path, device, fp16: bool) -> BasicVSRPlusPlusGan | BasicVSR:
     register_all_modules()
     if device and type(device) == str:
         device = torch.device(device)
 
     if os.path.splitext(checkpoint_path)[1] == ".ep":
-        logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
-        import torch_tensorrt
-        logger.info(f"Loading TensorRT export from {checkpoint_path}")
-        with open(checkpoint_path, "rb") as f:
-            trt_module = torch.export.load(f).module()
-            return trt_module.to(device)
+        from lada.utils.tensorrt_utils import load_ep
+        return load_ep(checkpoint_path, device)
 
     if config is None:
         config = get_default_gan_inference_config()

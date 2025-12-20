@@ -17,7 +17,6 @@ dependencies = [
     "mmengine==0.10.7", # Pinned as we apply a patch
     "tqdm",
     "torch",
-    "torch_tensorrt",
     "torchvision",
 ]
 
@@ -50,6 +49,7 @@ version = { attr = "lada.VERSION" }
 [project.optional-dependencies]
 cu128 = ["torch==2.8.0", "torchvision==0.23.0"]
 gui = ["pycairo", "PyGObject"]
+tensorrt = ["torch_tensorrt==2.8.0"]
 
 [dependency-groups]
 dev = [

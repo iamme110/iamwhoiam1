@@ -14,11 +14,11 @@ import torch
 from lada import VERSION, ModelFiles
 from lada.cli import utils
 from lada.utils import audio_utils, video_utils
-from lada.utils.os_utils import gpu_has_tensor_cores
+from lada.utils.os_utils import gpu_has_tensor_cores, supports_tensorrt
 from lada.restorationpipeline.frame_restorer import FrameRestorer
 from lada.restorationpipeline import load_models
 from lada.utils.video_utils import get_video_meta_data, VideoWriter
-from lada.cli.compilation import compile_mosaic_restoration_model
+from lada.utils.tensorrt_utils import compile_mosaic_restoration_model
 
 def setup_argparser() -> argparse.ArgumentParser:
     examples_header_text = _("Examples:")
@@ -77,7 +77,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_restoration.add_argument('--mosaic-restoration-model', type=str, default='basicvsrpp-v1.2', help=_('Name of detection model or path to model weights file. Use "--list-mosaic-restoration-models" to see what\'s available. (default: %(default)s)'))
     group_restoration.add_argument('--mosaic-restoration-config-path', type=str, default=None, help=_("Path to restoration model configuration file. You'll not have to set this unless you're training your own custom models"))
     group_restoration.add_argument('--max-clip-length', type=int, default=180, help=_('Maximum number of frames for restoration. Higher values improve temporal stability. Lower values reduce memory footprint. If set too low flickering could appear (default: %(default)s)'))
-    group_restoration.add_argument('--compile-mosaic-restoration-model', action=argparse.BooleanOptionalAction, default=gpu_has_tensor_cores(), help=_('Compile the mosaic restoration model to TensorRT. This will significantly improve performance at slight increase in memory usage. Large max-clip-length values are not recommended. (default: %(default)s)'))
+    group_restoration.add_argument('--compile-mosaic-restoration-model', action=argparse.BooleanOptionalAction, default=supports_tensorrt(), help=_('Compile the mosaic restoration model to TensorRT. This will significantly improve performance but increase VRAM usage. Large max-clip-length (>180) values are not recommended. Compilation will allocate around 80%% of free RAM space so consider closing some apps. (default: %(default)s)'))
 
     group_detection = parser.add_argument_group(_('Mosaic Detection'))
     group_detection.add_argument('--mosaic-detection-model', type=str, default='v4-fast', help=_('Name of detection model or path to model weights file. Use "--list-mosaic-detection-models" to see what\'s available. (default: %(default)s)'))
@@ -188,9 +188,8 @@ def main():
     else:
         print(_("Invalid mosaic restoration model"))
         sys.exit(1)
-    if args.compile_mosaic_restoration_model:
+    if args.compile_mosaic_restoration_model and "basicvsrpp" in mosaic_restoration_model_name:
         mosaic_restoration_model_path = compile_mosaic_restoration_model(
-            mosaic_restoration_model_name=mosaic_restoration_model_name,
             mosaic_restoration_model_path=mosaic_restoration_model_path,
             clip_length=args.max_clip_length,
             device=args.device,

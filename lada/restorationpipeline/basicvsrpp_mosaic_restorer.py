@@ -24,9 +24,14 @@ class BasicvsrppMosaicRestorer:
             result = []
             inference_view = torch.stack([x.permute(2, 0, 1) for x in video], dim=0).to(device=self.device).to(dtype=self.dtype).div_(255.0).unsqueeze(0)
             if self.is_tensorrt_model and inference_view.shape[1] < self.clip_length:
-                pad = self.clip_length - inference_view.shape[1]
-                pad_frame = inference_view[:, -1:].repeat(1, pad, 1, 1, 1)
-                inference_view = torch.cat([inference_view, pad_frame], dim=1)
+                t = inference_view.shape[1]
+                if t == 1:
+                    idx = torch.zeros(self.clip_length, dtype=torch.long, device=inference_view.device)
+                else:
+                    base = list(range(t)) + list(range(t - 2, 0, -1))
+                    reps = (self.clip_length + len(base) - 1) // len(base)
+                    idx = torch.tensor((base * reps)[:self.clip_length], dtype=torch.long, device=inference_view.device)
+                inference_view = inference_view.index_select(1, idx)
 
             if max_frames > 0:
                 for i in range(0, inference_view.shape[1], max_frames):
@@ -45,37 +50,3 @@ class BasicvsrppMosaicRestorer:
             assert input_frame_count == output_frame_count and input_frame_shape == output_frame_shape
 
         return result
-
-    def compile(self, output_path: str, max_clip_size: int) -> str:
-        import psutil
-        import torch_tensorrt
-
-        if max_clip_size > 60:
-            logger.warning(f"Max clip size {max_clip_size} is greater than 60. This is not recommended due to increased memory usage and possibly worsened performance for videos with poor mosaic detection.")
-
-        workspace_size = int(psutil.virtual_memory().available * 0.8)
-        input = torch.randn(1, max_clip_size, 3, 256, 256, dtype=self.dtype, device=self.device)
-
-        with torch_tensorrt.logging.info():
-            logger.info(f"Compiling BasicVSR++ model (TensorRT workspace_size={workspace_size / (1024 ** 3):.2f} GB)")
-            trt_gm = torch_tensorrt.compile(
-                self.model, 
-                ir="dynamo", 
-                inputs=[input],
-                min_block_size=1,
-                workspace_size=workspace_size,
-                enabled_precisions={self.dtype},
-                use_fp32_acc=False,
-                use_explicit_typing=False,
-                sparse_weights=False,
-                optimization_level=3,
-                hardware_compatible=False,
-                use_python_runtime=False,
-                cache_built_engines=False,
-                reuse_cached_engines=False,
-                truncate_double=True)
-
-        torch_tensorrt.save(trt_gm, output_path, inputs=[input])
-        del trt_gm
-        del input
-        return output_path
