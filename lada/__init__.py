@@ -134,7 +134,7 @@ def _init_translations():
     if "LOCALE_DIR" in os.environ:
         LOCALE_DIR = os.environ["LOCALE_DIR"]
     else:
-        LOCALE_DIR = "lada/locale"
+        LOCALE_DIR = os.path.join(os.path.dirname(__file__), "locale")
     is_language_set = False
     for var_name in ["LANGUAGE", "LANG"]:
         if var_name in os.environ:
@@ -142,6 +142,12 @@ def _init_translations():
             break
     if not is_language_set:
         os.environ["LANGUAGE"] = _get_language_from_os()
+    # Ensure LANG and LC_ALL are set for GTK compatibility
+    if "LANGUAGE" in os.environ:
+        if "LANG" not in os.environ:
+            os.environ["LANG"] = os.environ["LANGUAGE"]
+        if "LC_ALL" not in os.environ:
+            os.environ["LC_ALL"] = os.environ["LANGUAGE"]
     gettext.bindtextdomain(DOMAIN, LOCALE_DIR)
     gettext.textdomain(DOMAIN)
     gettext.install(DOMAIN, LOCALE_DIR)
