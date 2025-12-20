@@ -26,7 +26,7 @@ def load_models(
     elif mosaic_restoration_model_name.startswith("basicvsrpp"):
         from lada.models.basicvsrpp.inference import load_model
         from lada.restorationpipeline.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-        _model = load_model(mosaic_restoration_config_path, mosaic_restoration_model_path, device, fp16, clip_length)
+        _model = load_model(mosaic_restoration_config_path, mosaic_restoration_model_path, device, fp16)
         mosaic_restoration_model = BasicvsrppMosaicRestorer(_model, device, fp16, clip_length)
         pad_mode = 'zero'
     else:
