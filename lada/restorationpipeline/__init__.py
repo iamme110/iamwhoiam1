@@ -9,35 +9,35 @@ from lada.models.yolo.yolo11_segmentation_model import Yolo11SegmentationModel
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
+def _find_tensorrt_ep_for_clip(checkpoint_path: str, clip_length: int, fp16: bool) -> str | None:
+    from lada.utils.tensorrt_utils import get_compiled_mosaic_restoration_model_path_for_clip
+
+    trt_path = get_compiled_mosaic_restoration_model_path_for_clip(
+        checkpoint_path=checkpoint_path,
+        clip_length=clip_length,
+        fp16=fp16,
+    )
+    return trt_path if os.path.isfile(trt_path) else None
+
 def _load_small_tensorrt_model(
-    mosaic_restoration_model_path: str,
+    mosaic_restoration_checkpoint_path: str,
     mosaic_restoration_config_path: str | None,
     device: torch.device,
     fp16: bool,
     clip_length: int,
 ):
-    from lada.utils.tensorrt_utils import SMALL_TRT_CLIP_LENGTH_TRIGGER, get_compiled_mosaic_restoration_model_path_for_clip
+    from lada.utils.tensorrt_utils import SMALL_TRT_CLIP_LENGTH_TRIGGER
 
     if clip_length <= SMALL_TRT_CLIP_LENGTH_TRIGGER:
         return None
 
-    if mosaic_restoration_model_path.endswith(".ep"):
-        if "_clip" not in mosaic_restoration_model_path:
-            return None
-        prefix, rest = mosaic_restoration_model_path.rsplit("_clip", 1)
-        idx = rest.find(".trt_")
-        if idx == -1:
-            return None
-        clip10_path = f"{prefix}_clip10{rest[idx:]}"
-        if clip10_path == mosaic_restoration_model_path:
-            return None
-    else:
-        clip10_path = get_compiled_mosaic_restoration_model_path_for_clip(
-            checkpoint_path=mosaic_restoration_model_path,
-            clip_length=10,
-            fp16=fp16,
-        )
-    if not os.path.isfile(clip10_path):
+    assert mosaic_restoration_checkpoint_path.endswith(".pth") or mosaic_restoration_checkpoint_path.endswith(".pt")
+    clip10_path = _find_tensorrt_ep_for_clip(
+        checkpoint_path=mosaic_restoration_checkpoint_path,
+        clip_length=10,
+        fp16=fp16,
+    )
+    if clip10_path is None:
         return None
 
     from lada.models.basicvsrpp.inference import load_model
@@ -62,22 +62,19 @@ def load_models(
     elif mosaic_restoration_model_name.startswith("basicvsrpp"):
         from lada.models.basicvsrpp.inference import load_model
         from lada.restorationpipeline.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-        _model = load_model(mosaic_restoration_config_path, mosaic_restoration_model_path, device, fp16)
-        model_clip10 = _load_small_tensorrt_model(
-            mosaic_restoration_model_path=mosaic_restoration_model_path,
-            mosaic_restoration_config_path=mosaic_restoration_config_path,
-            device=device,
-            fp16=fp16,
-            clip_length=clip_length,
-        )
+        checkpoint_path = mosaic_restoration_model_path
+        weights_path = checkpoint_path
+        if (
+            weights_path.endswith(".pth")
+            and device.type == "cuda"
+            and fp16
+            and (trt_path := _find_tensorrt_ep_for_clip(weights_path, clip_length=clip_length, fp16=fp16)) is not None
+        ):
+            weights_path = trt_path
 
-        mosaic_restoration_model = BasicvsrppMosaicRestorer(
-            _model,
-            device,
-            fp16,
-            clip_length,
-            model_clip10=model_clip10,
-        )
+        _model = load_model(mosaic_restoration_config_path, weights_path, device, fp16)
+        model_clip10 = _load_small_tensorrt_model(checkpoint_path, mosaic_restoration_config_path, device, fp16, clip_length) if weights_path.endswith(".ep") else None
+        mosaic_restoration_model = BasicvsrppMosaicRestorer(_model, device, fp16, clip_length, model_clip10=model_clip10)
         pad_mode = 'zero'
     else:
         raise NotImplementedError()

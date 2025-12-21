@@ -189,7 +189,7 @@ def main():
         print(_("Invalid mosaic restoration model"))
         sys.exit(1)
     if args.compile_mosaic_restoration_model and "basicvsrpp" in mosaic_restoration_model_name:
-        mosaic_restoration_model_path = compile_mosaic_restoration_model(
+        compile_mosaic_restoration_model(
             mosaic_restoration_model_path=mosaic_restoration_model_path,
             clip_length=args.max_clip_length,
             device=args.device,
