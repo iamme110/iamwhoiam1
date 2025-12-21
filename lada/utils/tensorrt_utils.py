@@ -28,11 +28,11 @@ def _approx_max_tensorrt_clip_length(vram_gb: float) -> int:
     if vram_gb < 12:
         return 90
     if vram_gb < 16:
-        return 90
+        return 120
     if vram_gb < 24:
-        return 140
+        return 180
     if vram_gb < 32:
-        return 210
+        return 240
     return 300
 
 def _get_approx_max_tensorrt_clip_length(device: torch.device) -> tuple[float, int]:

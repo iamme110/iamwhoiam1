@@ -64,12 +64,7 @@ def load_models(
         from lada.restorationpipeline.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
         checkpoint_path = mosaic_restoration_model_path
         weights_path = checkpoint_path
-        if (
-            weights_path.endswith(".pth")
-            and device.type == "cuda"
-            and fp16
-            and (trt_path := _find_tensorrt_ep_for_clip(weights_path, clip_length=clip_length, fp16=fp16)) is not None
-        ):
+        if device.type == "cuda" and fp16 and (trt_path := _find_tensorrt_ep_for_clip(weights_path, clip_length=clip_length, fp16=fp16)) is not None:
             weights_path = trt_path
 
         _model = load_model(mosaic_restoration_config_path, weights_path, device, fp16)
