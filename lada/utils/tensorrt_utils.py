@@ -15,6 +15,9 @@ from lada.utils.os_utils import get_gpu_vram_gb
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
+SMALL_TRT_CLIP_LENGTH = 10
+SMALL_TRT_CLIP_LENGTH_TRIGGER = 30
+
 def _approx_max_tensorrt_clip_length(vram_gb: float) -> int:
     if vram_gb < 4:
         return 0
@@ -77,6 +80,19 @@ def _get_compiled_mosaic_restoration_model_path(
     stem = os.path.splitext(os.path.basename(mosaic_restoration_model_path))[0]
     return os.path.join(output_dir, f"{stem}_clip{clip_length}.trt_{precision}.ep")
 
+def get_compiled_mosaic_restoration_model_path_for_clip(
+    checkpoint_path: str,
+    clip_length: int,
+    fp16: bool,
+) -> str:
+    if checkpoint_path.endswith(".ep"):
+        raise ValueError("checkpoint_path must be a .pth/.pt path, not a .ep path")
+    return _get_compiled_mosaic_restoration_model_path(
+        mosaic_restoration_model_path=checkpoint_path,
+        clip_length=clip_length,
+        fp16=fp16,
+    )
+
 def load_ep(checkpoint_path: str, device: torch.device) -> BasicVSRPlusPlusGan:
     logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
     
@@ -103,15 +119,28 @@ def compile_mosaic_restoration_model(
         clip_length=clip_length,
         fp16=fp16,
     )
-    if os.path.isfile(output_path):
+    output_path_small = _get_compiled_mosaic_restoration_model_path(
+        mosaic_restoration_model_path=mosaic_restoration_model_path,
+        clip_length=SMALL_TRT_CLIP_LENGTH,
+        fp16=fp16,
+    )
+    requested_exists = os.path.isfile(output_path)
+    small_exists = os.path.isfile(output_path_small)
+    should_use_small_engine = clip_length > SMALL_TRT_CLIP_LENGTH_TRIGGER
+    if requested_exists and (small_exists or not should_use_small_engine):
         return output_path
 
     vram_gb, approx_max_clip_length = _get_approx_max_tensorrt_clip_length(device)
     if approx_max_clip_length == 0:
         print("Skipping compilation due to low VRAM (< 4 GB). Pass --no-compile-mosaic-restoration-model to suppress this message.")
-        return mosaic_restoration_model_path
+        return output_path if requested_exists else mosaic_restoration_model_path
 
-    if clip_length > approx_max_clip_length:
+    if not fp16:
+        print("Skipping compilation due to FP32 compilation is not recommended for TensorRT. Consider using FP16 instead to save on VRAM and have faster execution times.")
+        return output_path if requested_exists else mosaic_restoration_model_path
+
+    should_compile_requested = not requested_exists
+    if clip_length > approx_max_clip_length and should_compile_requested:
         if interactive and sys.stdin.isatty():
             print(
                 "\n".join(
@@ -131,27 +160,33 @@ def compile_mosaic_restoration_model(
                 flush=True,
             )
             if input().strip().lower() not in {"y", "yes"}:
-                return mosaic_restoration_model_path
+                should_compile_requested = False
         else:
             print(
                 f"Skipping compilation due to low VRAM for requested clip length {clip_length} "
                 f"(VRAM ~{vram_gb:.1f} GB, approx safe max {approx_max_clip_length}). "
                 "Large clip lengths can require significantly more VRAM, take much longer to compile, and may degrade performance on videos with poor mosaic detection."
             )
-            return mosaic_restoration_model_path
+            should_compile_requested = False
 
-    if not fp16:
-        print("Skipping compilation due to FP32 compilation is not recommended for TensorRT. Consider using FP16 instead to save on VRAM and have faster execution times.")
-        return mosaic_restoration_model_path
-            
     from lada.models.basicvsrpp.inference import load_model
 
-    model = load_model(mosaic_restoration_config_path, mosaic_restoration_model_path, device, fp16, clip_length)
-    _compile_basicvsrpp_model(model, device, fp16, output_path, clip_length)
+    dtype = torch.float16 if fp16 else torch.float32
+    should_compile_small = (
+        should_use_small_engine
+        and (not small_exists)
+        and SMALL_TRT_CLIP_LENGTH <= approx_max_clip_length
+    )
+    if should_compile_small or should_compile_requested:
+        model = load_model(mosaic_restoration_config_path, mosaic_restoration_model_path, device, fp16)
+        if should_compile_small:
+            _compile_basicvsrpp_model(model, device, dtype, output_path_small, SMALL_TRT_CLIP_LENGTH)
+        if should_compile_requested and output_path != output_path_small:
+            _compile_basicvsrpp_model(model, device, dtype, output_path, clip_length)
+        del model
 
-    del model
     gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    return output_path
+    return output_path if os.path.isfile(output_path) else mosaic_restoration_model_path
