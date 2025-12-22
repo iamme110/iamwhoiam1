@@ -62,10 +62,12 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         if self.item and self.item.state == ExportItemState.PROCESSING and self._mp4_fast_start_enabled:
             # Watch now
             if self._temp_file_path and os.path.exists(self._temp_file_path):
-                try:
-                    os.startfile(self._temp_file_path)
-                except Exception as e:
-                    logger.error(f"Failed to open file: {e}")
+                temp_file = Gio.File.new_for_path(self._temp_file_path)
+                preview_launcher = Gtk.FileLauncher(
+                    always_ask=False,
+                    file=temp_file
+                )
+                preview_launcher.launch()
             else:
                 logger.error("Temp file not ready or path not set")
             return
