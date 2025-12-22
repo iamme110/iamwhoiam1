@@ -85,6 +85,19 @@ SPDX-License-Identifier: AGPL-3.0
                             </object>
                         </child>
                         <child>
+                            <object class="GtkButton" id="button_preview">
+                                <property name="valign">3</property>
+                                <property name="halign">2</property>
+                                <property name="icon-name">media-playback-start-symbolic</property>
+                                <property name="tooltip-text" translatable="true">Watch the video while it's being restored</property>
+                                <property name="visible">false</property>
+                                <signal name="clicked" handler="on_button_preview_clicked"/>
+                                <style>
+                                    <class name="flat"/>
+                                </style>
+                            </object>
+                        </child>
+                        <child>
                             <object class="GtkButton" id="button_remove">
                                 <property name="valign">3</property>
                                 <property name="halign">2</property>
