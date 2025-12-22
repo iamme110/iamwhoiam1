@@ -69,13 +69,6 @@ SPDX-License-Identifier: AGPL-3.0
                             </object>
                         </child>
                         <child type="end">
-                            <object class="GtkButton" id="button_preview">
-                                <property name="label" translatable="true">Preview</property>
-                                <property name="visible">False</property>
-                                <signal name="clicked" handler="on_button_preview_clicked"/>
-                            </object>
-                        </child>
-                        <child type="end">
                             <object class="GtkButton" id="button_start_export">
                                 <property name="label" translatable="true">Restore</property>
                                 <property name="visible">False</property>
