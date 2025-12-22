@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import logging
+import os
 import pathlib
 import threading
 
@@ -24,6 +25,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
 
     progressbar: Gtk.ProgressBar = Gtk.Template.Child()
     button_open: Gtk.Button = Gtk.Template.Child()
+    button_preview: Gtk.Button = Gtk.Template.Child()
     button_remove: Gtk.Button = Gtk.Template.Child()
     button_show_error: Gtk.Button = Gtk.Template.Child()
 
@@ -34,6 +36,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
         self._progress: ExportItemDataProgress = ExportItemDataProgress()
         self._state: ExportItemState = ExportItemState.QUEUED
         self._subtitle = ""
+        self._temp_file_path: str | None = None
 
         self.set_title(original_file.get_basename())
         self._handler_id_button_open_clicked = None
@@ -73,6 +76,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self.progressbar.set_fraction(1.0)
             self.progressbar.add_css_class("finished")
             self.button_open.set_visible(True)
+            self.button_preview.set_visible(False)
             self.button_remove.set_visible(True)
             self.button_show_error.set_visible(False)
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
@@ -81,6 +85,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self.progressbar.remove_css_class("finished")
             self.progressbar.remove_css_class("failed")
             self.button_open.set_visible(False)
+            self.button_preview.set_visible(False)
             self.button_remove.set_visible(True)
             self.button_show_error.set_visible(False)
             self.progressbar.set_show_text(False)
@@ -88,6 +93,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self.progressbar.remove_css_class("finished")
             self.progressbar.remove_css_class("failed")
             self.button_open.set_visible(False)
+            self.button_preview.set_visible(self._temp_file_path is not None)
             self.button_remove.set_visible(False)
             self.button_show_error.set_visible(False)
             self.progressbar.set_fraction(max(MIN_VISIBLE_PROGRESS_FRACTION, self._progress.fraction))
@@ -97,6 +103,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self.progressbar.remove_css_class("finished")
             self.progressbar.add_css_class("failed")
             self.button_open.set_visible(False)
+            self.button_preview.set_visible(False)
             self.button_remove.set_visible(True)
             self.button_show_error.set_visible(True)
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
@@ -105,6 +112,7 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self.progressbar.remove_css_class("finished")
             self.progressbar.remove_css_class("failed")
             self.button_open.set_visible(False)
+            self.button_preview.set_visible(False)
             self.button_remove.set_visible(False)
             self.button_show_error.set_visible(False)
             self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
@@ -130,6 +138,14 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
             self._restored_file = value
             self._attach_file_launcher_to_open_button()
 
+    @GObject.Property(type=str)
+    def temp_file_path(self):
+        return self._temp_file_path
+
+    @temp_file_path.setter
+    def temp_file_path(self, value: str | None):
+        self._temp_file_path = value
+
     def _attach_file_launcher_to_open_button(self):
         file_launcher = Gtk.FileLauncher(
             always_ask=False,
@@ -146,6 +162,18 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
     @Gtk.Template.Callback()
     def on_button_show_error_clicked(self, button):
         self.emit("show-error-requested")
+
+    @Gtk.Template.Callback()
+    def on_button_preview_clicked(self, button):
+        if self._temp_file_path and os.path.exists(self._temp_file_path):
+            temp_file = Gio.File.new_for_path(self._temp_file_path)
+            preview_launcher = Gtk.FileLauncher(
+                always_ask=False,
+                file=temp_file
+            )
+            preview_launcher.launch()
+        else:
+            logger.error("Temp file not ready or path not set")
 
     @GObject.Signal(name="remove-requested")
     def video_export_requested_signal(self):
