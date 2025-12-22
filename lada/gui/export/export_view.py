@@ -134,6 +134,10 @@ class ExportView(Gtk.Widget):
             # When switching to multi-file mode, ensure the binding is refreshed
             # This helps synchronize model state with UI components
             self.multiple_files_page.bind(self.model)
+            # If there's an in-progress export, update the row with temp file path and state
+            if self.in_progress_idx is not None:
+                self.multiple_files_page.set_temp_file_path_for_row(self.in_progress_idx, self.temp_file_path)
+                # The row state is already PROCESSING from the model binding
             self.update_export_buttons()
 
     def update_export_buttons(self):
