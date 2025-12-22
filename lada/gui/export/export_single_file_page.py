@@ -2,107 +2,224 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import logging
+import os
 import pathlib
+import threading
 
-from gi.repository import Gtk, Gio, GObject
+from gi.repository import Gtk, Gio, GObject, GLib
 
 from lada import LOG_LEVEL
 from lada.gui import utils
+from lada.gui.export import export_utils
 from lada.gui.export.export_item_data import ExportItemData, ExportItemDataProgress, ExportItemState
-from lada.gui.export.export_multiple_files_row import ExportMultipleFilesRow
+from lada.gui.export.export_utils import MIN_VISIBLE_PROGRESS_FRACTION
+from lada.gui.export.spinner_button import SpinnerButton
 
 here = pathlib.Path(__file__).parent.resolve()
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-@Gtk.Template(string=utils.translate_ui_xml(here / 'export_multiple_files_page.ui'))
-class ExportMultipleFilesPage(Gtk.Widget):
-    __gtype_name__ = 'ExportMultipleFilesPage'
+@Gtk.Template(string=utils.translate_ui_xml(here / 'export_single_file_page.ui'))
+class ExportSingleFileStatusPage(Gtk.Widget):
+    __gtype_name__ = 'ExportSingleFileStatusPage'
 
-    list_box: Gtk.ListBox = Gtk.Template.Child()
+    status_page = Gtk.Template.Child()
+    progress_bar: Gtk.ProgressBar = Gtk.Template.Child()
+    button_open: Gtk.Button = Gtk.Template.Child()
+    button_cancel_export: SpinnerButton = Gtk.Template.Child()
+    button_resume_export: SpinnerButton = Gtk.Template.Child()
+    button_pause_export: SpinnerButton = Gtk.Template.Child()
+    button_show_error: Gtk.Button = Gtk.Template.Child()
+    button_start_export: Gtk.Button = Gtk.Template.Child()
+    label_meta_data: Gtk.Label = Gtk.Template.Child()
+    label_file_name: Gtk.Label = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.item: ExportItemData | None = None
+        self._handler_id_button_open_clicked = None
+        self._temp_file_path: str | None = None
+        self._mp4_fast_start_enabled: bool = False
 
-    @GObject.Signal(name="remove-item-requested", arg_types=(GObject.TYPE_INT64,))
-    def stop_export_requested_signal(self, idx: int):
+    @GObject.Signal(name="start-export-requested")
+    def start_export_requested_signal(self, start_export_button: Gtk.Button):
         pass
 
-    @GObject.Signal(name="show-error-requested", arg_types=(GObject.TYPE_INT64,))
-    def pause_export_requested_signal(self, idx: int):
+    @GObject.Signal(name="stop-export-requested")
+    def stop_export_requested_signal(self):
         pass
 
-    def bind(self, model):
-        self.list_box.bind_model(model, self.create_item_for_list_box_fun())
+    @GObject.Signal(name="pause-export-requested")
+    def pause_export_requested_signal(self):
+        pass
 
-    def create_item_for_list_box_fun(self):
-        def fun(obj: ExportItemData):
-            list_row = ExportMultipleFilesRow(
-                original_file=obj.original_file,
-                restored_file=obj.restored_file,
+    @GObject.Signal(name="resume-export-requested")
+    def resume_export_requested_signal(self):
+        pass
+
+    @Gtk.Template.Callback()
+    def on_button_start_export_clicked(self, button_clicked):
+        if self.item and self.item.state == ExportItemState.PROCESSING and self._mp4_fast_start_enabled:
+            # Watch now
+            if self._temp_file_path and os.path.exists(self._temp_file_path):
+                try:
+                    os.startfile(self._temp_file_path)
+                except Exception as e:
+                    logger.error(f"Failed to open file: {e}")
+            else:
+                logger.error("Temp file not ready or path not set")
+            return
+        assert self.item.state == ExportItemState.QUEUED
+
+        self.emit("start-export-requested", button_clicked)
+
+    @Gtk.Template.Callback()
+    def on_button_resume_export_clicked(self, button_clicked):
+        assert self.item.state == ExportItemState.PAUSED
+        self.button_cancel_export.set_sensitive(False)
+        self.button_resume_export.set_sensitive(False)
+        self.button_resume_export.set_spinner_visible(True)
+        self.emit("resume-export-requested")
+
+    @Gtk.Template.Callback()
+    def on_button_pause_export_clicked(self, button_clicked):
+        assert self.item.state == ExportItemState.PROCESSING
+        self.button_cancel_export.set_sensitive(False)
+        self.button_pause_export.set_sensitive(False)
+        self.button_pause_export.set_spinner_visible(True)
+        self.emit("pause-export-requested")
+
+    @Gtk.Template.Callback()
+    def on_button_cancel_export_clicked(self, button_clicked):
+        assert self.item.state in [ExportItemState.PROCESSING, ExportItemState.PAUSED]
+        self.button_cancel_export.set_sensitive(False)
+        self.button_cancel_export.set_spinner_visible(True)
+        self.button_pause_export.set_sensitive(False)
+        self.emit("stop-export-requested")
+
+    @Gtk.Template.Callback()
+    def on_button_show_error_clicked(self, button_clicked):
+        assert self.item.state == ExportItemState.FAILED
+
+        export_utils.open_error_dialog(self, self.item.original_file.get_basename(), self.item.error_details)
+
+    def show_video_export_started(self, save_file: Gio.File, temp_file_path: str | None = None, mp4_fast_start_enabled: bool = False, update_ui: bool = True):
+        self._temp_file_path = temp_file_path
+        self._mp4_fast_start_enabled = mp4_fast_start_enabled
+        if update_ui:
+            self.status_page.set_title(_("Restoring video…"))
+            self.status_page.set_icon_name("cafe-symbolic")
+            self.progress_bar.set_fraction(MIN_VISIBLE_PROGRESS_FRACTION)
+            self.progress_bar.set_visible(True)
+            self.progress_bar.set_show_text(True)
+            self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
+            if mp4_fast_start_enabled:
+                self.button_start_export.set_label("Preview")
+                self.button_start_export.set_sensitive(False)  # Disable until file is ready
+                # Check every second if file exists and has content
+                def check_file_ready():
+                    if self._temp_file_path and os.path.exists(self._temp_file_path) and os.path.getsize(self._temp_file_path) > 0:
+                        self.button_start_export.set_sensitive(True)
+                        return GLib.SOURCE_REMOVE
+                    return GLib.SOURCE_CONTINUE
+                GLib.timeout_add_seconds(1, check_file_ready)
+            else:
+                self.button_start_export.set_visible(False)
+            self.button_pause_export.set_visible(True)
+            self.button_cancel_export.set_visible(True)
+            file_launcher = Gtk.FileLauncher(
+                always_ask=False,
+                file=save_file
             )
-            # Sync UI state with model state when creating the row
-            # Set progress first, then state, so FINISHED state uses correct progress data
-            list_row.progress = obj.progress
-            list_row.state = obj.state
+            if self._handler_id_button_open_clicked is not None:
+                self.button_open.disconnect(self._handler_id_button_open_clicked)
+            self._handler_id_button_open_clicked = self.button_open.connect("clicked", lambda _: file_launcher.launch())
 
-            list_row.connect("remove-requested", lambda *args: self.on_export_item_remove_requested(list_row))
-            list_row.connect("show-error-requested", lambda *args: self.on_show_error_requested(list_row))
-            return list_row
-        return fun
+    def on_video_export_finished(self):
+        self.status_page.set_title(_("Finished video restoration!"))
+        self.status_page.set_icon_name("check-round-outline2-symbolic")
+        self.progress_bar.set_fraction(1.0)
+        self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
+        self.progress_bar.add_css_class("finished")
+        self.progress_bar.set_visible(True)
+        self.button_open.set_visible(True)
+        self.button_start_export.set_visible(False)
+        self.button_pause_export.set_visible(False)
+        self.button_cancel_export.set_visible(False)
 
-    def on_export_item_remove_requested(self, view_item: ExportMultipleFilesRow):
-        for idx, list_item in enumerate(self.list_box):
-            if list_item.original_file == view_item.original_file:
-                self.emit("remove-item-requested", idx)
-                break
+    def on_video_export_failed(self):
+        self.status_page.set_title(_("Restoration failed"))
+        self.status_page.set_icon_name("exclamation-mark-symbolic")
 
-    def on_show_error_requested(self, view_item: ExportMultipleFilesRow):
-        for idx, list_item in enumerate(self.list_box):
-            if list_item.state == ExportItemState.FAILED and list_item.original_file == view_item.original_file:
-                self.emit("show-error-requested", idx)
-                break
+        self.progress_bar.set_visible(False)
+        self.button_start_export.set_visible(True)
+        self.button_start_export.set_label("Restore")
+        self.button_pause_export.set_visible(False)
+        self.button_cancel_export.set_visible(False)
+        self.button_show_error.set_visible(True)
 
-    def on_video_export_finished(self, idx: int):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.progress.complete()
-        view_item.state = ExportItemState.FINISHED
+    def on_video_export_stopped(self):
+        self.status_page.set_title(_("Export video"))
+        self.status_page.set_icon_name("arrow-pointing-away-from-line-right-symbolic")
 
-    def on_video_export_progress(self, idx: int, progress: ExportItemDataProgress):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.progress = progress
+        self.button_start_export.set_sensitive(True)
+        self.button_pause_export.set_sensitive(True)
+        self.button_cancel_export.set_sensitive(True)
+        self.button_cancel_export.set_spinner_visible(False)
 
-    def show_video_export_started(self, idx: int):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.state = ExportItemState.PROCESSING
+        self.button_start_export.set_visible(True)
+        self.button_start_export.set_label("Restore")
+        self.button_pause_export.set_visible(False)
+        self.button_resume_export.set_visible(False)
+        self.button_cancel_export.set_visible(False)
+        self.progress_bar.set_visible(False)
 
-    def on_video_export_stopped(self, idx: int):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.state = ExportItemState.QUEUED
-        view_item.progress = ExportItemDataProgress()
+    def on_video_export_paused(self):
+        self.status_page.set_title(_("Restoration paused"))
+        self.status_page.set_icon_name("pause-large-symbolic")
 
-    def on_video_export_paused(self, idx: int):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.state = ExportItemState.PAUSED
+        self.button_pause_export.set_sensitive(True)
+        self.button_pause_export.set_spinner_visible(False)
+        self.button_cancel_export.set_sensitive(True)
+        if self._mp4_fast_start_enabled:
+            self.button_start_export.set_sensitive(False)
 
-    def on_video_export_resumed(self, idx: int):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.state = ExportItemState.PROCESSING
+        self.button_resume_export.set_visible(True)
+        self.button_pause_export.set_visible(False)
 
-    def on_video_export_failed(self, idx: int):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.state = ExportItemState.FAILED
+    def on_video_export_resumed(self):
+        self.status_page.set_title(_("Restoring video…"))
+        self.status_page.set_icon_name("cafe-symbolic")
 
-    def on_video_export_started(self, restored_files: list[Gio.File]):
-        for idx, restored_file in enumerate(restored_files):
-            view_item = self.list_box.get_row_at_index(idx)
-            view_item.restored_file = restored_file
+        self.button_resume_export.set_sensitive(True)
+        self.button_resume_export.set_spinner_visible(False)
+        self.button_cancel_export.set_sensitive(True)
+        if self._mp4_fast_start_enabled:
+            self.button_start_export.set_sensitive(True)
 
-    def on_restored_file_changed(self, idx: int, restored_file: Gio.File):
-        view_item = self.list_box.get_row_at_index(idx)
-        assert view_item.state == ExportItemState.QUEUED
-        view_item.restored_file = restored_file
+        self.button_resume_export.set_visible(False)
+        self.button_pause_export.set_visible(True)
 
-    def set_temp_file_path_for_row(self, idx: int, temp_file_path: str):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.temp_file_path = temp_file_path
+    def on_video_export_progress(self, progress: ExportItemDataProgress):
+        self.progress_bar.set_fraction(max(MIN_VISIBLE_PROGRESS_FRACTION, progress.fraction))
+        self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
+
+    def on_add_file(self, item: ExportItemData):
+        self.item = item
+        self.status_page.set_title(_("Export video"))
+        self.status_page.set_icon_name("arrow-pointing-away-from-line-right-symbolic")
+        self.progress_bar.set_visible(False)
+        self.button_start_export.set_visible(True)
+        self.button_show_error.set_visible(False)
+        self.button_open.set_visible(False)
+        self.label_meta_data.set_visible(True)
+        self.label_file_name.set_label(self.item.original_file.get_basename())
+
+        def update_label_with_video_metadata():
+            label = export_utils.get_video_metadata_string(self.item.original_file)
+            GLib.idle_add(lambda: self.label_meta_data.set_label(label))
+
+        threading.Thread(target=update_label_with_video_metadata, daemon=True).start()
+
+    def set_button_start_restore_label(self, value: str):
+        self.button_start_export.set_label(value)
