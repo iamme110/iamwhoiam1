@@ -145,6 +145,9 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
     @temp_file_path.setter
     def temp_file_path(self, value: str | None):
         self._temp_file_path = value
+        # Update button visibility if currently processing
+        if self._state == ExportItemState.PROCESSING:
+            self.button_preview.set_visible(self._temp_file_path is not None)
 
     def _attach_file_launcher_to_open_button(self):
         file_launcher = Gtk.FileLauncher(
