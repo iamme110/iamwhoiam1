@@ -39,7 +39,6 @@ class ExportView(Gtk.Widget):
     button_cancel_export: SpinnerButton = Gtk.Template.Child()
     button_resume_export: SpinnerButton = Gtk.Template.Child()
     button_pause_export: SpinnerButton = Gtk.Template.Child()
-    button_preview: Gtk.Button = Gtk.Template.Child()
     stack: Gtk.Stack = Gtk.Template.Child()
     view_switcher: Adw.ViewSwitcher = Gtk.Template.Child()
     config_sidebar = Gtk.Template.Child()
@@ -231,17 +230,6 @@ class ExportView(Gtk.Widget):
         item = self.model[self.in_progress_idx]
         self._start_export(item.original_file, item.restored_file)
 
-    @Gtk.Template.Callback()
-    def on_button_preview_clicked(self, button_clicked):
-        if self.temp_file_path and os.path.exists(self.temp_file_path):
-            temp_file = Gio.File.new_for_path(self.temp_file_path)
-            preview_launcher = Gtk.FileLauncher(
-                always_ask=False,
-                file=temp_file
-            )
-            preview_launcher.launch()
-        else:
-            logger.error("Temp file not ready or path not set")
 
     def on_show_error_requested(self, obj, idx):
         model_item = self.model[idx]
@@ -298,21 +286,10 @@ class ExportView(Gtk.Widget):
         model_item = self.model[idx]
         model_item.state = ExportItemState.PROCESSING
 
-        if self._config.mp4_fast_start and not self.single_file:
-            self.button_preview.set_visible(True)
-            self.button_preview.set_sensitive(False)
-            # Check every second if file exists and has content
-            def check_file_ready():
-                if self.temp_file_path and os.path.exists(self.temp_file_path) and os.path.getsize(self.temp_file_path) > 0:
-                    self.button_preview.set_sensitive(True)
-                    return GLib.SOURCE_REMOVE
-                return GLib.SOURCE_CONTINUE
-            GLib.timeout_add_seconds(1, check_file_ready)
-        else:
-            self.button_preview.set_visible(False)
         if self.single_file:
             self.single_file_page.show_video_export_started(save_file, self.temp_file_path, self._config.mp4_fast_start)
         else:
+            self.multiple_files_page.set_temp_file_path_for_row(idx, self.temp_file_path)
             self.multiple_files_page.show_video_export_started(idx)
 
     def on_video_export_finished(self, obj):
@@ -322,7 +299,6 @@ class ExportView(Gtk.Widget):
         model_item.progress.complete()
         model_item.state = ExportItemState.FINISHED
 
-        self.button_preview.set_visible(False)
         if self.single_file:
             self.single_file_page.on_video_export_finished()
             self.button_start_export.set_visible(False)
@@ -353,7 +329,6 @@ class ExportView(Gtk.Widget):
             self.single_file_page.on_video_export_stopped()
         self.multiple_files_page.on_video_export_stopped(self.in_progress_idx)
 
-        self.button_preview.set_visible(False)
         self.in_progress_idx = None
         self.stop_requested = False
         self.update_export_buttons()
@@ -374,7 +349,6 @@ class ExportView(Gtk.Widget):
             self.single_file_page.on_video_export_paused()
         self.multiple_files_page.on_video_export_paused(self.in_progress_idx)
 
-        self.button_preview.set_visible(False)
         self.update_export_buttons()
         self.button_pause_export.set_sensitive(True)
         self.button_pause_export.set_spinner_visible(False)
@@ -388,9 +362,6 @@ class ExportView(Gtk.Widget):
         assert model_item.state == ExportItemState.PAUSED
         model_item.state = ExportItemState.PROCESSING
 
-        self.button_preview.set_visible(self._config.mp4_fast_start and not self.single_file)
-        if self._config.mp4_fast_start and not self.single_file:
-            self.button_preview.set_sensitive(True)  # File already exists on resume
         if self.single_file:
             self.single_file_page.on_video_export_resumed()
             self.single_file_page.show_video_export_started(model_item.restored_file, self.temp_file_path, self._config.mp4_fast_start, update_ui=False)
