@@ -102,3 +102,7 @@ class ExportMultipleFilesPage(Gtk.Widget):
         view_item = self.list_box.get_row_at_index(idx)
         assert view_item.state == ExportItemState.QUEUED
         view_item.restored_file = restored_file
+
+    def set_temp_file_path_for_row(self, idx: int, temp_file_path: str):
+        view_item = self.list_box.get_row_at_index(idx)
+        view_item.temp_file_path = temp_file_path
