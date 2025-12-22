@@ -19,11 +19,12 @@ def get_subprocess_startup_info():
     startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     return startup_info
 
-def gpu_has_tensor_cores(device_index: int = 0) -> bool:
+def has_modern_nvidia_gpu(device_index: int = 0) -> bool:
     if not torch.cuda.is_available():
         return False
     major, minor = torch.cuda.get_device_capability(device_index)
     if major < 7:
+        # No tensor cores
         return False
     if major > 7:
         return True
@@ -33,7 +34,7 @@ def gpu_has_tensor_cores(device_index: int = 0) -> bool:
     return True
 
 def supports_tensorrt() -> bool:
-    if not gpu_has_tensor_cores():
+    if not has_modern_nvidia_gpu():
         return False
 
     try:
