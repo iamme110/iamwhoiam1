@@ -3,7 +3,6 @@
 
 import logging
 import time
-from dataclasses import dataclass
 from queue import Queue, Full, Empty
 import concurrent.futures as concurrent_futures
 from threading import Thread
@@ -13,11 +12,9 @@ from lada import LOG_LEVEL
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-# Should stop and shutdown ASAP without completing unfinished work
 class StopMarker:
     pass
 
-# Should stop after completing unfinished work
 class EofMarker:
     pass
 
