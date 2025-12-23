@@ -29,6 +29,7 @@ class Scene:
         self.video_meta_data = video_meta_data
         self.frames: list[ImageTensor] = []
         self.masks: list[MaskTensor] = []
+        self.offsets: list[int] = []
         self.boxes: list[Box] = []
         self.frame_start: int | None = None
         self.frame_end: int | None = None
@@ -37,7 +38,7 @@ class Scene:
     def __len__(self):
         return len(self.frames)
 
-    def add_frame(self, frame_num: int, img: ImageTensor, mask: MaskTensor, box: Box):
+    def add_frame(self, frame_num: int, img: ImageTensor, mask: MaskTensor, box: Box, offset_x: int = 0):
         if self.frame_start is None:
             self.frame_start = frame_num
             self.frame_end = frame_num
@@ -48,6 +49,7 @@ class Scene:
         self.frames.append(img)
         self.masks.append(mask)
         self.boxes.append(box)
+        self.offsets.append(offset_x)
 
     def merge_mask_box(self, mask: MaskTensor, box: Box):
         assert self.belongs(box)
@@ -97,10 +99,19 @@ class Clip:
         # crop scene
         for i in range(len(scene)):
             img, mask, box = scene.frames[i], scene.masks[i], scene.boxes[i]
-            cropped_img, cropped_mask, cropped_box, _ = crop_to_box_v3(box, img, mask, (size, size), max_box_expansion_factor=1., border_size=0.06)
+            offset_x = scene.offsets[i]
+            # Adjust box back to local coordinates for cropping
+            t, l, b, r = box
+            local_box = (t, l - offset_x, b, r - offset_x)
+            cropped_img, cropped_mask, cropped_local_box, _ = crop_to_box_v3(local_box, img, mask, (size, size), max_box_expansion_factor=1., border_size=0.06)
+
+            # Map the cropped box back to global coordinates for the Restorer to use
+            ct, cl, cb, cr = cropped_local_box
+            global_cropped_box = (ct, cl + offset_x, cb, cr + offset_x)
+
             self.frames.append(cropped_img)
             self.masks.append(cropped_mask)
-            self.boxes.append(cropped_box)
+            self.boxes.append(global_cropped_box)
             self.crop_shapes.append(cropped_img.shape)
 
         # resize crops to out_size
@@ -163,7 +174,7 @@ class Clip:
         return self.frames[item], self.masks[item], self.boxes[item]
 
 class MosaicDetector:
-    def __init__(self, model: Yolo11SegmentationModel, video_metadata: VideoMetadata, frame_detection_queue: PipelineQueue, mosaic_clip_queue: PipelineQueue, max_clip_length=30, clip_size=256, device: torch.device | None = None, pad_mode='reflect', batch_size=4):
+    def __init__(self, model: Yolo11SegmentationModel, video_metadata: VideoMetadata, frame_detection_queue: PipelineQueue, mosaic_clip_queue: PipelineQueue, max_clip_length=30, clip_size=256, device: torch.device | None = None, pad_mode='reflect', batch_size=4, sbs_mode=False):
         self.model = model
         self.video_meta_data = video_metadata
         self.device = torch.device(device) if device is not None else device
@@ -183,6 +194,7 @@ class MosaicDetector:
         self.inference_thread: threading.Thread | None = None
         self.stop_requested = False
         self.batch_size = batch_size
+        self.sbs_mode = sbs_mode
 
     def start(self, start_ns):
         assert self.frame_feeder_queue.empty()
@@ -260,15 +272,18 @@ class MosaicDetector:
             scenes.remove(completed_scene)
             self.clip_counter += 1
 
-    def _create_or_append_scenes_based_on_prediction_result(self, results: UltralyticsResults, scenes: list[Scene], frame_num):
-        mosaic_detected = len(results.boxes) > 0
-        self.frame_detection_queue.put((frame_num, mosaic_detected))
+    def _create_or_append_scenes_based_on_prediction_result(self, results: UltralyticsResults, scenes: list[Scene], frame_num, offset_x=0):
         if self.stop_requested:
             logger.debug("frame detector worker: frame_detection_queue producer unblocked")
             return
         for i in range(len(results.boxes)):
             mask = convert_yolo_mask_tensor(results.masks[i], results.orig_shape).to(device=results.orig_img.device)
             box = convert_yolo_box(results.boxes[i], results.orig_shape)
+
+            # Apply SBS Offset to the Global Coordinate Space
+            if offset_x > 0:
+                t, l, b, r = box
+                box = (t, l + offset_x, b, r + offset_x)
 
             current_scene = None
             for scene in scenes:
@@ -278,12 +293,14 @@ class MosaicDetector:
                         current_scene.merge_mask_box(mask, box)
                     else:
                         current_scene = scene
-                        current_scene.add_frame(frame_num, results.orig_img, mask, box)
+                        current_scene.add_frame(frame_num, results.orig_img, mask, box, offset_x)
                     break
             if current_scene is None:
                 current_scene = Scene(self.video_meta_data.video_file, self.video_meta_data)
                 scenes.append(current_scene)
-                current_scene.add_frame(frame_num, results.orig_img, mask, box)
+                current_scene.add_frame(frame_num, results.orig_img, mask, box, offset_x)
+
+        return len(results.boxes) > 0
 
     def _frame_feeder_worker(self):
         logger.debug("frame feeder: started")
@@ -294,21 +311,50 @@ class MosaicDetector:
             video_frames_generator = video_reader.frames()
             frame_num = self.start_frame
             while not (eof or self.stop_requested):
-                try:
-                    frames = []
-                    for i in range(self.batch_size):
+                # try:
+                #     frames = []
+                #     for i in range(self.batch_size):
+                #         frame, _ = next(video_frames_generator)
+                #         frames.append(frame)
+                # except StopIteration:
+                #     eof = True
+
+                batch_frames = []
+                batch_metadata = []  # List of tuples (frame_num, offset_x)
+                # Fill the batch
+                while len(batch_frames) < self.batch_size and not eof:
+                    try:
                         frame, _ = next(video_frames_generator)
-                        frames.append(frame)
-                except StopIteration:
-                    eof = True
-                if len(frames) > 0:
-                    frames_batch = self.model.preprocess(frames)
-                    data = (frames_batch, frames, frame_num)
+
+                        if self.sbs_mode:
+                            h, w, c = frame.shape
+                            half_w = w // 2
+                            # Left Eye
+                            frame_l = frame[:, :half_w, :]
+                            batch_frames.append(frame_l)
+                            batch_metadata.append((frame_num, 0))
+
+                            if len(batch_frames) < self.batch_size:
+                                # Right Eye
+                                frame_r = frame[:, half_w:, :]
+                                batch_frames.append(frame_r)
+                                batch_metadata.append((frame_num, half_w))
+                        else:
+                            batch_frames.append(frame)
+                            batch_metadata.append((frame_num, 0))
+
+                        frame_num += 1
+                    except StopIteration:
+                            eof = True
+
+                if len(batch_frames) > 0:
+                    frames_batch = self.model.preprocess(batch_frames)
+                    data = (frames_batch, batch_frames, batch_metadata)
                     self.frame_feeder_queue.put(data)
                     if self.stop_requested:
                         logger.debug("frame feeder worker: frame_feeder_queue producer unblocked")
                         break
-                frame_num += len(frames)
+
                 if eof:
                     self.frame_feeder_queue.put(EOF_MARKER)
                     if self.stop_requested:
@@ -334,11 +380,11 @@ class MosaicDetector:
                     logger.debug("inference worker: inference_queue producer unblocked")
                     break
                 break
-            frames_batch, frames, frame_num = frames_data
+            frames_batch, frames, batch_metadata = frames_data
 
             batch_prediction_results = self.model.inference_and_postprocess(frames_batch, frames)
 
-            self.inference_queue.put((batch_prediction_results, frames_batch, frame_num))
+            self.inference_queue.put((batch_prediction_results, frames_batch, batch_metadata))
             if self.stop_requested:
                 logger.debug("inference worker: inference_queue producer unblocked")
                 break
@@ -350,7 +396,10 @@ class MosaicDetector:
     def _frame_detector_worker(self):
         logger.debug("frame detector worker: started")
         scenes: list[Scene] = []
-        frame_num = self.start_frame
+        frame_num_out = self.start_frame
+
+        sbs_buffer = {} # Buffer for SBS aggregation: { frame_num: { 'count': int, 'detected': bool } }
+
         eof = False
         while not (eof or self.stop_requested):
             inference_data = self.inference_queue.get()
@@ -359,7 +408,7 @@ class MosaicDetector:
                 break
             eof = inference_data is EOF_MARKER
             if eof:
-                self._create_clips_for_completed_scenes(scenes, frame_num, eof=True)
+                self._create_clips_for_completed_scenes(scenes, frame_num_out   , eof=True)
                 self.frame_detection_queue.put(EOF_MARKER)
                 if self.stop_requested:
                     logger.debug("frame detector worker: frame_detection_queue producer unblocked")
@@ -369,13 +418,41 @@ class MosaicDetector:
                     logger.debug("frame detector worker: mosaic_clip_queue producer unblocked")
                     break
             else:
-                batch_prediction_results, preprocessed_frames, _frame_num = inference_data
-                assert frame_num == _frame_num, "frame detector worker out of sync with frame reader"
+                batch_prediction_results, preprocessed_frames, batch_metadata = inference_data
+                assert len(preprocessed_frames) == len(batch_prediction_results) == len(batch_metadata)
                 assert len(preprocessed_frames) == len(batch_prediction_results)
                 for i, results in enumerate(batch_prediction_results):
-                    self._create_or_append_scenes_based_on_prediction_result(results, scenes, frame_num)
-                    self._create_clips_for_completed_scenes(scenes, frame_num, eof=False)
-                    frame_num += 1
+                    current_frame_num, offset_x = batch_metadata[i]
+
+                    # Update Scenes
+                    has_mosaic = self._create_or_append_scenes_based_on_prediction_result(results, scenes, current_frame_num, offset_x)
+
+                    # Aggregate
+                    if self.sbs_mode:
+                        if current_frame_num not in sbs_buffer:
+                            sbs_buffer[current_frame_num] = {'count': 0, 'detected': False}
+
+                        sbs_buffer[current_frame_num]['count'] += 1
+                        if has_mosaic:
+                            sbs_buffer[current_frame_num]['detected'] = True
+
+                        if sbs_buffer[current_frame_num]['count'] == 2: # Have both eyes
+                            final_detected = sbs_buffer[current_frame_num]['detected']
+                            del sbs_buffer[current_frame_num]
+
+                            # Ensure output order
+                            while frame_num_out == current_frame_num:  # Should match
+                                self.frame_detection_queue.put((frame_num_out, final_detected))
+                                if self.stop_requested: break
+                                self._create_clips_for_completed_scenes(scenes, frame_num_out, eof=False)
+                                frame_num_out += 1
+                    else:
+                        # Non-SBS standard path
+                        self.frame_detection_queue.put((current_frame_num, has_mosaic))
+                        if self.stop_requested: break
+                        self._create_clips_for_completed_scenes(scenes, current_frame_num, eof=False)
+                        frame_num_out += 1
+
         if eof:
             logger.debug("frame detector worker: stopped itself, EOF")
         else:
