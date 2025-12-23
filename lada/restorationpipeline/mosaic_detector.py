@@ -24,12 +24,13 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
 class Scene:
-    def __init__(self, file_path: str, video_meta_data: VideoMetadata):
+    def __init__(self, file_path: str, video_meta_data: VideoMetadata, clip_size: int):
         self.file_path = file_path
         self.video_meta_data = video_meta_data
-        self.frames: list[ImageTensor] = []
+        self.clip_size = clip_size
+        self.frames: list[ImageTensor] = [] # Cropped frames
         self.masks: list[MaskTensor] = []
-        self.boxes: list[Box] = []
+        self.boxes: list[Box] = [] # coordinates relative to the original image/frame
         self.frame_start: int | None = None
         self.frame_end: int | None = None
         self._index: int = 0
@@ -45,20 +46,51 @@ class Scene:
             assert frame_num == self.frame_end + 1
             self.frame_end = frame_num
 
-        self.frames.append(img)
-        self.masks.append(mask)
-        self.boxes.append(box)
+        cropped_img, cropped_mask, cropped_box, _ = crop_to_box_v3(
+            box, img, mask, (self.clip_size, self.clip_size),
+            max_box_expansion_factor=1., border_size=0.06
+        )
 
-    def merge_mask_box(self, mask: MaskTensor, box: Box):
+        # Clone to release memory of original image
+        self.frames.append(cropped_img.clone())
+        self.masks.append(cropped_mask.clone())
+        self.boxes.append(cropped_box)
+
+    def merge_mask_box(self, mask: MaskTensor, box: Box, img: ImageTensor):
         assert self.belongs(box)
-        current_box = self.boxes[-1]
+
+        # Calculate new union box
+        current_box = self.boxes[-1]  # This is the box of the EXISTING crop
+
         t = min(current_box[0], box[0])
         l = min(current_box[1], box[1])
         b = max(current_box[2], box[2])
         r = max(current_box[3], box[3])
-        new_box = (t, l, b, r)
-        self.boxes[-1] = new_box
-        self.masks[-1] = torch.maximum(self.masks[-1], mask)
+        new_box_coords = (t, l, b, r)
+
+        cropped_img, new_cropped_mask_part, new_cropped_box, _ = crop_to_box_v3(
+            new_box_coords, img, mask, (self.clip_size, self.clip_size),
+            max_box_expansion_factor=1., border_size=0.06
+        )
+
+        combined_mask = new_cropped_mask_part
+        old_mask = self.masks[-1]
+        old_box = self.boxes[-1]  # t, l, b, r
+
+        offset_t = old_box[0] - new_cropped_box[0]
+        offset_l = old_box[1] - new_cropped_box[1]
+
+        h, w = old_mask.shape[:2]
+
+        # Create padded buffer for old mask
+        padded_old = torch.zeros_like(combined_mask)
+        padded_old[offset_t:offset_t + h, offset_l:offset_l + w, :] = old_mask
+
+        combined_mask = torch.maximum(combined_mask, padded_old)
+
+        self.frames[-1] = cropped_img.clone()
+        self.masks[-1] = combined_mask.clone()
+        self.boxes[-1] = new_cropped_box
 
     def belongs(self, box: Box):
         if len(self.boxes) == 0:
@@ -96,12 +128,10 @@ class Clip:
 
         # crop scene
         for i in range(len(scene)):
-            img, mask, box = scene.frames[i], scene.masks[i], scene.boxes[i]
-            cropped_img, cropped_mask, cropped_box, _ = crop_to_box_v3(box, img, mask, (size, size), max_box_expansion_factor=1., border_size=0.06)
-            self.frames.append(cropped_img)
-            self.masks.append(cropped_mask)
-            self.boxes.append(cropped_box)
-            self.crop_shapes.append(cropped_img.shape)
+            self.frames.append(scene.frames[i])
+            self.masks.append(scene.masks[i])
+            self.boxes.append(scene.boxes[i])
+            self.crop_shapes.append(scene.frames[i].shape)
 
         # resize crops to out_size
         max_width, max_height = self.get_max_width_height()
@@ -275,13 +305,13 @@ class MosaicDetector:
                 if scene.belongs(box):
                     if scene.frame_end == frame_num:
                         current_scene = scene
-                        current_scene.merge_mask_box(mask, box)
+                        current_scene.merge_mask_box(mask, box, results.orig_img)
                     else:
                         current_scene = scene
                         current_scene.add_frame(frame_num, results.orig_img, mask, box)
                     break
             if current_scene is None:
-                current_scene = Scene(self.video_meta_data.video_file, self.video_meta_data)
+                current_scene = Scene(self.video_meta_data.video_file, self.video_meta_data, self.clip_size)
                 scenes.append(current_scene)
                 current_scene.add_frame(frame_num, results.orig_img, mask, box)
 
