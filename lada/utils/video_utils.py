@@ -78,9 +78,10 @@ def VideoReaderOpenCV(*args, **kwargs):
         cap.release()
 
 class VideoReader:
-    def __init__(self, file):
+    def __init__(self, file, fisheye=False):
         self.file = file
         self.container = None
+        self.fisheye = fisheye
 
     def __enter__(self):
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
@@ -94,11 +95,30 @@ class VideoReader:
 
     def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
         self.container.streams.video[0].thread_type = 'AUTO'
+        stream = self.container.streams.video[0]
 
-        for frame in self.container.decode(video=0):
-            nd_frame = frame.to_ndarray(format='bgr24')
-            torch_frame = torch.from_numpy(nd_frame)
-            yield torch_frame, frame.pts
+        if self.fisheye:
+            graph = av.filter.Graph()
+            buffer = graph.add_buffer(template=stream)
+
+            v360 = graph.add("v360", "input=hequirect:output=fisheye:ih_fov=180:iv_fov=180:in_stereo=sbs:out_stereo=sbs")
+
+            sink = graph.add("buffersink")
+            buffer.link_to(v360)
+            v360.link_to(sink)
+            graph.configure()
+
+            for frame in self.container.decode(video=0):
+                graph.push(frame)
+                filtered_frame = graph.pull()
+                nd_frame = filtered_frame.to_ndarray(format='bgr24')
+                torch_frame = torch.from_numpy(nd_frame)
+                yield torch_frame, filtered_frame.pts
+        else:
+            for frame in self.container.decode(video=0):
+                nd_frame = frame.to_ndarray(format='bgr24')
+                torch_frame = torch.from_numpy(nd_frame)
+                yield torch_frame, frame.pts
 
     def seek(self, offset_ns):
         offset = int((offset_ns / 1_000_000_000) * av.time_base)

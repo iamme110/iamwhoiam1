@@ -17,6 +17,7 @@ from lada.utils import visualization_utils
 from lada.restorationpipeline.mosaic_detector import MosaicDetector
 from lada.restorationpipeline.mosaic_detector import Clip
 from lada.models.yolo.yolo11_segmentation_model import Yolo11SegmentationModel
+from lada.utils.vr_projection import FisheyeToVR180
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
@@ -24,7 +25,7 @@ logging.basicConfig(level=LOG_LEVEL)
 class FrameRestorer:
     def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model: Yolo11SegmentationModel, mosaic_restoration_model, preferred_pad_mode,
-                 mosaic_detection=False):
+                 mosaic_detection=False, fisheye=False):
         self.device = torch.device(device)
         self.mosaic_restoration_model_name = mosaic_restoration_model_name
         self.max_clip_length = max_clip_length
@@ -53,12 +54,19 @@ class FrameRestorer:
         # no queue size limit needed, elements are tiny
         self.frame_detection_queue = PipelineQueue(name="frame_detection_queue")
 
+        self.fisheye_to_vr180 = FisheyeToVR180(
+            self.video_meta_data.video_height,
+            self.video_meta_data.video_width,
+        )
+        self.fisheye = fisheye
+
         self.mosaic_detector = MosaicDetector(self.mosaic_detection_model, self.video_meta_data,
                                               frame_detection_queue=self.frame_detection_queue,
                                               mosaic_clip_queue=self.mosaic_clip_queue,
                                               device=self.device,
                                               max_clip_length=self.max_clip_length,
-                                              pad_mode=self.preferred_pad_mode)
+                                              pad_mode=self.preferred_pad_mode,
+                                              fisheye=fisheye)
 
         self.clip_restoration_thread: threading.Thread | None = None
         self.frame_restoration_thread: threading.Thread | None = None
@@ -200,6 +208,81 @@ class FrameRestorer:
 
             blend(blend_mask, clip_img, orig_clip_box)
 
+    def _restore_frame_fisheye(self, frame: ImageTensor, frame_num: int, restored_clips: list[Clip]):
+        """
+        Restores a VR180 frame using clips generated from Fisheye detection.
+        Optimized to avoid full-frame float32 casts.
+        """
+        current_clips = [c for c in restored_clips if c.frame_start == frame_num]
+        if not current_clips:
+            return
+
+        H, W = self.video_meta_data.video_height, self.video_meta_data.video_width
+
+        # Accumulate on Float Canvas (Fisheye Space)
+        fisheye_canvas = torch.zeros((H, W, 3), device=self.device, dtype=torch.float32)
+        fisheye_alpha = torch.zeros((H, W, 1), device=self.device, dtype=torch.float32)
+
+        for clip in current_clips:
+            clip_img, clip_mask, orig_clip_box, orig_crop_shape, pad_after_resize = clip.pop()
+
+            clip_img = image_utils.unpad_image(clip_img, pad_after_resize)
+            clip_mask = image_utils.unpad_image(clip_mask, pad_after_resize)
+            clip_img = image_utils.resize(clip_img, orig_crop_shape[:2])
+            clip_mask = image_utils.resize(clip_mask, orig_crop_shape[:2], interpolation=cv2.INTER_NEAREST)
+
+            if clip_img.shape[0] == 3: clip_img = clip_img.permute(1, 2, 0)
+            clip_img = clip_img.to(device=self.device, dtype=torch.float32)
+
+            # Soft mask for blending
+            mask_soft = mask_utils.create_blend_mask(clip_mask.to(device=self.device).float())
+            if mask_soft.ndim == 2:
+                mask_soft = mask_soft.unsqueeze(-1)
+            elif mask_soft.shape[0] == 1:
+                mask_soft = mask_soft.permute(1, 2, 0)
+
+            # Accumulate
+            t, l, b, r = orig_clip_box
+            # Note: clip_img * mask_soft results in Premultiplied Alpha
+            fisheye_canvas[t:b + 1, l:r + 1] = clip_img * mask_soft
+            fisheye_alpha[t:b + 1, l:r + 1] = mask_soft
+
+        # Warp Canvas to VR180 Space (Batch Processing implicit in efficient warper)
+        mid_w = W // 2
+
+        # Output is (H, W, 3) float32
+        vr180_restoration = self.fisheye_to_vr180(
+            fisheye_canvas[:, :mid_w, :],
+            fisheye_canvas[:, mid_w:, :]
+        )
+        # Output is (H, W, 1) float32
+        vr180_alpha = self.fisheye_to_vr180(
+            fisheye_alpha[:, :mid_w, :],
+            fisheye_alpha[:, mid_w:, :]
+        )
+
+        # Sparse Blending
+        active_mask = vr180_alpha.squeeze(-1) > (0.5 / 255.0)
+
+        if frame.device.type == 'cpu':
+            mask_cpu = active_mask.cpu()
+            # Gather only the background pixels that will change
+            bg_pixels = frame[mask_cpu].to(self.device, non_blocking=True).float()
+        else:
+            bg_pixels = frame[active_mask].float()
+
+        fg_pixels = vr180_restoration[active_mask]
+        alpha_vals = vr180_alpha[active_mask]
+
+        bg_pixels.mul_(1.0 - alpha_vals).add_(fg_pixels)
+
+        bg_pixels.round_().clamp_(0, 255)
+
+        if frame.device.type == 'cpu':
+            frame[mask_cpu] = bg_pixels.to('cpu', dtype=torch.uint8)
+        else:
+            frame[active_mask] = bg_pixels.to(dtype=torch.uint8)
+
     def _restore_clip(self, clip: Clip):
         """
         Restores each contained from of the mosaic clip. If self.mosaic_detection is True will instead draw mosaic detection
@@ -284,7 +367,7 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with video_utils.VideoReader(self.video_meta_data.video_file) as video_reader:
+        with video_utils.VideoReader(self.video_meta_data.video_file, fisheye=False) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
 
@@ -311,7 +394,10 @@ class FrameRestorer:
                     if queue_marker is STOP_MARKER:
                         break
 
-                    self._restore_frame(frame, frame_num, clip_buffer)
+                    if self.fisheye:
+                        self._restore_frame_fisheye(frame, frame_num, clip_buffer)
+                    else:
+                        self._restore_frame(frame, frame_num, clip_buffer)
                     self.frame_restoration_queue.put((frame, frame_pts))
                     if self.stop_requested:
                         logger.debug("frame restoration worker: frame_restoration_queue producer unblocked")

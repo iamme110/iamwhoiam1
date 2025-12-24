@@ -163,7 +163,7 @@ class Clip:
         return self.frames[item], self.masks[item], self.boxes[item]
 
 class MosaicDetector:
-    def __init__(self, model: Yolo11SegmentationModel, video_metadata: VideoMetadata, frame_detection_queue: PipelineQueue, mosaic_clip_queue: PipelineQueue, max_clip_length=30, clip_size=256, device: torch.device | None = None, pad_mode='reflect', batch_size=4):
+    def __init__(self, model: Yolo11SegmentationModel, video_metadata: VideoMetadata, frame_detection_queue: PipelineQueue, mosaic_clip_queue: PipelineQueue, max_clip_length=30, clip_size=256, device: torch.device | None = None, pad_mode='reflect', batch_size=4, fisheye: bool = False):
         self.model = model
         self.video_meta_data = video_metadata
         self.device = torch.device(device) if device is not None else device
@@ -183,6 +183,7 @@ class MosaicDetector:
         self.inference_thread: threading.Thread | None = None
         self.stop_requested = False
         self.batch_size = batch_size
+        self.fisheye = fisheye
 
     def start(self, start_ns):
         assert self.frame_feeder_queue.empty()
@@ -288,7 +289,7 @@ class MosaicDetector:
     def _frame_feeder_worker(self):
         logger.debug("frame feeder: started")
         eof = False
-        with video_utils.VideoReader(self.video_meta_data.video_file) as video_reader:
+        with video_utils.VideoReader(self.video_meta_data.video_file, fisheye=self.fisheye) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
             video_frames_generator = video_reader.frames()
