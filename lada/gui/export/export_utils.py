@@ -32,7 +32,7 @@ def get_video_metadata_string(file: Gio.File):
         fps=f"{meta_data.video_fps_exact:.2f}")
 
 def preview_file_available(file_path: str | None) -> bool:
-    return file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0
+    return file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 4096
 
 def open_error_dialog(parent: Gtk.Widget, filename:str, details:str|None):
     extra_child = None
