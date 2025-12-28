@@ -168,15 +168,13 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
 
     @Gtk.Template.Callback()
     def on_button_preview_clicked(self, button):
-        if self._temp_file_path and os.path.exists(self._temp_file_path):
-            temp_file = Gio.File.new_for_path(self._temp_file_path)
-            preview_launcher = Gtk.FileLauncher(
-                always_ask=False,
-                file=temp_file
-            )
-            preview_launcher.launch()
-        else:
-            logger.error("Temp file not ready or path not set")
+        assert export_utils.preview_file_available(self._temp_file_path)
+        temp_file = Gio.File.new_for_path(self._temp_file_path)
+        preview_launcher = Gtk.FileLauncher(
+            always_ask=False,
+            file=temp_file
+        )
+        preview_launcher.launch()
 
     @GObject.Signal(name="remove-requested")
     def video_export_requested_signal(self):

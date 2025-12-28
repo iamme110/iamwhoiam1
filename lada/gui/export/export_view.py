@@ -368,7 +368,7 @@ class ExportView(Gtk.Widget):
 
         if self.single_file:
             self.single_file_page.on_video_export_resumed()
-            self.single_file_page.show_video_export_started(model_item.restored_file, self.temp_file_path, self._config.mp4_fast_start, update_ui=False)
+            self.single_file_page.show_video_export_started(model_item.restored_file, self.temp_file_path, self._config.mp4_fast_start)
         self.multiple_files_page.on_video_export_resumed(self.in_progress_idx)
 
         self.update_export_buttons()
