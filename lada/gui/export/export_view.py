@@ -131,13 +131,6 @@ class ExportView(Gtk.Widget):
             self.single_file_page.on_add_file(self.model[0])
         else:
             self.stack.set_visible_child_name("multiple-files")
-            # When switching to multi-file mode, ensure the binding is refreshed
-            # This helps synchronize model state with UI components
-            self.multiple_files_page.bind(self.model)
-            # If there's an in-progress export, update the row with temp file path and state
-            if self.in_progress_idx is not None:
-                self.multiple_files_page.set_temp_file_path_for_row(self.in_progress_idx, self.temp_file_path)
-                # The row state is already PROCESSING from the model binding
             self.update_export_buttons()
 
     def update_export_buttons(self):
@@ -148,8 +141,6 @@ class ExportView(Gtk.Widget):
         is_paused = self.resume_info is not None
         is_any_queued_items = count_queued_items > 0
         self.button_start_export.set_visible(not is_in_progress and is_any_queued_items)
-        if not is_in_progress and is_any_queued_items:
-            self.button_start_export.set_sensitive(True)
         self.button_pause_export.set_visible(is_in_progress and not is_paused)
         self.button_resume_export.set_visible(is_paused)
         self.button_cancel_export.set_visible(is_in_progress)
@@ -292,8 +283,7 @@ class ExportView(Gtk.Widget):
 
         if self.single_file:
             self.single_file_page.show_video_export_started(save_file, self.temp_file_path, self._config.mp4_fast_start)
-        else:
-            self.multiple_files_page.show_video_export_started(idx, self.temp_file_path)
+        self.multiple_files_page.show_video_export_started(idx, self.temp_file_path)
 
     def on_video_export_finished(self, obj):
         assert self.in_progress_idx is not None
@@ -304,9 +294,7 @@ class ExportView(Gtk.Widget):
 
         if self.single_file:
             self.single_file_page.on_video_export_finished()
-            self.button_start_export.set_visible(False)
-        else:
-            self.multiple_files_page.on_video_export_finished(self.in_progress_idx)
+        self.multiple_files_page.on_video_export_finished(self.in_progress_idx)
 
         self.continue_next_file()
 

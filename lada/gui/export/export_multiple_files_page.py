@@ -41,8 +41,6 @@ class ExportMultipleFilesPage(Gtk.Widget):
                 original_file=obj.original_file,
                 restored_file=obj.restored_file,
             )
-            # Sync UI state with model state when creating the row
-            # Set progress first, then state, so FINISHED state uses correct progress data
             list_row.progress = obj.progress
             list_row.state = obj.state
 

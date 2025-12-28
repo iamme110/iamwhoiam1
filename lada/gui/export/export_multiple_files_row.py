@@ -55,12 +55,6 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
     @progress.setter
     def progress(self, value: ExportItemDataProgress):
         self._progress = value
-        # If state is FINISHED, always show 100% progress to maintain correct styling
-        if self._state == ExportItemState.FINISHED:
-            fraction = 1.0
-            self.progressbar.set_fraction(fraction)
-            # Don't override text when FINISHED - let state setter handle it
-            return
         fraction = max(MIN_VISIBLE_PROGRESS_FRACTION, self._progress.fraction) if self._state != ExportItemState.QUEUED else self._progress.fraction
         self.progressbar.set_fraction(fraction)
         self.progressbar.set_text(export_utils.get_progressbar_text(self._state, self._progress))
@@ -73,7 +67,6 @@ class ExportMultipleFilesRow(Adw.PreferencesRow):
     def state(self, value: ExportItemState):
         self._state = value
         if value == ExportItemState.FINISHED:
-            # Ensure progress bar shows 100% when finished to display correct green styling
             self.progressbar.set_fraction(1.0)
             self.progressbar.add_css_class("finished")
             self.button_open.set_visible(True)
