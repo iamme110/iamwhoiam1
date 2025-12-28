@@ -72,8 +72,9 @@ class ExportMultipleFilesPage(Gtk.Widget):
         view_item = self.list_box.get_row_at_index(idx)
         view_item.progress = progress
 
-    def show_video_export_started(self, idx: int):
+    def show_video_export_started(self, idx: int, temp_file_path: str | None):
         view_item = self.list_box.get_row_at_index(idx)
+        view_item.temp_file_path = temp_file_path
         view_item.state = ExportItemState.PROCESSING
 
     def on_video_export_stopped(self, idx: int):
@@ -102,7 +103,3 @@ class ExportMultipleFilesPage(Gtk.Widget):
         view_item = self.list_box.get_row_at_index(idx)
         assert view_item.state == ExportItemState.QUEUED
         view_item.restored_file = restored_file
-
-    def set_temp_file_path_for_row(self, idx: int, temp_file_path: str):
-        view_item = self.list_box.get_row_at_index(idx)
-        view_item.temp_file_path = temp_file_path
