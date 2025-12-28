@@ -80,7 +80,7 @@ SPDX-License-Identifier: AGPL-3.0
                                     </object>
                                 </child>
                                 <child>
-                                    <object class="GtkButton" id="button_preview_export">
+                                    <object class="SpinnerButton" id="button_preview_export">
                                         <property name="label" translatable="true">Preview</property>
                                         <property name="visible">false</property>
                                         <signal name="clicked" handler="on_button_preview_export_clicked"/>

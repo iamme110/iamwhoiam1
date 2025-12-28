@@ -30,7 +30,7 @@ class ExportSingleFileStatusPage(Gtk.Widget):
     button_pause_export: SpinnerButton = Gtk.Template.Child()
     button_show_error: Gtk.Button = Gtk.Template.Child()
     button_start_export: Gtk.Button = Gtk.Template.Child()
-    button_preview_export: Gtk.Button = Gtk.Template.Child()
+    button_preview_export: SpinnerButton = Gtk.Template.Child()
     label_meta_data: Gtk.Label = Gtk.Template.Child()
     label_file_name: Gtk.Label = Gtk.Template.Child()
 
@@ -113,10 +113,12 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         if mp4_fast_start_enabled:
             self.button_preview_export.set_visible(True)
             self.button_preview_export.set_sensitive(False)
+            self.button_preview_export.set_spinner_visible(True)
             # Check every second if file exists and has content
             def check_file_ready():
                 if export_utils.preview_file_available(self._temp_file_path):
                     self.button_preview_export.set_sensitive(True)
+                    self.button_preview_export.set_spinner_visible(False)
                     return GLib.SOURCE_REMOVE
                 return GLib.SOURCE_CONTINUE
             GLib.timeout_add_seconds(1, check_file_ready)
