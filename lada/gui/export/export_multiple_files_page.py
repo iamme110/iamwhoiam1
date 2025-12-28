@@ -70,9 +70,10 @@ class ExportMultipleFilesPage(Gtk.Widget):
         view_item = self.list_box.get_row_at_index(idx)
         view_item.progress = progress
 
-    def show_video_export_started(self, idx: int, temp_file_path: str | None):
+    def show_video_export_started(self, idx: int, temp_file_path: str | None, mp4_fast_start_enabled: bool = False):
         view_item = self.list_box.get_row_at_index(idx)
-        view_item.temp_file_path = temp_file_path
+        if mp4_fast_start_enabled:
+            view_item.temp_file_path = temp_file_path
         view_item.state = ExportItemState.PROCESSING
 
     def on_video_export_stopped(self, idx: int):
