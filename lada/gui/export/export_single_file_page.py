@@ -30,6 +30,7 @@ class ExportSingleFileStatusPage(Gtk.Widget):
     button_pause_export: SpinnerButton = Gtk.Template.Child()
     button_show_error: Gtk.Button = Gtk.Template.Child()
     button_start_export: Gtk.Button = Gtk.Template.Child()
+    button_preview_export: SpinnerButton = Gtk.Template.Child()
     label_meta_data: Gtk.Label = Gtk.Template.Child()
     label_file_name: Gtk.Label = Gtk.Template.Child()
 
@@ -37,6 +38,7 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         super().__init__(**kwargs)
         self.item: ExportItemData | None = None
         self._handler_id_button_open_clicked = None
+        self._temp_file_path: str | None = None
 
     @GObject.Signal(name="start-export-requested")
     def start_export_requested_signal(self, start_export_button: Gtk.Button):
@@ -59,6 +61,16 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         assert self.item.state == ExportItemState.QUEUED
 
         self.emit("start-export-requested", button_clicked)
+
+    @Gtk.Template.Callback()
+    def on_button_preview_export_clicked(self, button_clicked):
+        assert self.item.state in [ExportItemState.PROCESSING, ExportItemState.PAUSED]
+        temp_file = Gio.File.new_for_path(self._temp_file_path)
+        preview_launcher = Gtk.FileLauncher(
+            always_ask=False,
+            file=temp_file
+        )
+        preview_launcher.launch()
 
     @Gtk.Template.Callback()
     def on_button_resume_export_clicked(self, button_clicked):
@@ -90,13 +102,20 @@ class ExportSingleFileStatusPage(Gtk.Widget):
 
         export_utils.open_error_dialog(self, self.item.original_file.get_basename(), self.item.error_details)
 
-    def show_video_export_started(self, save_file: Gio.File):
+    def show_video_export_started(self, save_file: Gio.File, temp_file_path: str | None = None, mp4_fast_start_enabled: bool = False):
+        self._temp_file_path = temp_file_path
         self.status_page.set_title(_("Restoring video…"))
         self.status_page.set_icon_name("cafe-symbolic")
         self.progress_bar.set_fraction(MIN_VISIBLE_PROGRESS_FRACTION)
         self.progress_bar.set_visible(True)
         self.progress_bar.set_show_text(True)
         self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
+        if mp4_fast_start_enabled:
+            self.button_preview_export.set_visible(True)
+            self.button_preview_export.set_sensitive(False)
+            self.button_preview_export.set_spinner_visible(True)
+        else:
+            self.button_preview_export.set_visible(False)
         self.button_start_export.set_visible(False)
         self.button_pause_export.set_visible(True)
         self.button_cancel_export.set_visible(True)
@@ -116,17 +135,21 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         self.progress_bar.add_css_class("finished")
         self.progress_bar.set_visible(True)
         self.button_open.set_visible(True)
+        self.button_start_export.set_visible(False)
         self.button_pause_export.set_visible(False)
         self.button_cancel_export.set_visible(False)
+        self.button_preview_export.set_visible(False)
 
     def on_video_export_failed(self):
         self.status_page.set_title(_("Restoration failed"))
         self.status_page.set_icon_name("exclamation-mark-symbolic")
 
         self.progress_bar.set_visible(False)
+        self.button_start_export.set_visible(True)
         self.button_pause_export.set_visible(False)
         self.button_cancel_export.set_visible(False)
         self.button_show_error.set_visible(True)
+        self.button_preview_export.set_visible(False)
 
     def on_video_export_stopped(self):
         self.status_page.set_title(_("Export video"))
@@ -141,6 +164,7 @@ class ExportSingleFileStatusPage(Gtk.Widget):
         self.button_pause_export.set_visible(False)
         self.button_resume_export.set_visible(False)
         self.button_cancel_export.set_visible(False)
+        self.button_preview_export.set_visible(False)
         self.progress_bar.set_visible(False)
 
     def on_video_export_paused(self):
@@ -168,6 +192,10 @@ class ExportSingleFileStatusPage(Gtk.Widget):
     def on_video_export_progress(self, progress: ExportItemDataProgress):
         self.progress_bar.set_fraction(max(MIN_VISIBLE_PROGRESS_FRACTION, progress.fraction))
         self.progress_bar.set_text(export_utils.get_progressbar_text(self.item.state, self.item.progress))
+        if self._temp_file_path is not None and not self.button_preview_export.props.sensitive:
+            ready = export_utils.is_preview_file_ready(self._temp_file_path, progress)
+            self.button_preview_export.set_sensitive(ready)
+            self.button_preview_export.set_spinner_visible(not ready)
 
     def on_add_file(self, item: ExportItemData):
         self.item = item

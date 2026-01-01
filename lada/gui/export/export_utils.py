@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Lada Authors
 # SPDX-License-Identifier: AGPL-3.0
-
+import os
 from dataclasses import dataclass
 from fractions import Fraction
 
@@ -30,6 +30,15 @@ def get_video_metadata_string(file: Gio.File):
         duration=_format_duration(meta_data.duration),
         resolution=f"{meta_data.video_width}x{meta_data.video_height}",
         fps=f"{meta_data.video_fps_exact:.2f}")
+
+def is_preview_file_ready(file_path: str | None, progress: ExportItemDataProgress) -> bool:
+    file_exists = file_path is not None and os.path.exists(file_path)
+    if not file_exists:
+        return False
+    # Checking only progress.frames_done doesn't guarantee that these frames have been written/flushed to the filesystem yet, hence the additional sanity check for file size.
+    ONE_MEGABYTE = 1 * 1024 * 1024
+    file_probably_playable = progress.frames_done > 300 and os.path.getsize(file_path) > ONE_MEGABYTE
+    return file_probably_playable
 
 def open_error_dialog(parent: Gtk.Widget, filename:str, details:str|None):
     extra_child = None
