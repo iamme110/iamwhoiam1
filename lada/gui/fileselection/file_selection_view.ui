@@ -19,7 +19,7 @@ SPDX-License-Identifier: AGPL-3.0
                     <object class="AdwHeaderBar">
                         <property name="title-widget">
                             <object class="AdwWindowTitle">
-                                <property name="title" bind-source="FileSelectionView" bind-property="window-title"/>
+                                <property name="title" translatable="true">Lada</property>
                             </object>
                         </property>
                         <child type="end">
@@ -37,14 +37,29 @@ SPDX-License-Identifier: AGPL-3.0
                         <property name="title" translatable="true">Restore pixelated adult videos</property>
                         <property name="description" translatable="true">Drop one or more videos here</property>
                         <child>
-                            <object class="GtkButton" id="button_open_file">
-                                <property name="label" translatable="true">Open Files…</property>
-                                <signal name="clicked" handler="button_open_file_callback"/>
+                            <object class="GtkBox">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">12</property>
                                 <property name="halign">center</property>
-                                <style>
-                                    <class name="suggested-action"/>
-                                    <class name="pill"/>
-                                </style>
+                                <child>
+                                    <object class="GtkButton" id="button_open_file">
+                                        <property name="label" translatable="true">Open Files…</property>
+                                        <signal name="clicked" handler="button_open_file_callback"/>
+                                        <style>
+                                            <class name="suggested-action"/>
+                                            <class name="pill"/>
+                                        </style>
+                                    </object>
+                                </child>
+                                <child>
+                                    <object class="GtkButton" id="button_watch_url">
+                                        <property name="label" translatable="true">Watch from URL…</property>
+                                        <signal name="clicked" handler="button_watch_url_callback"/>
+                                        <style>
+                                            <class name="pill"/>
+                                        </style>
+                                    </object>
+                                </child>
                             </object>
                         </child>
                     </object>
