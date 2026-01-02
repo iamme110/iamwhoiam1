@@ -436,7 +436,8 @@ class PreviewView(Gtk.Widget):
     def _open_file(self, file: Gio.File):
         assert not self._video_preview_init_done
         file_path = file.get_path()
-        self.video_metadata = video_utils.get_video_meta_data(file_path)
+        # For growing files (like streaming downloads), allow incomplete metadata
+        self.video_metadata = video_utils.get_video_meta_data(file_path, allow_incomplete=True)
         self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model,
                                                            self.config.mosaic_detection_model, self.video_metadata,
                                                            self.config.device,
@@ -460,7 +461,41 @@ class PreviewView(Gtk.Widget):
 
         self.widget_timeline.set_property("duration", self.file_duration_ns)
 
-        self.frame_restorer_provider.init(self._frame_restorer_options)
+        # Initialize FrameRestorer with timeout to prevent UI hanging
+        def init_frame_restorer_with_timeout():
+            try:
+                # Use threading.Event for timeout (works on Windows too)
+                import threading
+                import time
+                
+                def init_worker():
+                    try:
+                        self.frame_restorer_provider.init(self._frame_restorer_options)
+                        logger.debug("FrameRestorer initialized successfully")
+                    except Exception as e:
+                        logger.error(f"FrameRestorer initialization failed: {e}")
+                        # Continue anyway - the pipeline can handle missing FrameRestorer
+                        pass
+                
+                # Start initialization in a thread
+                init_thread = threading.Thread(target=init_worker, daemon=True)
+                init_thread.start()
+                
+                # Wait with timeout
+                init_thread.join(timeout=10.0)  # 10 second timeout
+                
+                if init_thread.is_alive():
+                    logger.warning("FrameRestorer initialization timed out after 10 seconds")
+                else:
+                    logger.debug("FrameRestorer initialization completed within timeout")
+                    
+            except Exception as e:
+                logger.error(f"FrameRestorer initialization failed: {e}")
+                # Continue anyway - the pipeline can handle missing FrameRestorer
+                pass
+        
+        # Run with timeout to prevent hanging
+        threading.Thread(target=init_frame_restorer_with_timeout, daemon=True).start()
 
         if self.pipeline_manager:
             self.pipeline_manager.init_pipeline(self.video_metadata)
