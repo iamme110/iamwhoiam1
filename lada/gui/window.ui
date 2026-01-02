@@ -28,7 +28,6 @@ SPDX-License-Identifier: AGPL-3.0
                         <property name="name">file-selection</property>
                         <property name="child">
                             <object class="FileSelectionView" id="file_selection_view">
-                                <property name="window-title" bind-source="MainWindow" bind-property="title"/>
                             </object>
                         </property>
                     </object>
