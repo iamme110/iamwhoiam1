@@ -28,7 +28,8 @@ class FrameRestorer:
         self.device = torch.device(device)
         self.mosaic_restoration_model_name = mosaic_restoration_model_name
         self.max_clip_length = max_clip_length
-        self.video_meta_data = video_utils.get_video_meta_data(video_file)
+        # For growing files (like streaming downloads), allow incomplete metadata
+        self.video_meta_data = video_utils.get_video_meta_data(video_file, allow_incomplete=True)
         self.mosaic_detection_model = mosaic_detection_model
         self.mosaic_restoration_model = mosaic_restoration_model
         self.preferred_pad_mode = preferred_pad_mode
