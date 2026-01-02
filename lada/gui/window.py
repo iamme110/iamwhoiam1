@@ -21,7 +21,7 @@ here = pathlib.Path(__file__).parent.resolve()
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
-@Gtk.Template(string=utils.translate_ui_xml(here / 'window.ui'))
+@Gtk.Template(string=utils.translate_ui_xml(str(here / 'window.ui')))
 class MainWindow(Adw.ApplicationWindow):
     __gtype_name__ = 'MainWindow'
 
@@ -39,6 +39,13 @@ class MainWindow(Adw.ApplicationWindow):
     @config.setter
     def config(self, value):
         self._config = value
+
+    def get_temp_directory(self) -> str:
+        """Get the configured temp directory for downloads"""
+        if self._config:
+            return self._config.temp_directory
+        import tempfile
+        return tempfile.gettempdir()
 
     @GObject.Property(type=ShortcutsManager)
     def shortcuts_manager(self):
@@ -111,6 +118,9 @@ class MainWindow(Adw.ApplicationWindow):
     def close(self, *args):
         self.preview_view.close()
         self.export_view.close()
+        # Cleanup any downloaded .part files when GUI closes
+        if hasattr(self.file_selection_view, '_cleanup_downloaded_files_on_close'):
+            self.file_selection_view._cleanup_downloaded_files_on_close()
 
     def _resize_window(self, paintable: Gdk.Paintable, playback_controls: Gtk.Widget, headerbar: Gtk.Widget, initial: bool | None = False) -> None:
         # SPDX-SnippetBegin
