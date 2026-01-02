@@ -104,52 +104,137 @@ class VideoReader:
         offset = int((offset_ns / 1_000_000_000) * av.time_base)
         self.container.seek(offset)
 
-def get_video_meta_data(path: str) -> VideoMetadata:
+def get_video_meta_data(path: str, allow_incomplete: bool = False) -> VideoMetadata:
     cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-select_streams', 'v', '-show_streams', '-show_format', path]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=os_utils.get_subprocess_startup_info())
     out, err =  p.communicate()
+    
     if p.returncode != 0:
-        raise Exception(f"error running ffprobe: {err.strip()}. Code: {p.returncode}, cmd: {cmd}")
-    json_output = json.loads(out)
-    json_video_stream = json_output["streams"][0]
-    json_video_format = json_output["format"]
+        if allow_incomplete:
+            # For growing files, try to get basic info with fallback values
+            logger.warning(f"ffprobe failed for growing file {path}: {err.strip()}, using fallback metadata")
+            return _get_fallback_video_metadata(path)
+        else:
+            raise Exception(f"error running ffprobe: {err.strip()}. Code: {p.returncode}, cmd: {cmd}")
+    
+    try:
+        json_output = json.loads(out)
+        json_video_stream = json_output["streams"][0]
+        json_video_format = json_output["format"]
 
-    value = [int(num) for num in json_video_stream['avg_frame_rate'].split("/")]
-    # Can be 0/0 for some files for ffprobe isn't able to determine the number of frames nb_frames
-    average_fps = value[0]/value[1] if len(value) == 2 and value[1] != 0 else value[0]
+        value = [int(num) for num in json_video_stream['avg_frame_rate'].split("/")]
+        # Can be 0/0 for some files for ffprobe isn't able to determine the number of frames nb_frames
+        average_fps = value[0]/value[1] if len(value) == 2 and value[1] != 0 else value[0]
 
-    value = [int(num) for num in json_video_stream['r_frame_rate'].split("/")]
-    fps = value[0]/value[1] if len(value) == 2 else value[0]
-    fps_exact = Fraction(value[0], value[1])
+        value = [int(num) for num in json_video_stream['r_frame_rate'].split("/")]
+        fps = value[0]/value[1] if len(value) == 2 else value[0]
+        fps_exact = Fraction(value[0], value[1])
 
-    value = [int(num) for num in json_video_stream['time_base'].split("/")]
-    time_base = Fraction(value[0], value[1])
+        value = [int(num) for num in json_video_stream['time_base'].split("/")]
+        time_base = Fraction(value[0], value[1])
 
-    frame_count = json_video_stream.get('nb_frames')
-    if not frame_count:
-        # print("frame count ffmpeg", frame_count)
+        frame_count = json_video_stream.get('nb_frames')
+        duration = json_video_stream.get('duration', json_video_format.get('duration'))
+        
+        # For growing files, if duration is not available or very small, estimate it
+        if allow_incomplete and (not duration or float(duration) < 1.0):
+            # Estimate duration based on file size if available
+            try:
+                import os
+                file_size = os.path.getsize(path)
+                # Rough estimation: assume 1MB per minute for typical video
+                estimated_duration = max(60.0, file_size / (1024 * 1024) * 60)  # At least 1 minute
+                duration = estimated_duration
+                logger.info(f"Using estimated duration {duration:.1f}s for growing file {path}")
+            except:
+                duration = 300.0  # Default 5 minutes for growing files
+                
+        if not frame_count and allow_incomplete:
+            # For growing files, estimate frame count from duration and fps
+            frame_count = int(float(duration) * fps) if duration and fps else 0
+            
+        if not frame_count:
+            # print("frame count ffmpeg", frame_count)
+            cap = cv2.VideoCapture(path)
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            cap.release()
+            # print("frame count opencv", frame_count)
+        frame_count=int(frame_count) if frame_count else 0
+
+        start_pts = json_video_stream.get('start_pts')
+
+        metadata = VideoMetadata(
+            video_file=path,
+            video_height=int(json_video_stream['height']),
+            video_width=int(json_video_stream['width']),
+            video_fps=fps,
+            average_fps=average_fps,
+            video_fps_exact=fps_exact,
+            codec_name=json_video_stream['codec_name'],
+            frames_count=frame_count,
+            duration=float(duration) if duration else 0.0,
+            time_base=time_base,
+            start_pts=start_pts
+        )
+        return metadata
+    except (KeyError, IndexError, ValueError) as e:
+        if allow_incomplete:
+            logger.warning(f"Failed to parse ffprobe output for growing file {path}: {e}, using fallback metadata")
+            return _get_fallback_video_metadata(path)
+        else:
+            raise Exception(f"error parsing ffprobe output: {e}")
+
+def _get_fallback_video_metadata(path: str) -> VideoMetadata:
+    """Get fallback metadata for growing files when ffprobe fails"""
+    try:
         cap = cv2.VideoCapture(path)
-        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-        cap.release()
-        # print("frame count opencv", frame_count)
-    frame_count=int(frame_count)
-
-    start_pts = json_video_stream.get('start_pts')
-
-    metadata = VideoMetadata(
-        video_file=path,
-        video_height=int(json_video_stream['height']),
-        video_width=int(json_video_stream['width']),
-        video_fps=fps,
-        average_fps=average_fps,
-        video_fps_exact=fps_exact,
-        codec_name=json_video_stream['codec_name'],
-        frames_count=frame_count,
-        duration=float(json_video_stream.get('duration', json_video_format['duration'])),
-        time_base=time_base,
-        start_pts=start_pts
-    )
-    return metadata
+        if cap.isOpened():
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            cap.release()
+        else:
+            # Default values for unknown files
+            width, height, fps = 1920, 1080, 30.0
+            
+        # For growing files, estimate duration based on file size
+        try:
+            import os
+            file_size = os.path.getsize(path)
+            # Rough estimation: assume 1MB per minute for typical video
+            estimated_duration = max(60.0, file_size / (1024 * 1024) * 60)  # At least 1 minute
+        except:
+            estimated_duration = 300.0  # Default 5 minutes
+            
+        return VideoMetadata(
+            video_file=path,
+            video_height=height,
+            video_width=width,
+            video_fps=fps,
+            average_fps=fps,
+            video_fps_exact=Fraction(int(fps * 1000), 1000),
+            codec_name='unknown',
+            frames_count=int(estimated_duration * fps),
+            duration=estimated_duration,
+            time_base=Fraction(1, 1000000000),
+            start_pts=0
+        )
+    except Exception as e:
+        logger.error(f"Failed to get fallback metadata for {path}: {e}")
+        # Last resort default values
+        return VideoMetadata(
+            video_file=path,
+            video_height=1080,
+            video_width=1920,
+            video_fps=30.0,
+            average_fps=30.0,
+            video_fps_exact=Fraction(30, 1),
+            codec_name='unknown',
+            frames_count=0,
+            duration=300.0,
+            time_base=Fraction(1, 1000000000),
+            start_pts=0
+        )
 
 def offset_ns_to_frame_num(offset_ns, video_fps_exact):
     return int(Fraction(offset_ns, 1_000_000_000) * video_fps_exact)
