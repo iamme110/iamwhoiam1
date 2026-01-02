@@ -115,7 +115,17 @@ class FrameRestorerAppSrc(GstApp.AppSrc):
         caps = Gst.Caps.from_string(
             f"video/x-raw,format=BGR,width={GstPaddingHelpers.get_padded_width(self.video_metadata.video_width)},height={self.video_metadata.video_height},framerate={self.video_metadata.video_fps_exact.numerator}/{self.video_metadata.video_fps_exact.denominator}")
         self.set_property('caps', caps)
-        self.set_property('duration', int((self.video_metadata.frames_count * self.frame_duration_ns)))
+        
+        # For growing files, only set duration if we have a reasonable frame count
+        # If frame count is 0 or very small, let GStreamer handle it as a live stream
+        if self.video_metadata.frames_count > 0:
+            self.set_property('duration', int((self.video_metadata.frames_count * self.frame_duration_ns)))
+            logger.debug(f"appsource set video metadata with duration: {video_metadata.video_file}, frames: {self.video_metadata.frames_count}")
+        else:
+            # For growing files, set a very large duration to avoid premature EOF
+            self.set_property('duration', int(24 * 3600 * Gst.SECOND))  # 24 hours
+            logger.debug(f"appsource set video metadata with unlimited duration for growing file: {video_metadata.video_file}")
+        
         logger.debug(f"appsource set video metadata: {video_metadata.video_file}")
 
     def _on_need_data(self, src, length):
