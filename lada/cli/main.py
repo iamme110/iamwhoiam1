@@ -17,6 +17,7 @@ from lada.utils.os_utils import has_modern_nvidia_gpu
 from lada.restorationpipeline.frame_restorer import FrameRestorer
 from lada.restorationpipeline import load_models
 from lada.utils.video_utils import get_video_meta_data, VideoWriter
+from lada.utils.ffmpeg_utils import FFVideoWriter
 
 def setup_argparser() -> argparse.ArgumentParser:
     examples_header_text = _("Examples:")
@@ -96,7 +97,12 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
     try:
         frame_restorer.start()
         frame_restorer_progressbar.init()
-        with VideoWriter(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
+        match encoder:
+            case "ffmpeg":
+                video_writer_cls = FFVideoWriter
+            case _:
+                video_writer_cls = VideoWriter
+        with video_writer_cls(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
                          video_metadata.video_fps_exact, encoder=encoder, encoder_options=encoder_options,
                          time_base=video_metadata.time_base, mp4_fast_start=mp4_fast_start) as video_writer:
             for elem in frame_restorer:
@@ -106,7 +112,7 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
                     print("Error on export: frame restorer stopped prematurely")
                     break
                 (restored_frame, restored_frame_pts) = elem
-                video_writer.write(restored_frame, restored_frame_pts, bgr2rgb=True)
+                video_writer.write(restored_frame, restored_frame_pts, is_bgr=True)
                 frame_restorer_progressbar.update()
     except (Exception, KeyboardInterrupt) as e:
         success = False
