@@ -586,6 +586,9 @@ class FileSelectionView(Gtk.Widget):
                 
                 # Rename video file to proper name if we detected a video title
                 self._rename_downloaded_video(downloaded_file, video_title if 'video_title' in locals() else None)
+                
+                # Auto-watch after successful download and rename
+                self._auto_watch_after_download()
             
             # Let the final progress callback handle the completion UI update
             # Don't close dialog here - let the callback do it when it processes the final update
@@ -894,6 +897,65 @@ class FileSelectionView(Gtk.Widget):
                 
         except Exception as e:
             logger.warning(f"Error renaming video file: {e}")
+    
+    def _auto_watch_after_download(self):
+        """Automatically trigger Watch Now after successful download and rename"""
+        try:
+            # Only auto-watch if we have a downloaded file and the dialog is still open
+            if not hasattr(self, '_current_downloaded_file') or not self._current_downloaded_file:
+                logger.info("No downloaded file available for auto-watch")
+                return
+                
+            if not hasattr(self, 'progress_dialog') or not self.progress_dialog:
+                logger.info("Progress dialog not open, skipping auto-watch")
+                return
+                
+            # Schedule all GUI operations on the main thread
+            def main_thread_auto_watch():
+                try:
+                    # Close the progress dialog on main thread
+                    self._close_progress_dialog()
+                    
+                    # Small delay to ensure file is properly written and renamed
+                    def delayed_watch():
+                        try:
+                            logger.info("Auto-watching downloaded video after rename")
+                            
+                            # Use the existing "Watch Now" logic
+                            if self._current_downloaded_file:
+                                current_file = pathlib.Path(self._current_downloaded_file)
+                                if current_file.exists():
+                                    file_size = current_file.stat().st_size
+                                    logger.info(f"Auto-watch: File exists, size: {file_size/1024/1024:.1f} MB")
+                                    
+                                    if file_size >= 1024:  # At least 1KB (should be much larger for actual videos)
+                                        gio_file = Gio.File.new_for_path(str(current_file))
+                                        logger.info(f"Auto-watching: {current_file}")
+                                        self.emit("files-selected", [gio_file])
+                                        
+                                        # Store the file path for cleanup when GUI closes
+                                        self._video_file_for_cleanup = str(current_file)
+                                    else:
+                                        logger.info("Auto-watch: File too small")
+                                else:
+                                    logger.info("Auto-watch: Downloaded file doesn't exist")
+                            else:
+                                logger.info("Auto-watch: No downloaded file path available")
+                                
+                        except Exception as e:
+                            logger.warning(f"Error during auto-watch: {e}")
+                    
+                    # Delay auto-watch by 1 second to ensure file operations are complete
+                    GLib.timeout_add_seconds(1, delayed_watch)
+                    
+                except Exception as e:
+                    logger.warning(f"Error in main thread auto-watch: {e}")
+            
+            # Schedule the entire auto-watch process on the main thread
+            GLib.idle_add(main_thread_auto_watch)
+            
+        except Exception as e:
+            logger.warning(f"Error setting up auto-watch: {e}")
     
     @GObject.Signal(name="files-selected", arg_types=(GObject.TYPE_PYOBJECT,))
     def files_opened_signal(self, files: list[Gio.File]):
