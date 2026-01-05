@@ -325,16 +325,23 @@ def _is_likely_supported_site(url: str) -> bool:
     
     return False
 
-def download_video_progressive(url: str, progress_callback=None, temp_directory=None) -> str:
+# Global flag to track download cancellation
+_download_cancelled = False
+
+# Track active processes for cancellation
+_active_processes = {}
+
+def download_video_progressive(url: str, progress_callback=None, temp_directory=None, process_holder=None) -> tuple[str, str | None]:
     """Download video progressively for immediate playback
     
     Args:
         url: Video URL to download
         progress_callback: Optional callback for progress updates
         temp_directory: Optional temp directory path (uses LADA config if not provided)
+        process_holder: Optional reference to store the process object for cancellation
         
     Returns:
-        Path to downloadable file that can be played while downloading
+        Tuple of (path to downloadable file, video title) that can be played while downloading
         
     Raises:
         Exception: If download fails
@@ -345,6 +352,7 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
     import threading
     import re
     from pathlib import Path
+    import time as time_module
     
     # Get temp directory
     if temp_directory:
@@ -354,11 +362,24 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
         temp_base_dir = tempfile.gettempdir()
     
     # Create temporary file in LADA's temp directory
-    temp_dir = Path(temp_base_dir) / f"lada_stream_{int(time.time())}"
+    temp_dir = Path(temp_base_dir) / f"lada_stream_{int(time_module.time())}"
     temp_dir.mkdir(exist_ok=True)
     temp_file = temp_dir / "stream.mp4"
     
+    # Declare global variables
+    global _download_cancelled
+    
+    # Check for cancellation immediately
+    if _download_cancelled:
+        logger.info("Download cancelled before starting")
+        return ("", None)
+    
     try:
+        # Check for cancellation again
+        if _download_cancelled:
+            logger.info("Download cancelled during setup")
+            return ("", None)
+            
         # First, validate the URL format
         if not _is_valid_url(url):
             raise Exception("Invalid URL format. Please enter a complete URL starting with http:// or https://")
@@ -473,6 +494,11 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
         
         logger.info(f"Starting progressive download: {format_id} ({ext} {best_format.get('height', '?')}p)")
         
+        # Check for cancellation before starting process
+        if _download_cancelled:
+            logger.info("Download cancelled before starting process")
+            return ("", None)
+        
         # Start download process with settings optimized to minimize I/O contention
         cmd = [
             "yt-dlp",
@@ -489,6 +515,15 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
         ]
         
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
+        
+        logger.info(f"Created yt-dlp process with PID: {process.pid}")
+        
+        # Store process reference for cancellation
+        if process_holder is not None:
+            process_holder[0] = process
+            logger.info(f"Stored process reference in holder: {process_holder[0]}")
+        else:
+            logger.warning("process_holder is None, cannot store process reference")
         
         # Shared variable for tracking progress across thread
         last_reported_size = [0]  # Use list to make it mutable across thread
@@ -513,7 +548,13 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
                         return
                     
                     for line in iter(process.stdout.readline, ''):
+                        # Check global cancellation flag
+                        if _download_cancelled:
+                            logger.info("Download cancelled via global flag, stopping progress monitoring")
+                            break
+                            
                         if process.poll() is not None:
+                            logger.info("Process terminated, stopping progress monitoring")
                             break
                             
                         line = line.strip()
@@ -617,13 +658,62 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
         
         # Wait for completion
         try:
+            # Check for cancellation during wait
+            if _download_cancelled:
+                logger.info("Download cancelled during wait")
+                # Clean up and return cancellation
+                try:
+                    if temp_dir.exists():
+                        shutil.rmtree(temp_dir)
+                except:
+                    pass
+                return ("", None)
+            
             # Don't use communicate() since we're already reading stdout in the progress thread
             process.wait()
+            
+            # Check for cancellation immediately after wait
+            if _download_cancelled:
+                logger.info("Download cancelled after process completion")
+                # Clean up and return cancellation
+                try:
+                    if temp_dir.exists():
+                        shutil.rmtree(temp_dir)
+                except:
+                    pass
+                return ("", None)
+                
         except Exception as e:
             logger.error(f"Error waiting for process completion: {e}")
+            # Check if this was a cancellation
+            if _download_cancelled:
+                logger.info("Download cancelled during wait exception")
+                return ("", None)
             raise Exception(f"Download process error: {e}")
         
         if process.returncode != 0:
+            # IMMEDIATELY check for cancellation before any other processing
+            if _download_cancelled:
+                logger.info("Download was cancelled by user - returning early")
+                # Clean up and return early without error
+                try:
+                    if temp_dir.exists():
+                        shutil.rmtree(temp_dir)
+                except:
+                    pass
+                return ("", None)  # Return empty string to indicate cancellation
+            
+            # Also check if the process was terminated recently (within last 2 seconds)
+            import time as time_module
+            if hasattr(process, '_termination_time') and time_module.time() - process._termination_time < 2:
+                logger.info("Process was recently terminated - treating as cancellation")
+                try:
+                    if temp_dir.exists():
+                        shutil.rmtree(temp_dir)
+                except:
+                    pass
+                return ("", None)
+            
             # Get any remaining stderr output
             try:
                 stderr_output = process.stderr.read() if process.stderr else ""
@@ -657,13 +747,13 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
                 logger.info("Download completed but file rename failed due to file being accessed by player. This is normal when watching while downloading.")
                 # Check if the final file exists, if not, return the .part file path
                 if temp_file.exists():
-                    return str(temp_file)
+                    return (str(temp_file), video_title)
                 else:
                     # The file was not renamed, return the .part file path
                     part_file = Path(str(temp_file) + ".part")
                     if part_file.exists():
                         logger.info(f"Returning .part file since final file doesn't exist: {part_file}")
-                        return str(part_file)
+                        return (str(part_file), video_title)
                     else:
                         # Fallback to any video file in the directory
                         temp_dir = temp_file.parent
@@ -671,9 +761,9 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
                             for video_file in temp_dir.glob(video_ext):
                                 if video_file.stat().st_size > 1024*1024:  # At least 1MB
                                     logger.info(f"Returning existing video file: {video_file}")
-                                    return str(video_file)
+                                    return (str(video_file), video_title)
                         # If no video file found, return the expected path anyway
-                        return str(temp_file)
+                        return (str(temp_file), video_title)
             
             # Provide specific error messages
             if "rate limit" in error_msg.lower() or "429" in error_msg:
@@ -698,7 +788,7 @@ def download_video_progressive(url: str, progress_callback=None, temp_directory=
                 pass  # Silent error handling
         
         logger.info(f"Progressive download completed: {temp_file}")
-        return str(temp_file)
+        return (str(temp_file), video_title)
         
     except subprocess.CalledProcessError as e:
         logger.error(f"yt-dlp command failed: {e}")
