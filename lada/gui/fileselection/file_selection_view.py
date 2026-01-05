@@ -42,6 +42,13 @@ class FileSelectionView(Gtk.Widget):
         self._video_file_for_cleanup: str | None = None
         self._watch_now_processing: bool = False
         self._autostart_playback: bool = False  # New: autostart playback setting
+        
+        # Process tracking for cancellation
+        self._current_process = None
+        self._process_holder = None  # Store process holder as instance variable
+        self._download_thread = None
+        self._cancelled = False  # Flag to indicate cancellation was requested
+        
         self._setup_gui_close_cleanup()
 
         drop_target = utils.create_video_files_drop_target(lambda files: self.emit("files-selected", files))
@@ -98,9 +105,9 @@ class FileSelectionView(Gtk.Widget):
         
         # Start download in background thread
         import threading
-        thread = threading.Thread(target=self._download_video_progressive, args=(url,))
-        thread.daemon = True
-        thread.start()
+        self._download_thread = threading.Thread(target=self._download_video_progressive, args=(url,))
+        self._download_thread.daemon = True
+        self._download_thread.start()
 
     def _show_progress_dialog(self):
         """Show download progress dialog"""
@@ -293,8 +300,115 @@ class FileSelectionView(Gtk.Widget):
 
     def _cancel_download(self):
         """Cancel the current download"""
-        # Since the download process is managed in utils.py, we need to track it differently
-        # For now, we'll rely on the process being cleaned up when the thread ends
+        import os
+        import signal
+        import time
+        
+        cancel_time = time.time()
+        logger.info(f"Cancelling download at {cancel_time}...")
+        logger.info(f"Current process: {getattr(self, '_current_process', 'None')}")
+        logger.info(f"Process holder: {getattr(self, '_process_holder', 'None')}")
+        
+        # Store cancel time for debugging
+        self._cancel_time = cancel_time
+        
+        # Try to find and cancel the process from multiple sources
+        process_to_cancel = None
+        if hasattr(self, '_current_process') and self._current_process:
+            process_to_cancel = self._current_process
+            logger.info(f"Using tracked process: {process_to_cancel}")
+        elif hasattr(self, '_process_holder') and self._process_holder and len(self._process_holder) > 0 and self._process_holder[0]:
+            process_to_cancel = self._process_holder[0]
+            logger.info(f"Using process holder: {process_to_cancel}")
+        else:
+            logger.warning("No process reference found, will use system-wide kill")
+        
+        # Terminate the yt-dlp process if it exists
+        if process_to_cancel:
+            try:
+                process = process_to_cancel
+                logger.info(f"Process object: {process}, PID: {getattr(process, 'pid', 'No PID')}")
+                
+                # Check if process is still running
+                poll_result = process.poll()
+                logger.info(f"Process poll result: {poll_result}")
+                
+                if poll_result is None:  # Process is still running
+                    logger.info(f"Terminating yt-dlp process PID: {process.pid}")
+                    
+                    # Set global cancellation flag IMMEDIATELY to prevent error dialog
+                    try:
+                        from lada.gui.utils import _download_cancelled
+                        _download_cancelled = True
+                        logger.info("Set global download cancellation flag IMMEDIATELY")
+                    except ImportError:
+                        logger.warning("Could not import global cancellation flag")
+                    
+                    # First, immediately try to kill all yt-dlp processes system-wide
+                    logger.info("First, killing all yt-dlp processes system-wide...")
+                    self._kill_remaining_yt_dlp_processes()
+                    
+                    # Then close stdout to stop progress monitoring immediately
+                    try:
+                        if process.stdout:
+                            logger.info("Closing process stdout to stop progress monitoring")
+                            process.stdout.close()
+                    except Exception as e:
+                        logger.warning(f"Error closing stdout: {e}")
+                    
+                    # Try graceful termination of our tracked process
+                    try:
+                        if os.name == 'nt':  # Windows
+                            logger.info("Using Windows process.terminate()")
+                            process.terminate()
+                        else:  # Unix-like systems
+                            logger.info(f"Using Unix kill with SIGTERM for PID {process.pid}")
+                            os.kill(process.pid, signal.SIGTERM)
+                    except Exception as e:
+                        logger.error(f"Error during graceful termination: {e}")
+                    
+                    # Wait a moment for graceful termination
+                    try:
+                        logger.info("Waiting for graceful termination...")
+                        process.wait(timeout=2)
+                        logger.info("Process terminated gracefully")
+                    except Exception as e:
+                        logger.warning(f"Graceful termination failed: {e}")
+                        # If graceful termination fails, force kill
+                        try:
+                            if os.name == 'nt':  # Windows
+                                logger.info("Using Windows process.kill()")
+                                process.kill()
+                            else:  # Unix-like systems
+                                logger.info(f"Using Unix kill with SIGKILL for PID {process.pid}")
+                                os.kill(process.pid, signal.SIGKILL)
+                            process.wait(timeout=1)
+                            logger.info("Process killed forcefully")
+                        except Exception as e:
+                            logger.error(f"Error during forced kill: {e}")
+                else:
+                    logger.info(f"Process already finished with return code: {poll_result}")
+                
+            except Exception as e:
+                logger.error(f"Error terminating download process: {e}")
+        else:
+            logger.warning("No current process to cancel")
+        
+        # Clear the process reference
+        self._current_process = None
+        
+        # Stop progress monitoring thread
+        self._stop_progress_monitoring = True
+        
+        # Reset download thread
+        if hasattr(self, '_download_thread') and self._download_thread:
+            # Daemon threads will be terminated when the main thread exits
+            self._download_thread = None
+        
+        # Reset progress thread tracking
+        if hasattr(self, '_progress_thread') and self._progress_thread:
+            self._progress_thread = None
+        
         # Reset completion tracking
         self._download_completed = False
         self._completed_file_path = None
@@ -303,6 +417,52 @@ class FileSelectionView(Gtk.Widget):
         if hasattr(self, '_download_temp_directory'):
             # Keep the temp directory for "Watch Now" functionality
             pass
+        
+        # Check for any remaining yt-dlp processes and kill them
+        self._kill_remaining_yt_dlp_processes()
+        
+        # Re-enable the button
+        self.button_watch_url.set_sensitive(True)
+    
+    def _kill_remaining_yt_dlp_processes(self):
+        """Kill any remaining yt-dlp processes"""
+        try:
+            import subprocess
+            
+            # Try to find and kill yt-dlp processes on different platforms
+            if os.name == 'nt':  # Windows
+                try:
+                    # Use taskkill to kill yt-dlp processes
+                    result = subprocess.run(['taskkill', '/F', '/IM', 'yt-dlp.exe'], 
+                                          capture_output=True, text=True)
+                    if result.returncode == 0:
+                        logger.info("Successfully killed yt-dlp processes using taskkill")
+                    else:
+                        logger.warning(f"taskkill failed: {result.stderr}")
+                except Exception as e:
+                    logger.warning(f"Error using taskkill: {e}")
+            else:  # Unix-like systems
+                try:
+                    # Use pkill to kill yt-dlp processes
+                    result = subprocess.run(['pkill', '-f', 'yt-dlp'], 
+                                          capture_output=True, text=True)
+                    if result.returncode == 0:
+                        logger.info("Successfully killed yt-dlp processes using pkill")
+                    else:
+                        logger.warning(f"pkill failed: {result.stderr}")
+                except Exception as e:
+                    logger.warning(f"Error using pkill: {e}")
+                    
+                # Fallback: try to use killall
+                try:
+                    result = subprocess.run(['killall', 'yt-dlp'], 
+                                          capture_output=True, text=True)
+                    if result.returncode == 0:
+                        logger.info("Successfully killed yt-dlp processes using killall")
+                except Exception as e:
+                    logger.warning(f"Error using killall: {e}")
+        except Exception as e:
+            logger.warning(f"Error killing remaining yt-dlp processes: {e}")
 
     def _download_video_progressive(self, url: str):
         """Download video progressively with progress monitoring"""
@@ -345,12 +505,60 @@ class FileSelectionView(Gtk.Widget):
             
             logger.info("About to call download_video_progressive...")
             
+            # Create a list to hold the process reference and store as instance variable
+            self._process_holder = [None]
+            process_holder = self._process_holder
+            logger.info(f"Created process holder: {process_holder}")
+            
             # Start download (it will use the same path we just set)
+            # Reset global cancellation flag for new download
+            try:
+                from lada.gui.utils import _download_cancelled
+                _download_cancelled = False
+                logger.info("Reset global download cancellation flag for new download")
+            except ImportError:
+                pass
+            
             logger.info(f"Starting download with expected path: {expected_file_path}")
-            downloaded_file = download_video_progressive(url, progress_callback, temp_directory)
+            downloaded_file, video_title = download_video_progressive(url, progress_callback, temp_directory, process_holder)
+            
+            # Store the process reference for cancellation
+            self._current_process = process_holder[0]
+            logger.info(f"Stored process reference: {self._current_process}, PID: {getattr(self._current_process, 'pid', 'No PID')}")
+            logger.info(f"Process holder contents after download: {process_holder}")
+            
+            # Verify the process was stored
+            if self._current_process is None:
+                logger.error("WARNING: Process reference is None after download!")
+            else:
+                logger.info(f"Process reference confirmed: PID {self._current_process.pid}")
+                
+                # Log current process status
+                logger.info(f"Current process status at start: {self._current_process.poll()}")
             
             logger.info(f"Download function returned: {downloaded_file}")
             logger.info(f"Type of returned value: {type(downloaded_file)}")
+            
+            # Handle cancellation case
+            if downloaded_file == "":
+                logger.info("Download was cancelled by user")
+                # Reset the global cancellation flag
+                try:
+                    from lada.gui.utils import _download_cancelled
+                    _download_cancelled = False
+                except ImportError:
+                    pass
+                
+                # Close the progress dialog and return without error - all on main thread
+                def cleanup_ui():
+                    try:
+                        self._close_progress_dialog()
+                        self.button_watch_url.set_sensitive(True)
+                    except Exception as e:
+                        logger.warning(f"Error during UI cleanup: {e}")
+                
+                GLib.idle_add(cleanup_ui)
+                return
             
             if downloaded_file is None:
                 logger.error("ERROR: download_video_progressive returned None!")
@@ -375,6 +583,9 @@ class FileSelectionView(Gtk.Widget):
                 downloaded_path = pathlib.Path(downloaded_file)
                 self._download_temp_directory = str(downloaded_path.parent)
                 logger.info(f"Set temp directory to: {self._download_temp_directory}")
+                
+                # Rename video file to proper name if we detected a video title
+                self._rename_downloaded_video(downloaded_file, video_title if 'video_title' in locals() else None)
             
             # Let the final progress callback handle the completion UI update
             # Don't close dialog here - let the callback do it when it processes the final update
@@ -382,6 +593,13 @@ class FileSelectionView(Gtk.Widget):
             if downloaded_file:
                 # Download successful - the final progress callback will handle UI updates
                 logger.info(f"Progressive download completed: {downloaded_file}")
+                
+                # Reset global cancellation flag
+                try:
+                    from lada.gui.utils import _download_cancelled
+                    _download_cancelled = False
+                except ImportError:
+                    pass
                 
                 # Store completion flag for the progress callback to handle
                 self._download_completed = True
@@ -391,7 +609,23 @@ class FileSelectionView(Gtk.Widget):
             else:
                 # Download failed or was cancelled
                 logger.info("Download was cancelled or failed")
-                GLib.idle_add(lambda: self._show_download_error_dialog("Download was cancelled"))
+                
+                # Reset global cancellation flag
+                try:
+                    from lada.gui.utils import _download_cancelled
+                    _download_cancelled = False
+                except ImportError:
+                    pass
+                
+                # Don't show error dialog for cancelled downloads - clean UI on main thread
+                def cleanup_ui():
+                    try:
+                        self._close_progress_dialog()
+                        self.button_watch_url.set_sensitive(True)
+                    except Exception as e:
+                        logger.warning(f"Error during UI cleanup: {e}")
+                
+                GLib.idle_add(cleanup_ui)
                 
         except Exception as e:
             logger.error(f"Failed to download video from URL {url}: {e}")
@@ -401,14 +635,64 @@ class FileSelectionView(Gtk.Widget):
             # Reset completion flag on error
             self._download_completed = False
             
-            # Close progress dialog on error
-            self._close_progress_dialog()
+            # Reset global cancellation flag
+            try:
+                from lada.gui.utils import _download_cancelled
+                _download_cancelled = False
+            except ImportError:
+                pass
+            
+            # Check if this was a cancellation
+            error_msg = str(e).lower()
+            
+            # Check for cancellation indicators in error message or global flag
+            is_cancelled = (
+                error_msg.strip() == "" or  # Empty error
+                "download failed: unknown download error" in error_msg or  # Generic error from process termination (exact match)
+                "progressive download failed" in error_msg and "download failed" in error_msg and "unknown download error" in error_msg or  # Full error message pattern
+                "failed to download video" in error_msg and "unknown download error" in error_msg or  # Alternative pattern
+                "terminated" in error_msg or  # Process termination
+                "killed" in error_msg or  # Process killed
+                "interrupted" in error_msg or  # Process interrupted
+                error_msg.startswith("progressive download failed")  # Starts with our function name
+            )
+            
+            # Also check the global flag as backup
+            try:
+                from lada.gui.utils import _download_cancelled
+                if _download_cancelled:
+                    is_cancelled = True
+                    logger.info("Global cancellation flag detected")
+            except ImportError:
+                pass
+            
+            if is_cancelled:
+                logger.info("Download was cancelled - not showing error dialog")
+                
+                # Clean UI operations on main thread
+                def cleanup_ui():
+                    try:
+                        self._close_progress_dialog()
+                        self.button_watch_url.set_sensitive(True)
+                    except Exception as ui_e:
+                        logger.warning(f"Error during UI cleanup: {ui_e}")
+                
+                GLib.idle_add(cleanup_ui)
+                return
             
             # Capture the error message properly
             error_message = str(e)
-            def show_error():
-                self._show_download_error_dialog(error_message)
-            GLib.idle_add(show_error)
+            
+            # Close progress dialog and show error on main thread
+            def handle_error():
+                try:
+                    self._close_progress_dialog()
+                    self._show_download_error_dialog(error_message)
+                    self.button_watch_url.set_sensitive(True)
+                except Exception as ui_e:
+                    logger.warning(f"Error during error UI handling: {ui_e}")
+            
+            GLib.idle_add(handle_error)
     
     def _get_estimated_video_size(self, url: str) -> float | None:
         """Get estimated video size before download"""
@@ -576,6 +860,41 @@ class FileSelectionView(Gtk.Widget):
         dialog.set_default_response("ok")
         dialog.present()
 
+    def _rename_downloaded_video(self, file_path: str, video_title: str | None):
+        """Rename downloaded video to proper name based on video title"""
+        try:
+            if not video_title:
+                logger.info("No video title available, skipping rename")
+                return
+                
+            original_path = pathlib.Path(file_path)
+            if not original_path.exists():
+                logger.info(f"Original file doesn't exist: {original_path}")
+                return
+                
+            # Clean video title for filename (remove invalid characters)
+            safe_title = "".join(c for c in video_title if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
+            safe_title = safe_title.replace(' ', '_')
+            
+            # Create new filename with same extension
+            new_filename = f"{safe_title}{original_path.suffix}"
+            new_path = original_path.parent / new_filename
+            
+            # Only rename if the new filename is different
+            if new_path != original_path and not new_path.exists():
+                original_path.rename(new_path)
+                logger.info(f"Renamed video from {original_path.name} to {new_filename}")
+                
+                # Update the file path references
+                self._current_downloaded_file = str(new_path)
+                if hasattr(self, '_download_temp_directory'):
+                    self._download_temp_directory = str(new_path.parent)
+            else:
+                logger.info("Skipping rename - file already exists or same name")
+                
+        except Exception as e:
+            logger.warning(f"Error renaming video file: {e}")
+    
     @GObject.Signal(name="files-selected", arg_types=(GObject.TYPE_PYOBJECT,))
     def files_opened_signal(self, files: list[Gio.File]):
         pass
