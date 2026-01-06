@@ -16,7 +16,7 @@ from lada.utils import audio_utils, video_utils
 from lada.utils.os_utils import has_modern_nvidia_gpu, gpu_has_tensor_cores, has_modern_intel_gpu
 from lada.restorationpipeline.frame_restorer import FrameRestorer
 from lada.restorationpipeline import load_models
-from lada.utils.video_utils import get_video_meta_data, VideoWriter
+from lada.utils.video_utils import get_video_meta_data, VideoWriter, get_default_preset_name
 
 def setup_argparser() -> argparse.ArgumentParser:
     examples_header_text = _("Examples:")
@@ -27,11 +27,14 @@ def setup_argparser() -> argparse.ArgumentParser:
     example2_text = _("Restore all videos found in the specified directory and save them to a different folder:")
     example2_command = _("%(prog)s --input path/to/input/dir/ --output /path/to/output/dir/")
 
-    example3_text = _("Use Nvidia hardware-accelerated encoder by selecting a preset:")
+    example3_text = _("Use Nvidia hardware-accelerated encoder (NVENC) by selecting a preset:")
     example3_command = _("%(prog)s --input input.mp4 --encoding-preset hevc-nvidia-gpu-hq")
 
-    example4_text = _("Set encoding parameters directly without using an encoding preset:")
-    example4_command = _("%(prog)s --input input.mp4 --encoder libx265 --encoder-options '-crf 26 -preset fast -x265-params log_level=error'")
+    example4_text = _("Use Intel hardware-accelerated encoder (QSV) by selecting a preset:")
+    example4_command = _("%(prog)s --input input.mp4 --encoding-preset hevc-intel-gpu-hq")
+
+    example5_text = _("Set encoding parameters directly without using an encoding preset:")
+    example5_command = _("%(prog)s --input input.mp4 --encoder libx265 --encoder-options '-crf 26 -preset fast -x265-params log_level=error'")
 
     parser = argparse.ArgumentParser(
         usage=_('%(prog)s [options]'),
@@ -46,6 +49,8 @@ def setup_argparser() -> argparse.ArgumentParser:
                     {example3_command}
                 * {example4_text}
                     {example4_command}
+                * {example5_text}
+                    {example5_command}
             ''')),
         formatter_class=utils.TranslatableHelpFormatter,
         add_help=False)
@@ -62,7 +67,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
 
     export = parser.add_argument_group(_('Export'))
-    export.add_argument('--encoding-preset', type=str, default="hevc-nvidia-gpu-hq" if has_modern_nvidia_gpu() else "h264-cpu-fast", help=_('Select encoding preset by name. Use "--list-encoding-presets" to see what\'s available. Ignored if "--encoder" and "--encoder-options" are used (default: %(default)s)'))
+    export.add_argument('--encoding-preset', type=str, default=get_default_preset_name(), help=_('Select encoding preset by name. Use "--list-encoding-presets" to see what\'s available. Ignored if "--encoder" and "--encoder-options" are used (default: %(default)s)'))
     export.add_argument('--list-encoding-presets', action='store_true', help=_("List available encoding presets and exit"))
     export.add_argument('--encoder', type=str, help=_('Select video encoder by name. Use "--list-encoders" to see what\'s available. (default: %(default)s)'))
     export.add_argument('--list-encoders', action='store_true', help=_("List available encoders and exit"))
@@ -143,9 +148,6 @@ def main():
         sys.exit(0)
     if args.list_devices:
         utils.dump_torch_devices()
-        if hasattr(torch, 'xpu') and torch.xpu.is_available():
-            for i in range(torch.xpu.device_count()):
-                print(f"\t{'xpu:'+str(i):<8}{torch.xpu.get_device_name(i)}")
         sys.exit(0)
     if args.list_encoding_presets:
         utils.dump_available_encoding_presets()
@@ -157,25 +159,19 @@ def main():
         argparser.print_help()
         sys.exit(0)
 
-    device_str = args.device
-    if device_str == "auto":
-        if hasattr(torch, 'xpu') and torch.xpu.is_available():
-            device_str = "xpu"
-            print(f"Auto Device: {torch.xpu.get_device_name(0)}")
-        elif torch.cuda.is_available():
-            device_str = "cuda"
-            print(f"Auto Device: {torch.cuda.get_device_name(0)}")
-        else:
-            device_str = "cpu"
-            print("Auto Device: CPU ")
-
-    if device_str.startswith("cuda") and not torch.cuda.is_available():
-        print(_("GPU {device} selected but CUDA is not available").format(device=device_str))
+    try:
+        device_str = utils.get_optimal_device(args.device)
+    except RuntimeError as e:
+        print(f"Error: {e}")
         sys.exit(1)
-    if device_str.startswith("xpu") and (not hasattr(torch, 'xpu') or not torch.xpu.is_available()):
-        print(_("XPU {device} selected but XPU is not available").format(device=device_str))
-        sys.exit(1)
-    
+    device = torch.device(device_str)
+    device_name = "CPU"
+    if device.type == 'xpu':
+        device_name = torch.xpu.get_device_name(0)
+    elif device.type == 'cuda':
+        device_name = torch.cuda.get_device_name(0)
+    print(f"Running on: {device_name}")
+   
     if "{orig_file_name}" not in args.output_file_pattern or "." not in args.output_file_pattern:
         print(_("Invalid file name pattern. It must include the template string '{orig_file_name}' and a file extension"))
         sys.exit(1)
