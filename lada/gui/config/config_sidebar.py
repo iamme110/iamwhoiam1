@@ -113,7 +113,7 @@ class ConfigSidebar(Gtk.Box):
             active = False
             if preset.name == config.encoding_preset_name:
                 active = True
-            action_row, radio_button = self.get_action_row_for_existing_preset(preset, active=active, localized_description=True)
+            action_row, radio_button = self.get_action_row_for_existing_preset(preset, active=active)
             self.add_preset_row(action_row, radio_button)
 
         self._create_preset_action_row = self.get_action_row_for_add_new_preset()
@@ -410,7 +410,7 @@ class ConfigSidebar(Gtk.Box):
         updated_presets.add(preset)
         self._config.custom_encoding_presets = updated_presets
 
-        action_row, radio_button = self.get_action_row_for_existing_preset(preset, active=True, localized_description=False)
+        action_row, radio_button = self.get_action_row_for_existing_preset(preset, active=True)
         self.expander_row_encoding_presets.remove(self._create_preset_action_row)
         self.add_preset_row(action_row, radio_button)
         self.expander_row_encoding_presets.add_row(self._create_preset_action_row)
@@ -452,9 +452,9 @@ class ConfigSidebar(Gtk.Box):
         active_button.connect("toggled", on_toggled, selected_model)
         return [self._get_action_row_for_model(modelfile, active_button, selected_model, on_toggled) for modelfile in ModelFiles.get_detection_models()]
 
-    def get_action_row_for_existing_preset(self, preset: EncodingPreset, active: bool, localized_description: bool) -> tuple[Adw.ActionRow, Gtk.CheckButton]:
+    def get_action_row_for_existing_preset(self, preset: EncodingPreset, active: bool) -> tuple[Adw.ActionRow, Gtk.CheckButton]:
         action_row = Adw.ActionRow.new()
-        action_row.set_title(_(preset.description) if localized_description else preset.description)
+        action_row.set_title(preset.description)
 
         radio_button = Gtk.CheckButton.new()
         radio_button.set_group(self._active_preset_button_group)
