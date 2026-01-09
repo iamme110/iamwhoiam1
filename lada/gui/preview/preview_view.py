@@ -434,11 +434,12 @@ class PreviewView(Gtk.Widget):
                 self.seek_preview_popover.clear_thumbnail()
                 for id in self.pipeline_connection_handler_ids: self.pipeline_manager.handler_unblock(id)
             video_metadata = video_utils.get_video_meta_data(file.get_path())
-            GLib.idle_add(lambda: self._open_file(video_metadata))
+            subtitle_path = self._find_subtitle_file(video_metadata.video_file)
+            GLib.idle_add(lambda: self._open_file(video_metadata, subtitle_path))
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _open_file(self, video_metadata: video_utils.VideoMetadata):
+    def _open_file(self, video_metadata: video_utils.VideoMetadata, subtitle_path: str | None):
         assert not self._video_preview_init_done
         self.video_metadata = video_metadata
         self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model,
@@ -465,8 +466,6 @@ class PreviewView(Gtk.Widget):
         self.widget_timeline.set_property("duration", self.file_duration_ns)
 
         self.frame_restorer_provider.init(self._frame_restorer_options)
-
-        subtitle_path = self._find_subtitle_file(self.video_metadata.video_file)
 
         if self.pipeline_manager:
             self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
