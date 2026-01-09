@@ -118,9 +118,25 @@ def get_video_meta_data(path: str) -> VideoMetadata:
     # Can be 0/0 for some files for ffprobe isn't able to determine the number of frames nb_frames
     average_fps = value[0]/value[1] if len(value) == 2 and value[1] != 0 else value[0]
 
-    value = [int(num) for num in json_video_stream['r_frame_rate'].split("/")]
-    fps = value[0]/value[1] if len(value) == 2 else value[0]
-    fps_exact = Fraction(value[0], value[1])
+    # For VFR videos, avg_frame_rate is more reliable than r_frame_rate.
+    # r_frame_rate is often a default/placeholder value from the container.
+    # Use avg_frame_rate as the primary FPS.
+    avg_value = [int(num) for num in json_video_stream['avg_frame_rate'].split("/")]
+    fps_exact = Fraction(avg_value[0], avg_value[1]) if len(avg_value) == 2 and avg_value[1] != 0 else Fraction(avg_value[0], 1)
+    fps = float(fps_exact)
+
+    # Fallback: calculate FPS from duration and frame count if available
+    # This is more reliable for VFR videos where container FPS values may be incorrect
+    duration = float(json_video_stream.get('duration', json_video_format.get('duration', 0)))
+    frame_count_str = json_video_stream.get('nb_frames')
+    if frame_count_str:
+        frame_count = int(frame_count_str)
+        if duration > 0:
+            calculated_fps = frame_count / duration
+            # Use calculated FPS if it's more reasonable (within 50% of container values)
+            if fps > 0 and 0.5 * fps <= calculated_fps <= 2.0 * fps:
+                fps = calculated_fps
+                fps_exact = Fraction(calculated_fps).limit_denominator(1000000)
 
     value = [int(num) for num in json_video_stream['time_base'].split("/")]
     time_base = Fraction(value[0], value[1])
