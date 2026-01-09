@@ -45,7 +45,6 @@ class PipelineManager(GObject.Object):
         self.subtitle_filesrc: Gst.Element | None = None
         self.subtitle_textoverlay: Gst.Element | None = None
         self.has_subtitles: bool = False
-        self.subtitle_path: str | None = None
 
     @GObject.Property(type=Gdk.Paintable)
     def paintable(self):
@@ -127,7 +126,6 @@ class PipelineManager(GObject.Object):
             self.video_metadata = video_metadata
             self.has_audio = audio_utils.get_audio_codec(self.video_metadata.video_file) is not None
             self.has_subtitles = subtitle_path is not None
-            self.subtitle_path = subtitle_path
 
             bus = self.pipeline.get_bus()
             bus.add_watch(GLib.PRIORITY_DEFAULT, self.on_bus_msg)
@@ -136,7 +134,6 @@ class PipelineManager(GObject.Object):
             if self.has_audio:
                 self.pipeline_add_audio()
             if self.has_subtitles:
-                assert subtitle_path is not None
                 try:
                     self.pipeline_add_subtitles(subtitle_path)
                 except Exception as e:
@@ -307,6 +304,9 @@ class PipelineManager(GObject.Object):
         self.pipeline_subtitle_elements = [filesrc, subparse, textoverlay]
 
     def pipeline_remove_subtitles(self):
+        for subtitle_element in self.pipeline_subtitle_elements:
+            subtitle_element.set_state(Gst.State.NULL)
+
         # Unlink the subtitle pipeline and restore original video pipeline
         try:
             self.video_buffer_queue.unlink(self.subtitle_textoverlay)
@@ -314,10 +314,7 @@ class PipelineManager(GObject.Object):
             self.video_buffer_queue.link(self.video_sink)
         except Exception as e:
             # This could be fine if there was an error while adding subtitle elements and these aren't actually linked
-            logger.debug("Couldn't unlink subtitle elements", e)
-
-        for subtitle_element in self.pipeline_subtitle_elements:
-            subtitle_element.set_state(Gst.State.NULL)
+            logger.debug("Couldn't unlink subtitle elements",e )
 
         for subtitle_element in self.pipeline_subtitle_elements:
             self.pipeline.remove(subtitle_element)
@@ -350,21 +347,21 @@ class PipelineManager(GObject.Object):
             self.pipeline_remove_audio()
 
         # Handle subtitles
-        if subtitle_path != self.subtitle_path:
-            self.pipeline.set_state(Gst.State.NULL)
-            if self.has_subtitles:
-                self.pipeline_remove_subtitles()
-            self.has_subtitles = subtitle_path is not None
-            if self.has_subtitles:
-                assert subtitle_path is not None
-                try:
+        subtitle_pipeline_already_added = self.has_subtitles
+        self.has_subtitles = subtitle_path is not None
+
+        if self.has_subtitles:
+            try:
+                if subtitle_pipeline_already_added:
+                    self.subtitle_filesrc.set_property('location', subtitle_path)
+                else:
                     self.pipeline_add_subtitles(subtitle_path)
-                except Exception as e:
-                    logger.error("Error while adding subtitle. Continue without subs.", e)
-                    self.pipeline_remove_subtitles()
-                    self.has_subtitles = False
-            self.subtitle_path = subtitle_path
-            self.pipeline.set_state(Gst.State.PLAYING)
+            except Exception as e:
+                logger.error("Error while adding subtitle. Continue without subs.", e)
+                self.pipeline_remove_subtitles()
+                self.has_subtitles = False
+        elif subtitle_pipeline_already_added:
+            self.pipeline_remove_subtitles()
 
     def reinit_appsrc(self):
         self.frame_restorer_app_src.set_property('video-metadata', self.video_metadata)
