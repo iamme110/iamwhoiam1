@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from lada.utils import Box, Mask, box_utils
 from lada.utils import image_utils
+from torchvision.transforms.functional import gaussian_blur
 
 def get_box(mask: Mask) -> Box:
     points = cv2.findNonZero(mask)
@@ -87,6 +88,8 @@ def create_blend_mask(crop_mask: torch.Tensor):
     blend = F.pad(inner, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
     mask4 = (mask > 0)
     blend = torch.maximum(mask4, blend)
+    feathered = gaussian_blur(mask4.unsqueeze(0).unsqueeze(0), [blur_size, blur_size], [3.0, 3.0]).squeeze(0).squeeze(0)
+    blend = torch.minimum(feathered, blend)
     kernel = torch.tensor(1.0 / (blur_size**2), device=blend.device, dtype=blend.dtype).expand(1, blur_size, blur_size)
     blend = image_utils.filter2D(blend.unsqueeze(0).unsqueeze(0), kernel).squeeze(0).squeeze(0)
     assert blend.shape == mask.shape
