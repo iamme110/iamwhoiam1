@@ -111,37 +111,27 @@ def dump_torch_devices():
     print(_("Available devices:"))
     devices = ["cpu"]
     descriptions = ["CPU"]
+
     if torch.cuda.is_available():
         cuda_device_count = torch.cuda.device_count()
         for i in range(cuda_device_count):
             devices.append(f"cuda:{i}")
             descriptions.append(torch.cuda.get_device_properties(i).name)
+    
     if hasattr(torch, 'xpu') and torch.xpu.is_available():
         xpu_device_count = torch.xpu.device_count()
         for i in range(xpu_device_count):
             devices.append(f"xpu:{i}")
-            descriptions.append(torch.xpu.get_device_name(i))
+            try:
+                name = torch.xpu.get_device_name(i)
+            except:
+                name = "Intel XPU Device"
+            descriptions.append(name)
+
     table = [[_("Device"), _("Description")]]
     for device, description in zip(devices, descriptions):
         table.append([device, description])
     _dump_table(table)
-
-def get_optimal_device(device_str: str) -> str:
-    if device_str == "auto":
-        if hasattr(torch, 'xpu') and torch.xpu.is_available():
-            final_device = "xpu"
-        elif torch.cuda.is_available():
-            final_device = "cuda"
-        else:
-            final_device = "cpu"
-        return final_device
-
-    if device_str.startswith("cuda") and not torch.cuda.is_available():
-        raise RuntimeError(_("GPU {device} selected but CUDA is not available").format(device=device_str))
-    if device_str.startswith("xpu") and (not hasattr(torch, 'xpu') or not torch.xpu.is_available()):
-        raise RuntimeError(_("XPU {device} selected but XPU is not available").format(device=device_str))
-
-    return device_str
 
 def dump_available_detection_models():
     modelfiles = ModelFiles.get_detection_models()

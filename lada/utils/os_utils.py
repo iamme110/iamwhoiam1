@@ -3,8 +3,11 @@
 
 import subprocess
 import sys
+import av
+import io
 
 import torch
+from functools import cache
 
 def get_subprocess_startup_info():
     if sys.platform != "win32":
@@ -32,23 +35,53 @@ def has_modern_intel_gpu(device_index: int = 0) -> bool:
         return False
     if device_index >= torch.xpu.device_count():
         return False
-
     return True
 
-def gpu_has_tensor_cores(device: torch.device = None) -> bool:
+def gpu_has_fp16_acceleration(device: torch.device = None) -> bool:
     if device is None:
         if has_modern_intel_gpu(0):
             return True
         if torch.cuda.is_available():
             return has_modern_nvidia_gpu(0)
         return False
-
     if device.type == 'xpu':
         idx = device.index if device.index is not None else 0
         return has_modern_intel_gpu(idx)
-        
     if device.type == 'cuda':
         idx = device.index if device.index is not None else 0
         return has_modern_nvidia_gpu(idx)
-    
     return False
+
+def default_device() -> str:
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        return "cuda:0"
+    if hasattr(torch, 'xpu') and torch.xpu.is_available() and torch.xpu.device_count() > 0:
+        return "xpu:0"
+    return "cpu"
+
+def has_nvidia_hardware() -> bool:
+    return torch.cuda.is_available()
+
+def has_intel_arc_hardware() -> bool:
+    return hasattr(torch, 'xpu') and torch.xpu.is_available()
+
+@cache
+# UHD 630/750/770
+def _probe_qsv_encoder() -> bool:
+    try:
+        mem_file = io.BytesIO()
+        with av.open(mem_file, mode='w', format='null') as container:
+            stream = container.add_stream('h264_qsv', rate=30)
+            stream.width = 64
+            stream.height = 64
+            stream.pix_fmt = 'nv12'
+            dummy_frame = av.VideoFrame(64, 64, format='nv12')
+            stream.encode(dummy_frame)
+            return True
+    except Exception:
+        return False
+
+def has_intel_qsv_hardware() -> bool:
+    if has_intel_arc_hardware():
+        return True
+    return _probe_qsv_encoder()

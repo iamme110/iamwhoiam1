@@ -13,12 +13,11 @@ import torch
 from lada import VERSION, ModelFiles
 from lada.cli import utils
 from lada.utils import audio_utils, video_utils
-from lada.utils.os_utils import has_modern_nvidia_gpu, gpu_has_tensor_cores, has_modern_intel_gpu
+from lada.utils.os_utils import has_modern_nvidia_gpu,gpu_has_fp16_acceleration, default_device
 from lada.restorationpipeline.frame_restorer import FrameRestorer
 from lada.restorationpipeline import load_models
 from lada.utils.threading_utils import STOP_MARKER, ErrorMarker
-from lada.utils.video_utils import get_video_meta_data, VideoWriter
-
+from lada.utils.video_utils import get_video_meta_data, VideoWriter, get_default_preset_name
 
 def setup_argparser() -> argparse.ArgumentParser:
     examples_header_text = _("Examples:")
@@ -29,14 +28,11 @@ def setup_argparser() -> argparse.ArgumentParser:
     example2_text = _("Restore all videos found in the specified directory and save them to a different folder:")
     example2_command = _("%(prog)s --input path/to/input/dir/ --output /path/to/output/dir/")
 
-    example3_text = _("Use Nvidia hardware-accelerated encoder (NVENC) by selecting a preset:")
+    example3_text = _("Use Nvidia hardware-accelerated encoder by selecting a preset:")
     example3_command = _("%(prog)s --input input.mp4 --encoding-preset hevc-nvidia-gpu-hq")
 
-    example4_text = _("Use Intel hardware-accelerated encoder (QSV) by selecting a preset:")
-    example4_command = _("%(prog)s --input input.mp4 --encoding-preset hevc-intel-gpu-hq")
-
-    example5_text = _("Set encoding parameters directly without using an encoding preset:")
-    example5_command = _("%(prog)s --input input.mp4 --encoder libx265 --encoder-options '-crf 26 -preset fast -x265-params log_level=error'")
+    example4_text = _("Set encoding parameters directly without using an encoding preset:")
+    example4_command = _("%(prog)s --input input.mp4 --encoder libx265 --encoder-options '-crf 26 -preset fast -x265-params log_level=error'")
 
     parser = argparse.ArgumentParser(
         usage=_('%(prog)s [options]'),
@@ -51,8 +47,6 @@ def setup_argparser() -> argparse.ArgumentParser:
                     {example3_command}
                 * {example4_text}
                     {example4_command}
-                * {example5_text}
-                    {example5_command}
             ''')),
         formatter_class=utils.TranslatableHelpFormatter,
         add_help=False)
@@ -62,8 +56,8 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_general.add_argument('--output', type=str, help=_('Path used to save output file(s). If path is a directory then file name will be chosen automatically (see --output-file-pattern). If no output path was given then the directory of the input file will be used'))
     group_general.add_argument('--temporary-directory', type=str, default=tempfile.gettempdir(), help=_('Directory for temporary video files during restoration process. Alternatively, you can use the environment variable TMPDIR. (default: %(default)s)'))
     group_general.add_argument('--output-file-pattern', type=str, default="{orig_file_name}.restored.mp4", help=_("Pattern used to determine output file name(s). Used when input is a directory, or a file but no output path was specified. Must include the placeholder '{orig_file_name}'. (default: %(default)s)"))
-    group_general.add_argument('--device', type=str, default="auto", help=_('Device used for running Restoration and Detection models. Use "auto", "cpu", "cuda", or "xpu". If set to "auto", will automatically select the best available device in order: XPU > CUDA > CPU. If you have multiple GPUs you can select a specific one via index e.g. "cuda:0" (default: %(default)s)'))
-    group_general.add_argument('--fp16', action=argparse.BooleanOptionalAction, default=gpu_has_tensor_cores(), help=_("Reduces VRAM usage and may increase speed on modern GPUs with tensor cores, with negligible quality difference. (default: %(default)s)"))
+    group_general.add_argument('--device', type=str, default=default_device(), help=_('Device used for running Restoration and Detection models. Use "--list-devices" to see what\'s available (default: %(default)s)'))
+    group_general.add_argument('--fp16', action=argparse.BooleanOptionalAction, default=gpu_has_fp16_acceleration(), help=_("Reduces VRAM usage and may increase speed on modern GPUs (with FP16 support), with negligible quality difference. (default: %(default)s)"))
     group_general.add_argument('--list-devices', action='store_true', help=_("List available devices and exit"))
     group_general.add_argument('--version', action='store_true', help=_("Display version and exit"))
     group_general.add_argument('--help', action='store_true', help=_("Show this help message and exit"))
@@ -135,7 +129,6 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
 def main():
     argparser = setup_argparser()
     args = argparser.parse_args()
-
     if args.version:
         print("Lada: ", VERSION)
         sys.exit(0)
@@ -160,20 +153,9 @@ def main():
     if args.help or not args.input:
         argparser.print_help()
         sys.exit(0)
-
-    try:
-        device_str = utils.get_optimal_device(args.device)
-    except RuntimeError as e:
-        print(f"Error: {e}")
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
+        print(_("GPU {device} selected but CUDA is not available").format(device=args.device))
         sys.exit(1)
-    device = torch.device(device_str)
-    device_name = "CPU"
-    if device.type == 'xpu':
-        device_name = torch.xpu.get_device_name(0)
-    elif device.type == 'cuda':
-        device_name = torch.cuda.get_device_name(0)
-    print(f"Running on: {device_name}")
-   
     if "{orig_file_name}" not in args.output_file_pattern or "." not in args.output_file_pattern:
         print(_("Invalid file name pattern. It must include the template string '{orig_file_name}' and a file extension"))
         sys.exit(1)
@@ -227,7 +209,7 @@ def main():
         sys.exit(1)
     assert encoder is not None and encoder_options is not None
 
-    device = torch.device(device_str)
+    device = torch.device(args.device)
     mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode = load_models(
         device, mosaic_restoration_model_name, mosaic_restoration_model_path, args.mosaic_restoration_config_path,
         mosaic_detection_model_path, args.fp16, args.detect_face_mosaics
@@ -250,4 +232,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    

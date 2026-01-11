@@ -248,11 +248,10 @@ class EncodingPreset:
 
     def clone(self): return EncodingPreset(**dataclasses.asdict(self))
 
-# --- NVIDIA > Intel > CPU ---
 def get_default_preset_name():
-    if os_utils.has_modern_nvidia_gpu():
+    if os_utils.has_nvidia_hardware():
         return "h264-nvidia-gpu-fast"
-    if os_utils.has_modern_intel_gpu():
+    if os_utils.has_intel_qsv_hardware():
         return "h264-intel-gpu-fast"
     return "h264-cpu-fast"
 
@@ -264,26 +263,41 @@ def get_encoding_presets() -> list[EncodingPreset]:
         logger.warning("Could not find encoding_presets.csv!")
         return presets
     
-    # --- Hardware Environment Detection ---
-    has_nvidia = os_utils.has_modern_nvidia_gpu()
-    has_intel = os_utils.has_modern_intel_gpu()
+    available_encoders_list = get_video_encoder_codecs()
+    available_encoder_names = {e.name.lower() for e in available_encoders_list}
+    has_nvidia = os_utils.has_nvidia_hardware()
+    has_intel_arc = os_utils.has_intel_arc_hardware()
+
+    has_intel_qsv = False
+    if 'h264_qsv' in available_encoder_names:
+        has_intel_qsv = os_utils.has_intel_qsv_hardware()
+
     with open(encoding_presets_csv_path, mode='r', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile, delimiter='|')
         for row in reader:
             encoder_name = row["encoder_name"].lower()
             preset_name = row["preset_name"].lower()
-            # --- Preset Type Classification ---
+            
+            if encoder_name not in available_encoder_names:
+                continue
+
             is_nvidia_preset = 'nvenc' in encoder_name or 'nvidia' in preset_name
             is_intel_preset = 'qsv' in encoder_name or 'intel' in preset_name
-            # --- Compatibility Filtering ---
+            is_av1_encoder = 'av1' in encoder_name
+            # Nvidia 
             if is_nvidia_preset and not has_nvidia:
                 continue
-            if is_intel_preset and not has_intel:
-                continue
-            preset = EncodingPreset(row["preset_name"], row["preset_description(translatable)"], False, row["encoder_name"], row["encoder_options"])
+            # Intel 
+            if is_intel_preset:
+                if not has_intel_qsv:
+                    continue
+                if is_av1_encoder and not has_intel_arc:
+                    continue
+
+            preset = EncodingPreset(row["preset_name"], row["preset_description(translatable)"], False, row["encoder_name"], row["encoder_options"])    
             presets.append(preset)
         return presets
-   
+    
 class VideoWriter:
     def _parse_encoder_options(self, encoder_options: str):
         tokens = shlex.split(encoder_options)
@@ -303,13 +317,9 @@ class VideoWriter:
 
         encoder_lower = encoder.lower()
         target_pix_fmt = 'yuv420p'
-
-        if 'qsv' in encoder.lower():
+        if 'qsv' in encoder_lower:
             target_pix_fmt = 'nv12'
         
-        elif 'nvenc' in encoder_lower:
-            target_pix_fmt = 'yuv420p'
-
         video_stream_out.pix_fmt = target_pix_fmt
         video_stream_out.codec_context.pix_fmt = target_pix_fmt
 
