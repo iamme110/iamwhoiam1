@@ -403,6 +403,9 @@ def get_video_encoder_codecs() -> list[Encoder]:
         codecs.add(encoder)
     return sorted(list(codecs), key=lambda e: e.name)
 
+def get_hwdevices():
+    return hwaccel.hwdevices_available()
+
 class VideoThumbnailer:
 
     def __init__(self, video_path: str, thumb_width: int, thumb_height: int):

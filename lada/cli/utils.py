@@ -107,6 +107,13 @@ def dump_encoders():
         table.append([e.name, e.long_name, hardware, devices])
     _dump_table(table)
 
+def dump_hwdevices():
+    from lada.utils.video_utils import get_hwdevices
+    devices = get_hwdevices()
+    s = _("Available hwdevices:\n")
+    s += ", ".join(devices)
+    print(s)
+
 def dump_torch_devices():
     print(_("Available devices:"))
     cuda_device_count = torch.cuda.device_count()

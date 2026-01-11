@@ -143,6 +143,9 @@ def main():
     if args.list_encoders:
         utils.dump_encoders()
         sys.exit(0)
+    if args.list_hwdevices:
+        utils.dump_hwdevices()
+        sys.exit(0)
     if args.list_mosaic_detection_models:
         utils.dump_available_detection_models()
         sys.exit(0)
