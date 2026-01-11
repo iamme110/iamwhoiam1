@@ -20,6 +20,7 @@ import av
 import cv2
 import torch
 import numpy as np
+from av.codec import hwaccel
 
 from lada.utils import Image, Mask, VideoMetadata, os_utils
 
@@ -78,15 +79,29 @@ def VideoReaderOpenCV(*args, **kwargs):
         cap.release()
 
 class VideoReader:
-    def __init__(self, file):
+    def __init__(self, file, hwaccel_device: str|None):
         self.file = file
         self.container = None
+        self.target_pts = 0
+        self.hwaccel_device = hwaccel_device
 
     def __enter__(self):
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
         # E.g. metadata could be encoded in CP936 instead of UTF-8 which would raise an error if we don't pass it in metadata_encoding.
         # If we use it in the future we have to consider non-default character encodings.
-        self.container = av.open(self.file, metadata_errors='ignore')
+        if self.hwaccel_device is not None:
+            device = hwaccel.HWAccel(self.hwaccel_device)
+        else:
+            device = None
+        self.container = av.open(self.file, metadata_errors='ignore', hwaccel=device)
+        video_stream = self.container.streams.video[0]
+
+        if device is not None:
+            # Resolving the deadlock caused by hardware acceleration (hwaccel) that prevents the container.close
+            video_stream.thread_type = "NONE"
+            video_stream.thread_count = 1
+        else:
+            video_stream.thread_type = 'AUTO'
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):

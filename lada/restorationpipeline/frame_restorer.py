@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL)
 
 class FrameRestorer:
-    def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
+    def __init__(self, device, hwaccel_device: str|None, video_file, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model: Yolo11SegmentationModel, mosaic_restoration_model, preferred_pad_mode,
                  mosaic_detection=False):
         self.device = torch.device(device)
@@ -38,6 +38,7 @@ class FrameRestorer:
         self.mosaic_detection = mosaic_detection
         self.eof = False
         self.stop_requested = False
+        self.hwaccel_device = hwaccel_device
 
         # limit queue size to approx 512MB
         max_frames_in_frame_restoration_queue = (512 * 1024 * 1024) // (self.video_meta_data.video_width * self.video_meta_data.video_height * 3)
@@ -58,6 +59,7 @@ class FrameRestorer:
                                               frame_detection_queue=self.frame_detection_queue,
                                               mosaic_clip_queue=self.mosaic_clip_queue,
                                               device=self.device,
+                                              hwaccell_device=self.hwaccel_device,
                                               max_clip_length=self.max_clip_length,
                                               pad_mode=self.preferred_pad_mode,
                                               error_handler=self._on_worker_thread_error)
@@ -300,7 +302,7 @@ class FrameRestorer:
 
     def _frame_restoration_worker(self):
         logger.debug("frame restoration worker: started")
-        with video_utils.VideoReader(self.video_meta_data.video_file) as video_reader:
+        with video_utils.VideoReader(self.video_meta_data.video_file, self.hwaccel_device) as video_reader:
             if self.start_ns > 0:
                 video_reader.seek(self.start_ns)
 

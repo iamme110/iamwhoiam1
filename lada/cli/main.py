@@ -67,6 +67,11 @@ def setup_argparser() -> argparse.ArgumentParser:
     export.add_argument('--list-encoding-presets', action='store_true', help=_("List available encoding presets and exit"))
     export.add_argument('--encoder', type=str, help=_('Select video encoder by name. Use "--list-encoders" to see what\'s available. (default: %(default)s)'))
     export.add_argument('--list-encoders', action='store_true', help=_("List available encoders and exit"))
+    export.add_argument('--hwaccel-device', type=str, default=None, help=_('Specify the hardware device to use for video decoding. '
+                                                      'If set, the video will be decoded using the specified hardware; '
+                                                      'otherwise, CPU decoding is used. Use "--list-hwdevices" to see what\'s available. '
+                                                      '(default: %(default)s)'))
+    export.add_argument('--list-hwdevices', action='store_true', help=_("List available hwdevices and exit"))
     export.add_argument('--encoder-options', type=str, help=_("Space-separated list of options for the encoder set via \"--encoder\". Use \"--list-encoder-options\" to see what's available. (default: %(default)s)"))
     export.add_argument('--list-encoder-options', metavar='ENCODER', type=str, help=_("List available options of the given encoder and exit"))
     export.add_argument('--mp4-fast-start',  default=False, action=argparse.BooleanOptionalAction, help=_("Allows playing the file while it's being written. Sets .mp4 mov flags \"frag_keyframe+empty_moov+faststart\". (default: %(default)s)"))
@@ -84,11 +89,14 @@ def setup_argparser() -> argparse.ArgumentParser:
 
     return parser
 
-def process_video_file(input_path: str, output_path: str, temp_dir_path: str, device: torch.device, mosaic_restoration_model, mosaic_detection_model,
-                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, encoder: str, encoder_options: str, mp4_fast_start):
+def process_video_file(input_path: str, output_path: str, temp_dir_path: str,
+                       device: torch.device, hwaccel_device: str|None, 
+                       mosaic_restoration_model, mosaic_detection_model,
+                       mosaic_restoration_model_name, preferred_pad_mode,
+                       max_clip_length, encoder: str, encoder_options: str, mp4_fast_start):
     video_metadata = get_video_meta_data(input_path)
 
-    frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
+    frame_restorer = FrameRestorer(device, hwaccel_device, input_path, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
     success = True
     video_tmp_file_output_path = os.path.join(temp_dir_path, f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
@@ -223,9 +231,11 @@ def main():
         if not single_file_input:
             print(f"{os.path.basename(input_path)}:")
         try:
-            process_video_file(input_path=input_path, output_path=output_path, temp_dir_path=args.temporary_directory, device=device, mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
-                               mosaic_restoration_model_name=mosaic_restoration_model_name, preferred_pad_mode=preferred_pad_mode, max_clip_length=args.max_clip_length,
-                               encoder=encoder, encoder_options=encoder_options, mp4_fast_start=args.mp4_fast_start)
+            process_video_file(input_path=input_path, output_path=output_path, temp_dir_path=args.temporary_directory,
+                               device=device, hwaccel_device=args.hwaccel_device,
+                               mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
+                               mosaic_restoration_model_name=mosaic_restoration_model_name, preferred_pad_mode=preferred_pad_mode,
+                               max_clip_length=args.max_clip_length,encoder=encoder, encoder_options=encoder_options, mp4_fast_start=args.mp4_fast_start)
         except KeyboardInterrupt:
             print(_("Received Ctrl-C, stopping restoration."))
             break
