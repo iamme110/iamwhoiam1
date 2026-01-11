@@ -296,6 +296,15 @@ class VideoWriter:
         self.output_container = output_container
         self.video_stream = video_stream_out
 
+        codec = av.codec.Codec(encoder, "w")
+        target_pixel_formats = codec.video_formats
+        source_pixel_format = av.VideoFormat('bgr24')
+        target_pixel_format, _loss = av.codec.find_best_pix_fmt_of_list(target_pixel_formats, source_pixel_format)
+        assert target_pixel_format is not None, "No compatible pixel format found for encoder {encoder} to convert from bgr24 frames"
+
+        video_stream_out.pix_fmt = target_pixel_format.name
+        video_stream_out.codec_context.pix_fmt = target_pixel_format.name
+
         # Buffers for reordering frames
         self.BUFFER_MAX_SIZE = 30
         self.pts_heap = []
