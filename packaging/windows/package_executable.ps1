@@ -21,17 +21,22 @@ function Ask-YesNo {
 }
 
 function Install-SystemDependencies {
+    param([Parameter(Mandatory)] [boolean]$cli_only)
+
     Write-Host "Installing system dependencies..."
 
     winget install --id Gyan.FFmpeg -e --source winget
     winget install --id Git.Git -e --source winget
     winget install --id=astral-sh.uv -e --source winget --version $global:UV_VERSION --force
-    winget install --id MSYS2.MSYS2 -e --source winget
-    winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --silent --override "--wait --quiet --add ProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-    winget install --id Rustlang.Rustup -e --source winget
-    winget install --id Microsoft.VCRedist.2013.x64  -e --source winget
-    winget install --id Microsoft.VCRedist.2013.x86  -e --source winget
     winget install --id=7zip.7zip -e --source winget
+
+    if (-Not ($cli_only)) {
+        winget install --id MSYS2.MSYS2 -e --source winget
+        winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --silent --override "--wait --quiet --add ProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+        winget install --id Rustlang.Rustup -e --source winget
+        winget install --id Microsoft.VCRedist.2013.x64  -e --source winget
+        winget install --id Microsoft.VCRedist.2013.x86  -e --source winget
+    }
 }
 
 function Build-SystemDependencies {
@@ -91,8 +96,6 @@ function Download-ModelWeights {
         }
     }
 
-    Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v3.1_accurate.pt?download=true' "lada_mosaic_detection_model_v3.1_accurate.pt" "2b6e5d6cd5a795a4dcc1205b817a7323a4bd3725cef1a7de3a172cb5689f0368"
-    Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v3.1_fast.pt?download=true' "lada_mosaic_detection_model_v3.1_fast.pt" "25d62894c16bba00468f3bcc160360bb84726b2f92751b5e235578bf2f9b0820"
     Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v2.pt?download=true' "lada_mosaic_detection_model_v2.pt" "056756fcab250bcdf0833e75aac33e2197b8809b0ab8c16e14722dcec94269b5"
     Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_accurate.pt?download=true' "lada_mosaic_detection_model_v4_accurate.pt" "c244d7e49d8f88e264b8dc15f91fb21f5908ad8fb6f300b7bc88462d0801bc1f"
     Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_fast.pt?download=true' "lada_mosaic_detection_model_v4_fast.pt" "9a6b660d1d3e3797d39515e08b0e72fcc59815f38279faa7a4ab374ab2c1e3b4"
@@ -101,6 +104,8 @@ function Download-ModelWeights {
 }
 
 function Install-PythonDependencies {
+    param([Parameter(Mandatory)] [boolean]$cli_only)
+
     Write-Host "Installing Python dependencies..."
 
     uv venv --clear --python $global:PYTHON_VERSION venv_release_win
@@ -114,10 +119,13 @@ function Install-PythonDependencies {
     uv pip uninstall polars
     uv pip install polars-lts-cpu
 
-    uv pip install --force-reinstall (Resolve-Path ".\build_gtk_release\gtk\x64\release\python\pygobject*.whl").Path
-    uv pip install --force-reinstall (Resolve-Path ".\build_gtk_release\gtk\x64\release\python\pycairo*.whl").Path
-
-    uv pip install --no-deps '.[gui]'
+    if ($cli_only) {
+        uv pip install --no-deps '.'
+    } else {
+        uv pip install --force-reinstall (Resolve-Path ".\build_gtk_release\gtk\x64\release\python\pygobject*.whl").Path
+        uv pip install --force-reinstall (Resolve-Path ".\build_gtk_release\gtk\x64\release\python\pycairo*.whl").Path
+        uv pip install --no-deps '.[gui]'
+    }
 
     uv pip install pyinstaller==$global:PYINSTALLER_VERSION
 
@@ -196,7 +204,7 @@ $ErrorActionPreference = "Stop"
 Check-ProjectRoot
 
 if ($args -notcontains "--skip-winget") {
-    Install-SystemDependencies
+    Install-SystemDependencies ($args -contains "--cli-only")
     if (!(Ask-YesNo "Installing/Upgrading winget programs finished. Check the winget install output above. You may want to stop and restart this script in a new shell for certain installs/updates. Do you want to continue?")) {
         exit 0
     }
@@ -204,8 +212,10 @@ if ($args -notcontains "--skip-winget") {
 if (($args -notcontains "--skip-gvsbuild") -And ($args -notcontains "--cli-only")) {
     Build-SystemDependencies ($args -contains "--clean-gvsbuild")
 }
-Compile-Translations
+if ($args -notcontains "--skip-translations") {
+    Compile-Translations
+}
 Download-ModelWeights
-Install-PythonDependencies
+Install-PythonDependencies ($args -contains "--cli-only")
 Create-EXE ($args -contains "--cli-only")
 Create-7ZArchive
