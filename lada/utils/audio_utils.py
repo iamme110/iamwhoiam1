@@ -9,6 +9,7 @@ import os
 import subprocess
 import shutil
 from typing import Optional
+from lada.types import FFmpegError
 from lada.utils import video_utils, os_utils
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,9 @@ def combine_audio_video_files(av_video_metadata: video_utils.VideoMetadata, tmp_
         cmd += ["-map", "1:v:0"]
         cmd += ["-map", "0:a:0"]
         cmd += [av_video_output_path]
-        subprocess.run(cmd, stdout=subprocess.PIPE, startupinfo=os_utils.get_subprocess_startup_info())
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, startupinfo=os_utils.get_subprocess_startup_info())
+        if result.returncode != 0:
+            raise FFmpegError(result.stderr)
     else:
         shutil.copy(tmp_v_video_input_path, av_video_output_path)
     os.remove(tmp_v_video_input_path)

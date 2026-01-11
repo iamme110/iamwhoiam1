@@ -7,12 +7,14 @@ import pathlib
 import sys
 import tempfile
 import textwrap
-
+import json
 import torch
 
+from fractions import Fraction
 from lada import VERSION, ModelFiles
 from lada.cli import utils
 from lada.utils import audio_utils, video_utils
+from lada.types import RestoredInfo
 from lada.utils.os_utils import has_modern_nvidia_gpu
 from lada.restorationpipeline.frame_restorer import FrameRestorer
 from lada.restorationpipeline import load_models
@@ -87,44 +89,79 @@ def setup_argparser() -> argparse.ArgumentParser:
 def process_video_file(input_path: str, output_path: str, temp_dir_path: str, device: torch.device, mosaic_restoration_model, mosaic_detection_model,
                        mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, encoder: str, encoder_options: str, mp4_fast_start):
     video_metadata = get_video_meta_data(input_path)
-
-    frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
-                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
+    output_basename = os.path.basename(output_path)
+    (output_name, output_ext) = os.path.splitext(output_basename)
+    process_tmp_dir = os.path.join(temp_dir_path, output_name)
+    pathlib.Path(process_tmp_dir).mkdir(exist_ok=True, parents=True)
+    finished_tmp_path = os.path.join(process_tmp_dir, f"finished{output_ext}")
     success = True
-    video_tmp_file_output_path = os.path.join(temp_dir_path, f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
-    pathlib.Path(output_path).parent.mkdir(exist_ok=True, parents=True)
-    frame_restorer_progressbar = utils.Progressbar(video_metadata)
-    try:
-        frame_restorer.start()
-        frame_restorer_progressbar.init()
-        with VideoWriter(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
-                         video_metadata.video_fps_exact, encoder=encoder, encoder_options=encoder_options,
-                         time_base=video_metadata.time_base, mp4_fast_start=mp4_fast_start) as video_writer:
-            for elem in frame_restorer:
-                if elem is STOP_MARKER or isinstance(elem, ErrorMarker):
-                    success = False
-                    frame_restorer_progressbar.error = True
-                    print("Error on export: frame restorer stopped prematurely")
-                    break
-                (restored_frame, restored_frame_pts) = elem
-                video_writer.write(restored_frame, restored_frame_pts, bgr2rgb=True)
-                frame_restorer_progressbar.update()
-    except (Exception, KeyboardInterrupt) as e:
-        success = False
-        if isinstance(e, KeyboardInterrupt):
-            raise e
-        else:
-            print("Error on export", e)
-    finally:
-        frame_restorer.stop()
-        frame_restorer_progressbar.close(ensure_completed_bar=success)
+    # If finished_tmp_path exists, the process was likely interrupted during "Processing audio".
+    if not os.path.exists(finished_tmp_path):
+        restored_info = video_utils.get_restored_info(process_tmp_dir)
+        if restored_info is None:
+            restored_info: RestoredInfo = {
+                'encoder': encoder,
+                'encoder_options': encoder_options,
+                'ext': output_ext,
+                'frame_count': 0,
+                'slice_file_list': []
+            }
+            with open(os.path.join(process_tmp_dir, 'info.json'), 'w') as f:
+                json.dump(restored_info, f)
+        frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
+                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
+        pathlib.Path(output_path).parent.mkdir(exist_ok=True, parents=True)
+        start_frame = max(0, restored_info['frame_count'] - max_clip_length)
+        start_ns = int(Fraction(start_frame, video_metadata.video_fps_exact) * 1_000_000_000)
+        start_pts = int(restored_info['frame_count'] / video_metadata.video_fps_exact / video_metadata.time_base)
+        frame_restorer_progressbar = utils.Progressbar(video_metadata, initial=start_frame)
+        try:
+            frame_restorer.start(start_ns)
+            frame_restorer_progressbar.init()
+            with VideoWriter(process_tmp_dir,
+                             len(restored_info['slice_file_list']),
+                             video_metadata.video_width,
+                             video_metadata.video_height,
+                             video_metadata.video_fps_exact,
+                             output_ext,
+                             encoder=encoder,
+                             encoder_options=encoder_options,
+                             time_base=video_metadata.time_base,
+                             mp4_fast_start=mp4_fast_start) as video_writer:
+                for elem in frame_restorer:
+                    if elem is STOP_MARKER or isinstance(elem, ErrorMarker):
+                        success = False
+                        frame_restorer_progressbar.error = True
+                        print("Error on export: frame restorer stopped prematurely")
+                        break
+                    (restored_frame, restored_frame_pts) = elem
+                    # Discard frames with PTS less than start_pts
+                    if restored_frame_pts < start_pts:
+                        continue
+                    video_writer.write(restored_frame, restored_frame_pts, bgr2rgb=True)
+                    frame_restorer_progressbar.update()
+        except (Exception, KeyboardInterrupt) as e:
+            success = False
+            if isinstance(e, KeyboardInterrupt):
+                raise e
+            else:
+                print("Error on export", e)
+        finally:
+            frame_restorer.stop()
+            frame_restorer_progressbar.close(ensure_completed_bar=success)
 
-    if success:
-        print(_("Processing audio"))
-        audio_utils.combine_audio_video_files(video_metadata, video_tmp_file_output_path, output_path)
+        if success:
+            print(_("Concatenating slices"))
+            video_utils.concat_slices(process_tmp_dir)
+            print(_("Processing audio"))
+            audio_utils.combine_audio_video_files(video_metadata, finished_tmp_path, output_path)
+            os.rmdir(process_tmp_dir)
     else:
-        if os.path.exists(video_tmp_file_output_path):
-            os.remove(video_tmp_file_output_path)
+        print(_("Processing audio"))
+        audio_utils.combine_audio_video_files(video_metadata, finished_tmp_path, output_path)
+        os.rmdir(process_tmp_dir)
+
+    return success
 
 def main():
     argparser = setup_argparser()

@@ -4,7 +4,9 @@ import csv
 import dataclasses
 import json
 import logging
+import math
 import os
+from pathlib import Path
 import re
 import subprocess
 from contextlib import contextmanager
@@ -22,6 +24,7 @@ import torch
 import numpy as np
 
 from lada.utils import Image, Mask, VideoMetadata, os_utils
+from lada.types import FFmpegError, RestoredInfo, ConcatSliceError
 
 logger = logging.getLogger(__name__)
 
@@ -271,42 +274,67 @@ class VideoWriter:
         }
         return parsed_encoder_options
 
-    def __init__(self, output_path, width, height, fps, encoder: str, encoder_options: str, time_base=None, mp4_fast_start=False):
+    def __init__(self,
+                 output_dir: str,
+                 slice_num: int,
+                 width: int, height: int, fps: Fraction,
+                 output_ext: str,
+                 encoder: str, encoder_options: str,
+                 time_base=None, mp4_fast_start=False):
         container_options = {}
-        if mp4_fast_start and (output_path.lower().endswith(".mp4") or output_path.lower().endswith(".mov")):
+        if mp4_fast_start and (output_ext.lower().endswith(".mp4") or output_ext.lower().endswith(".mov")):
             container_options["movflags"] = "+frag_keyframe+empty_moov+faststart"
 
-        output_container = av.open(output_path, "w", options=container_options)
-        video_stream_out: av.VideoStream = output_container.add_stream(encoder, fps)
-
-        video_stream_out.width = width
-        video_stream_out.height = height
-        video_stream_out.thread_count = 0
-        video_stream_out.thread_type = 3
-        video_stream_out.time_base = time_base
-
-        # up until PyAV 15.5.0 it was enough to set these settings on the stream only.
-        video_stream_out.codec_context.width = width
-        video_stream_out.codec_context.height = height
-        video_stream_out.codec_context.thread_count = 0
-        video_stream_out.codec_context.thread_type = 3
-        video_stream_out.codec_context.time_base = time_base
-
-        video_stream_out.options = self._parse_encoder_options(encoder_options)
-        self.output_container = output_container
-        self.video_stream = video_stream_out
-
+        self.width = width
+        self.height = height
+        self.encoder_options = self._parse_encoder_options(encoder_options)
+        self.time_base = time_base
+        self.container_options = container_options
+        # Slice duration = 60 seconds
+        self.slice_size = math.ceil(60 * fps)
+        self.slice_num = slice_num
+        self.encoder = encoder
+        self.output_dir = output_dir
+        self.ext = output_ext
+        self.fps = fps
+        self.pts_offset = 0
         # Buffers for reordering frames
         self.BUFFER_MAX_SIZE = 30
-        self.pts_heap = []
-        self.frame_queue = deque()
-        self.pts_set = set()
+
+        self._init_output_container()
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
+
+    def _init_output_container(self):
+        slice_tmp_path = os.path.join(self.output_dir, f"slice-{self.slice_num}.tmp{self.ext}")
+        output_container = av.open(slice_tmp_path, "w", options=self.container_options)
+        video_stream_out: av.VideoStream = output_container.add_stream(self.encoder, self.fps)
+
+        video_stream_out.width = self.width
+        video_stream_out.height = self.height
+        video_stream_out.thread_count = 0
+        video_stream_out.thread_type = 3
+        video_stream_out.time_base = self.time_base
+
+        # up until PyAV 15.5.0 it was enough to set these settings on the stream only.
+        video_stream_out.codec_context.width = self.width
+        video_stream_out.codec_context.height = self.height
+        video_stream_out.codec_context.thread_count = 0
+        video_stream_out.codec_context.thread_type = 3
+        video_stream_out.codec_context.time_base = self.time_base
+
+        video_stream_out.options = self.encoder_options
+        self.output_container = output_container
+        self.video_stream = video_stream_out
+
+        self.pts_heap = []
+        self.frame_queue = deque()
+        self.pts_set = set()
+        self.frame_count = 0
 
     def _process_buffer(self, flush_all=False):
         """Processes the buffer to encode frames."""
@@ -337,11 +365,22 @@ class VideoWriter:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         if frame_pts not in self.pts_set:
+            if self.slice_num > 0 and self.frame_count == 0:
+                self.pts_offset = frame_pts
+            frame_pts -= self.pts_offset
             heapq.heappush(self.pts_heap, frame_pts)
             self.frame_queue.append(frame)
             self.pts_set.add(frame_pts)
+            self.frame_count += 1
 
-        self._process_buffer()
+        if self.frame_count == self.slice_size:
+            # Finish a slice
+            self.release()
+            # New slice
+            self.slice_num += 1
+            self._init_output_container()
+        else:
+            self._process_buffer()
 
     def release(self):
         while len(self.frame_queue) > 0:
@@ -351,6 +390,13 @@ class VideoWriter:
         if out_packet:
             self.output_container.mux(out_packet)
         self.output_container.close()
+
+        if self.frame_count > 0:
+            slice_tmp_path = os.path.join(self.output_dir, f"slice-{self.slice_num}.tmp{self.ext}")
+            slice_path = os.path.join(self.output_dir, f"slice-{self.slice_num}{self.ext}")
+            if os.path.exists(slice_path):
+                os.remove(slice_path)
+            os.rename(slice_tmp_path, slice_path)
 
 def is_video_file(file_path):
     SUPPORTED_VIDEO_FILE_EXTENSIONS = {".asf", ".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".wmv",
@@ -476,3 +522,132 @@ class VideoThumbnailer:
         except Exception as e:
             logger.error(f"Error generating thumbnail at {timestamp_ns}: {e}")
             return self._get_fallback_thumbnail()
+
+def check_video_last_gop_integrity(path: str|Path) -> bool:
+    with av.logging.Capture() as logs:
+        try:
+            with av.open(path) as container:
+                packets: list[av.Packet] = []
+                video_stream = container.streams.video[0]
+                for packet in container.demux(video=0):
+                    if packet.dts is None or packet.size == 0:
+                        continue
+                    if packet.is_keyframe:
+                        packets.clear()
+                    packets.append(packet)
+                for packet in packets:
+                    for _ in video_stream.decode(packet):
+                        if len(logs) > 0:
+                            return False
+        except:
+            return False
+    return True
+
+def get_restored_info(output_path: str) -> RestoredInfo|None:
+    """Get restored info
+
+    Args:
+        output_path (str): output file path
+
+    Returns:
+        RestoredInfo|None
+    """
+    if not os.path.isdir(output_path):
+        return None
+    
+    try:
+        info_file = os.path.join(output_path, "info.json")
+        with open(info_file) as f:
+            info: RestoredInfo = json.load(f)
+    except:
+        return None
+    
+    # Check whether the slice_tmp_file is complete; it is usually intact when the process is terminated via Ctrl+C.
+    for slice_tmp_path in Path(output_path).iterdir():
+        if slice_tmp_path.is_file() and slice_tmp_path.name.startswith('slice-') and slice_tmp_path.name.endswith(f".tmp{info['ext']}"):
+            if check_video_last_gop_integrity(slice_tmp_path):
+                slice_path = os.path.join(output_path, slice_tmp_path.name.replace('.tmp', ''))
+                if os.path.isfile(slice_path):
+                    os.remove(slice_path)
+                os.rename(slice_tmp_path, slice_path)
+            else:
+                os.remove(slice_tmp_path)
+    
+    slice_file_list: list[str] = []
+    for file in Path(output_path).iterdir():
+        if file.is_file() and file.name.startswith('slice-') and file.name.endswith(info['ext']):
+            slice_file_list.append(str(file))
+    slice_file_list.sort(key=lambda s: int(s.split("slice-")[1].split(".")[0])) 
+    
+    slice_count = 0
+    restored_frame_count = 0
+    while slice_count < len(slice_file_list):
+        slice_path = slice_file_list[slice_count]
+        slice_num = int(slice_path.split("slice-")[1].split(".")[0])
+        if slice_num != slice_count or not os.path.isfile(slice_path):
+            for slice_path in slice_file_list[slice_count:]:
+                os.remove(slice_path)
+            del slice_file_list[slice_count:]
+            break
+        
+        try:
+            with av.open(slice_path) as container:
+                video_stream = container.streams.video[0]
+                frames = video_stream.frames
+                restored_frame_count += frames
+        except KeyboardInterrupt:
+            pass
+        except:
+            for slice_path in slice_file_list[slice_count:]:
+                os.remove(slice_path)
+            del slice_file_list[slice_count:]
+            break
+        slice_count += 1
+    info['frame_count'] = restored_frame_count
+    info['slice_file_list'] = slice_file_list
+
+    return info
+
+def concat_slices(output_path: str) -> str:
+    restored_info = get_restored_info(output_path)
+
+    if restored_info is None:
+        raise ConcatSliceError("Can not get restored_info")
+    
+    match len(restored_info['slice_file_list']):
+        case 0:
+            raise ConcatSliceError('No slice file')
+        case 1:
+            slice_file_name = os.path.basename(restored_info['slice_file_list'][0])
+            for file_path in Path(output_path).iterdir():
+                if file_path.name == slice_file_name:
+                    continue
+                os.remove(file_path)
+            return restored_info['slice_file_list'][0]
+        case _:
+            merge_txt = ''
+            for slice_path in restored_info['slice_file_list']:
+                merge_txt += f"file '{slice_path}'\n"
+
+            merge_path = os.path.join(output_path, "merge.txt")
+            with open(merge_path, 'w', encoding='utf-8') as f:
+                f.write(merge_txt)
+
+            output_tmp_file_name = f"finished.tmp{restored_info['ext']}"
+            output_tmp_file_path = os.path.join(output_path, output_tmp_file_name)
+            cmd = ['ffmpeg', '-f', 'concat', '-y', '-safe', '0', "-loglevel", "quiet"]
+            cmd += ['-i', merge_path]
+            cmd += ['-c', 'copy']
+            cmd += [output_tmp_file_path]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                raise FFmpegError(result.stderr)
+            
+            output_file_name = f"finished{restored_info['ext']}"
+            output_file_path = os.path.join(output_path, output_file_name)
+            os.rename(output_tmp_file_path, output_file_path)
+            for file_path in Path(output_path).iterdir():
+                if file_path.name != output_file_name:
+                    os.remove(file_path)

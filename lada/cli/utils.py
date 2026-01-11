@@ -165,7 +165,7 @@ class TranslatableHelpFormatter(argparse.RawDescriptionHelpFormatter):
         self._add_item(self._format_usage, args)
 
 class Progressbar:
-    def __init__(self, video_metadata: VideoMetadata):
+    def __init__(self, video_metadata: VideoMetadata, initial=0):
         self.frame_processing_durations_buffer = []
         self.video_metadata = video_metadata
         self.frame_processing_durations_buffer_min_len = min(video_metadata.frames_count - 1, int(video_metadata.video_fps * 15))
@@ -176,7 +176,7 @@ class Progressbar:
         BAR_FORMAT = _("Processing video: {done_percent}%|{bar}|Processed: {time_done} ({frames_done}f){bar_suffix}")
         BAR_FORMAT_TQDM = BAR_FORMAT.format(done_percent="{percentage:3.0f}", bar="{bar}", time_done="{elapsed}", frames_done="{n_fmt}", bar_suffix="{desc}")
         initial_estimating_bar_suffix = _(" | Remaining: ? | Speed: ?")
-        self.tqdm = tqdm(dynamic_ncols=True, total=video_metadata.frames_count, bar_format=BAR_FORMAT_TQDM, desc=initial_estimating_bar_suffix)
+        self.tqdm = tqdm(dynamic_ncols=True, total=video_metadata.frames_count, initial=initial, bar_format=BAR_FORMAT_TQDM, desc=initial_estimating_bar_suffix)
         self.duration_start = None
 
     def init(self):
