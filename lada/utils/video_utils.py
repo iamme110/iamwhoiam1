@@ -86,19 +86,38 @@ class VideoReader:
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
         # E.g. metadata could be encoded in CP936 instead of UTF-8 which would raise an error if we don't pass it in metadata_encoding.
         # If we use it in the future we have to consider non-default character encodings.
-        self.container = av.open(self.file, metadata_errors='ignore')
+        # Enhanced options for handling corrupted streams
+        open_opts = {
+            "probesize": "100M",
+            "analyzeduration": "100M",
+            "fflags": "+genpts",
+            "err_detect": "ignore_err",
+        }
+        self.container = av.open(self.file, mode="r", options=open_opts, metadata_errors="ignore")
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
 
     def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
-        self.container.streams.video[0].thread_type = 'AUTO'
+        vstream = self.container.streams.video[0]
+        try:
+            vstream.thread_type = 'AUTO'
+        except Exception:
+            pass
 
-        for frame in self.container.decode(video=0):
-            nd_frame = frame.to_ndarray(format='bgr24')
-            torch_frame = torch.from_numpy(nd_frame)
-            yield torch_frame, frame.pts
+        # Fault-tolerant demux: skip bad packets to avoid Invalid NAL unit errors
+        for packet in self.container.demux(vstream):
+            if packet is None:
+                continue
+            try:
+                frames = packet.decode()
+            except Exception as e:  # Catches InvalidDataError and similar
+                continue  # Skip bad packet
+            for frame in frames:
+                nd_frame = frame.to_ndarray(format='bgr24')
+                torch_frame = torch.from_numpy(nd_frame)
+                yield torch_frame, frame.pts
 
     def seek(self, offset_ns):
         offset = int((offset_ns / 1_000_000_000) * av.time_base)
