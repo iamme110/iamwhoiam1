@@ -251,7 +251,7 @@ class EncodingPreset:
 def get_default_preset_name():
     if os_utils.has_nvidia_hardware():
         return "h264-nvidia-gpu-fast"
-    if os_utils.has_intel_qsv_hardware():
+    if os_utils.has_intel_arc_hardware():
         return "h264-intel-gpu-fast"
     return "h264-cpu-fast"
 
