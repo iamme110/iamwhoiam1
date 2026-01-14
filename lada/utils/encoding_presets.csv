@@ -12,6 +12,3 @@ hevc-intel-gpu-hq|H.265 / HEVC, Intel Quick Sync hardware encoder, High Quality,
 hevc-intel-gpu-uhq|H.265 / HEVC, Intel Quick Sync hardware encoder, Indistinguishable Quality, Very Slow|hevc_qsv|-preset veryslow -global_quality 18 -look_ahead 1
 
 av1-cpu-uhq|AV1, SVT-AV1 software encoder, Indistinguishable Quality, Smaller File Size|libsvtav1|-crf 18 -preset 4 -svtav1-params tune=0:enable-overlays=1:film-grain=0:film-grain-denoise=0
-av1-intel-gpu-balanced|AV1, Intel Quick Sync hardware encoder, Good Quality, Balanced Speed and Size|av1_qsv|-preset medium -look_ahead 1 -rc icq -global_quality 25 -tile-rows 2 -tile-columns 2 -tile-row-size 64 -tile-column-size 64
-av1-intel-gpu-hq|AV1, Intel Quick Sync hardware encoder, High Quality, Slower, Smaller File Size|av1_qsv|-preset slow -look_ahead 1 -rc icq -global_quality 22 -tile-rows 2 -tile-columns 2 -tile-row-size 64 -tile-column-size 64
-av1-intel-gpu-uhq|AV1, Intel Quick Sync hardware encoder, Indistinguishable Quality, Very Slow, Smallest File Size|av1_qsv|-preset veryslow -look_ahead 1 -rc icq -global_quality 19 -tile-rows 2 -tile-columns 2 -tile-row-size 64 -tile-column-size 64

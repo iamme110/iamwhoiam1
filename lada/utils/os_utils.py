@@ -66,22 +66,21 @@ def has_intel_arc_hardware() -> bool:
     return hasattr(torch, 'xpu') and torch.xpu.is_available()
 
 @cache
-# UHD 630/750/770
-def _probe_qsv_encoder() -> bool:
+def is_intel_qsv_encoding_available() -> bool:
     try:
-        mem_file = io.BytesIO()
-        with av.open(mem_file, mode='w', format='null') as container:
-            stream = container.add_stream('h264_qsv', rate=30)
-            stream.width = 64
-            stream.height = 64
-            stream.pix_fmt = 'nv12'
-            dummy_frame = av.VideoFrame(64, 64, format='nv12')
-            stream.encode(dummy_frame)
-            return True
+        av.video.codeccontext.VideoCodecContext.create(
+            av.codec.Codec('h264_qsv', 'w'),
+            hwaccel=av.codec.hwaccel.HWAccel('qsv', allow_software_fallback=False),)
+        return True
     except Exception:
         return False
 
-def has_intel_qsv_hardware() -> bool:
-    if has_intel_arc_hardware():
+@cache
+def is_nvidia_cuda_encoding_available() -> bool:
+    try:
+        av.video.codeccontext.VideoCodecContext.create(
+            av.codec.Codec('h264_nvenc', 'w'),
+            hwaccel=av.codec.hwaccel.HWAccel('cuda', allow_software_fallback=False),)
         return True
-    return _probe_qsv_encoder()
+    except Exception:
+        return False

@@ -265,12 +265,12 @@ def get_encoding_presets() -> list[EncodingPreset]:
     
     available_encoders_list = get_video_encoder_codecs()
     available_encoder_names = {e.name.lower() for e in available_encoders_list}
-    has_nvidia = os_utils.has_nvidia_hardware()
-    has_intel_arc = os_utils.has_intel_arc_hardware()
-
     has_intel_qsv = False
     if 'h264_qsv' in available_encoder_names:
-        has_intel_qsv = os_utils.has_intel_qsv_hardware()
+        has_intel_qsv = os_utils.is_intel_qsv_encoding_available()
+    has_nvidia_nvenc = False
+    if 'h264_nvenc' in available_encoder_names:
+        has_nvidia_nvenc = os_utils.is_nvidia_cuda_encoding_available()
 
     with open(encoding_presets_csv_path, mode='r', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile, delimiter='|')
@@ -283,15 +283,12 @@ def get_encoding_presets() -> list[EncodingPreset]:
 
             is_nvidia_preset = 'nvenc' in encoder_name or 'nvidia' in preset_name
             is_intel_preset = 'qsv' in encoder_name or 'intel' in preset_name
-            is_av1_encoder = 'av1' in encoder_name
             # Nvidia 
-            if is_nvidia_preset and not has_nvidia:
+            if is_nvidia_preset and not has_nvidia_nvenc:
                 continue
             # Intel 
             if is_intel_preset:
                 if not has_intel_qsv:
-                    continue
-                if is_av1_encoder and not has_intel_arc:
                     continue
 
             preset = EncodingPreset(row["preset_name"], row["preset_description(translatable)"], False, row["encoder_name"], row["encoder_options"])    

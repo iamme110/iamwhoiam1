@@ -122,11 +122,7 @@ def dump_torch_devices():
         xpu_device_count = torch.xpu.device_count()
         for i in range(xpu_device_count):
             devices.append(f"xpu:{i}")
-            try:
-                name = torch.xpu.get_device_name(i)
-            except:
-                name = "Intel XPU Device"
-            descriptions.append(name)
+            descriptions.append(torch.xpu.get_device_name(i))
 
     table = [[_("Device"), _("Description")]]
     for device, description in zip(devices, descriptions):
