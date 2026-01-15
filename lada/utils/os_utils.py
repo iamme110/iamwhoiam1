@@ -68,19 +68,23 @@ def has_intel_arc_hardware() -> bool:
 @cache
 def is_intel_qsv_encoding_available() -> bool:
     try:
-        av.video.codeccontext.VideoCodecContext.create(
-            av.codec.Codec('h264_qsv', 'w'),
-            hwaccel=av.codec.hwaccel.HWAccel('qsv', allow_software_fallback=False),)
-        return True
+        with av.logging.Capture():
+            av.video.codeccontext.VideoCodecContext.create(
+                av.codec.Codec('h264_qsv', 'w'),
+                hwaccel=av.codec.hwaccel.HWAccel('qsv', allow_software_fallback=False),
+                )
+            return True
     except Exception:
         return False
 
 @cache
 def is_nvidia_cuda_encoding_available() -> bool:
     try:
-        av.video.codeccontext.VideoCodecContext.create(
-            av.codec.Codec('h264_nvenc', 'w'),
-            hwaccel=av.codec.hwaccel.HWAccel('cuda', allow_software_fallback=False),)
+        with av.logging.Capture():
+            av.video.codeccontext.VideoCodecContext.create(
+                av.codec.Codec('h264_nvenc', 'w'),
+                hwaccel=av.codec.hwaccel.HWAccel('cuda', allow_software_fallback=False),
+                )
         return True
     except Exception:
         return False
