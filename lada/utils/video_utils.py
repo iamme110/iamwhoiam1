@@ -79,18 +79,18 @@ def VideoReaderOpenCV(*args, **kwargs):
         cap.release()
 
 class VideoReader:
-    def __init__(self, file, hwaccel_device: str|None):
+    def __init__(self, file, decoding_device: str|None):
         self.file = file
         self.container = None
         self.target_pts = 0
-        self.hwaccel_device = hwaccel_device
+        self.decoding_device = decoding_device
 
     def __enter__(self):
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
         # E.g. metadata could be encoded in CP936 instead of UTF-8 which would raise an error if we don't pass it in metadata_encoding.
         # If we use it in the future we have to consider non-default character encodings.
-        if self.hwaccel_device is not None:
-            device = hwaccel.HWAccel(self.hwaccel_device)
+        if self.decoding_device is not None:
+            device = hwaccel.HWAccel(self.decoding_device)
         else:
             device = None
         self.container = av.open(self.file, metadata_errors='ignore', hwaccel=device)
