@@ -107,11 +107,14 @@ def dump_encoders():
         table.append([e.name, e.long_name, hardware, devices])
     _dump_table(table)
 
-def dump_hwdevices():
+def dump_decoding_devices():
     from lada.utils.video_utils import get_hwdevices
     devices = get_hwdevices()
-    s = _("Available hwdevices:\n")
-    s += ", ".join(devices)
+    s = _("Available decoding devices:\n")
+    if len(devices) == 0:
+        s += "None"
+    else:
+        s += ", ".join(devices)
     print(s)
 
 def dump_torch_devices():
