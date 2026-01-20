@@ -86,7 +86,6 @@ class VideoReader:
         # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
         # E.g. metadata could be encoded in CP936 instead of UTF-8 which would raise an error if we don't pass it in metadata_encoding.
         # If we use it in the future we have to consider non-default character encodings.
-        # Enhanced options for handling corrupted streams
         open_opts = {
             "probesize": "100M",
             "analyzeduration": "100M",
@@ -100,24 +99,45 @@ class VideoReader:
         self.container.close()
 
     def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
-        vstream = self.container.streams.video[0]
-        try:
-            vstream.thread_type = 'AUTO'
-        except Exception:
-            pass
+        # Print to console via FFmpegs log callback instead of utilizing Pythons logging system
+        # Unfortunately we need this to prevent deadlocks. On certain corrupt video files decode() would hang indefinitely after
+        # encountering an error (always reproducible). See https://github.com/PyAV-Org/PyAV/issues/751 and https://codeberg.org/ladaapp/lada/issues/247
+        # Alternatively, setting thread_type to 'SLICE' would also avoid the deadlock even with av logs enabled but may negatively impact performance.
+        av.logging.restore_default_callback()
+        self.container.streams.video[0].thread_type = 'AUTO'
 
-        # Fault-tolerant demux: skip bad packets to avoid Invalid NAL unit errors
+        # Fault-tolerant frame decoding with frame duplication for corrupted frames
+        # This approach mimics how ffmpeg CLI handles corrupted frames by duplicating the last good frame
+        last_good_frame = None
+        consecutive_errors = 0
+        max_consecutive_errors = 10  # Prevent infinite loops on completely corrupted streams
+        
+        # Use packet-level decoding to handle corrupted frames properly
+        vstream = self.container.streams.video[0]
         for packet in self.container.demux(vstream):
-            if packet is None:
-                continue
             try:
                 frames = packet.decode()
-            except Exception as e:  # Catches InvalidDataError and similar
-                continue  # Skip bad packet
-            for frame in frames:
-                nd_frame = frame.to_ndarray(format='bgr24')
-                torch_frame = torch.from_numpy(nd_frame)
-                yield torch_frame, frame.pts
+                for frame in frames:
+                    nd_frame = frame.to_ndarray(format='bgr24')
+                    torch_frame = torch.from_numpy(nd_frame)
+                    last_good_frame = (torch_frame, frame.pts)
+                    consecutive_errors = 0
+                    yield torch_frame, frame.pts
+            except av.error.InvalidDataError as e:
+                # Handle corrupted frames by duplicating the last good frame
+                if last_good_frame is not None and consecutive_errors < max_consecutive_errors:
+                    consecutive_errors += 1
+                    logger.warning(f"Corrupted frame detected, duplicating last good frame ({consecutive_errors}/{max_consecutive_errors})")
+                    yield last_good_frame[0], last_good_frame[1]
+                else:
+                    if consecutive_errors >= max_consecutive_errors:
+                        raise Exception(f"Too many consecutive corrupted frames ({max_consecutive_errors}), aborting")
+                    else:
+                        # No good frame available yet, skip this frame
+                        continue
+            except Exception as e:
+                # For other unexpected errors, re-raise them
+                raise
 
     def seek(self, offset_ns):
         offset = int((offset_ns / 1_000_000_000) * av.time_base)
