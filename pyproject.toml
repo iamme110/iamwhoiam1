@@ -12,7 +12,7 @@ readme = "README.md"
 dependencies = [
     "ultralytics==8.4.4", # Pinned as we apply a patch
     "numpy",
-    "opencv-python",
+    "opencv-python==4.12.0.88", # Version 4.13 doesn't show any text for HighGUI Trackbars on Linux / no font warning
     "av>=16.1.0", # Versions before 16.1.0 didn't come with support for QSV encoders needed for Lada Intel Arc support
     "mmengine==0.10.7", # Pinned as we apply a patch
     "tqdm",
@@ -51,9 +51,9 @@ version = { attr = "lada.VERSION" }
 # Nvidia extras are still on 2.8 as 2.9.[01] causes a performance regression in DeepMosaics caused by conv3d regression in nvidia-cudnn.
 # There would be a workaround though https://github.com/pytorch/pytorch/releases/tag/v2.9.1
 # Will probably skip and wait for PyTorch 2.10 release
-nvidia-legacy = ["torch==2.8.0", "torchvision==0.23.0"]
-nvidia = ["torch==2.8.0", "torchvision==0.23.0"]
-intel = ["torch==2.9.1", "torchvision==0.24.1", "pytorch-triton-xpu ; sys_platform == 'win32' or sys_platform == 'linux'"]
+nvidia-legacy = ["torch==2.8.0; sys_platform == 'linux' or sys_platform == 'win32'", "torchvision==0.23.0; sys_platform == 'linux' or sys_platform == 'win32'"]
+nvidia = ["torch==2.8.0; sys_platform == 'linux' or sys_platform == 'win32'", "torchvision==0.23.0; sys_platform == 'linux' or sys_platform == 'win32'"]
+intel = ["torch==2.9.1; sys_platform == 'linux' or sys_platform == 'win32'", "torchvision==0.24.1; sys_platform == 'linux' or sys_platform == 'win32'", "pytorch-triton-xpu ; sys_platform == 'win32' or sys_platform == 'linux'"]
 cpu = ["torch==2.9.1", "torchvision==0.24.1"]
 gui = ["pycairo", "PyGObject"]
 
@@ -68,7 +68,7 @@ training = [
     "tensorboard>=2.20.0", # Versions before 2.20.0 were not compatible with Python >= 3.13 without workarounds
 ]
 dataset-creation = ["lap>=0.5.12", "timm", "einops", "pillow", "scipy", "onnx", "onnxruntime-gpu"]
-docker = ["opencv-python-headless"]
+docker = ["opencv-python-headless==4.12.0.88"] # Version 4.13.0.90 is broken as it requires GUI libs, see https://github.com/opencv/opencv-python/issues/1183
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -117,6 +117,7 @@ conflicts = [
         { extra = "intel" },
       ],
 ]
+default-groups = []
 
 [tool.uv.sources]
 torch = [
