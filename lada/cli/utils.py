@@ -97,21 +97,33 @@ def _dump_table(table):
     print(s)
 
 def dump_encoders():
-    from lada.utils.video_utils import get_video_encoder_codecs
+    from lada.utils.video_utils import get_video_encoder_codecs, get_human_readable_hardware_device_name
     encoders = get_video_encoder_codecs()
     print(_("Available video encoders:"))
     table = [[_("Name"), _("Description"), _("Hardware-accelerated"), _("Hardware devices")]]
     for e in encoders:
         hardware = _("Yes") if e.hardware_encoder else ""
-        devices = str(e.hardware_devices) if len(e.hardware_devices) > 0 else ""
+        devices = ", ".join([get_human_readable_hardware_device_name(device) for device in e.hardware_devices])
         table.append([e.name, e.long_name, hardware, devices])
     _dump_table(table)
 
 def dump_torch_devices():
     print(_("Available devices:"))
-    cuda_device_count = torch.cuda.device_count()
-    devices = ["cpu"] + [f"cuda:{i}" for i in range(cuda_device_count)]
-    descriptions = ["CPU"] + [torch.cuda.get_device_properties(i).name for i in range(cuda_device_count)]
+    devices = ["cpu"]
+    descriptions = ["CPU"]
+
+    if torch.cuda.is_available():
+        cuda_device_count = torch.cuda.device_count()
+        for i in range(cuda_device_count):
+            devices.append(f"cuda:{i}")
+            descriptions.append(torch.cuda.get_device_properties(i).name)
+    
+    if hasattr(torch, 'xpu') and torch.xpu.is_available():
+        xpu_device_count = torch.xpu.device_count()
+        for i in range(xpu_device_count):
+            devices.append(f"xpu:{i}")
+            descriptions.append(torch.xpu.get_device_name(i))
+
     table = [[_("Device"), _("Description")]]
     for device, description in zip(devices, descriptions):
         table.append([device, description])

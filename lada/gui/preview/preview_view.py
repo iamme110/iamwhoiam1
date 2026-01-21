@@ -71,6 +71,8 @@ class PreviewView(Gtk.Widget):
         self._thread_counter_lock = threading.Lock()
         self._thumbnail_size = (220, 124)
 
+        self.pipeline_connection_handler_ids = []
+
         self.eos = False
 
         self.frame_restorer_provider: FrameRestorerProvider = FRAME_RESTORER_PROVIDER
@@ -425,18 +427,21 @@ class PreviewView(Gtk.Widget):
     def _reinit_open_file_async(self, file: Gio.File):
         def run():
             if self._video_preview_init_done:
+                for id in self.pipeline_connection_handler_ids: self.pipeline_manager.handler_block(id)
                 self._video_preview_init_done = False
                 self.pipeline_manager.close_video_file()
                 self.close_thumbnailer()
                 self.seek_preview_popover.clear_thumbnail()
-            GLib.idle_add(lambda: self._open_file(file))
+                for id in self.pipeline_connection_handler_ids: self.pipeline_manager.handler_unblock(id)
+            video_metadata = video_utils.get_video_meta_data(file.get_path())
+            subtitle_path = self._find_subtitle_file(video_metadata.video_file)
+            GLib.idle_add(lambda: self._open_file(video_metadata, subtitle_path))
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _open_file(self, file: Gio.File):
+    def _open_file(self, video_metadata: video_utils.VideoMetadata, subtitle_path: str | None):
         assert not self._video_preview_init_done
-        file_path = file.get_path()
-        self.video_metadata = video_utils.get_video_meta_data(file_path)
+        self.video_metadata = video_metadata
         self.frame_restorer_options = FrameRestorerOptions(self.config.mosaic_restoration_model,
                                                            self.config.mosaic_detection_model, self.video_metadata,
                                                            self.config.device,
@@ -463,16 +468,18 @@ class PreviewView(Gtk.Widget):
         self.frame_restorer_provider.init(self._frame_restorer_options)
 
         if self.pipeline_manager:
-            self.pipeline_manager.init_pipeline(self.video_metadata)
+            self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
         else:
             buffer_queue_min_thresh_time, buffer_queue_max_thresh_time = self.get_gst_buffer_bounds()
             self.pipeline_manager = PipelineManager(self.frame_restorer_provider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, self.config.mute_audio)
-            self.pipeline_manager.init_pipeline(self.video_metadata)
+            self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
             self.picture_video_preview.set_paintable(self.pipeline_manager.paintable)
-            self.pipeline_manager.connect("paintable-size-changed", lambda obj: self.emit("window-resize-requested", self.pipeline_manager.paintable, self.box_playback_controls, self.header_bar))
-            self.pipeline_manager.connect("eos", self.on_eos)
-            self.pipeline_manager.connect("waiting-for-data", lambda obj, waiting_for_data: self.on_waiting_for_data(waiting_for_data))
-            self.pipeline_manager.connect("notify::state", lambda obj, spec: GLib.idle_add(lambda: self.on_pipeline_state(obj.get_property(spec.name))))
+            self.pipeline_connection_handler_ids = [
+                self.pipeline_manager.connect("paintable-size-changed", lambda obj: GLib.idle_add(lambda: self.emit("window-resize-requested", self.pipeline_manager.paintable, self.box_playback_controls, self.header_bar))),
+                self.pipeline_manager.connect("eos", lambda obj: GLib.idle_add(lambda: self.on_eos())),
+                self.pipeline_manager.connect("waiting-for-data", lambda obj, waiting_for_data: GLib.idle_add(lambda: self.on_waiting_for_data(waiting_for_data))),
+                self.pipeline_manager.connect("notify::state", lambda obj, spec: GLib.idle_add(lambda: self.on_pipeline_state(obj.get_property(spec.name)))),
+            ]
             GLib.timeout_add(100, self.update_current_position)
 
         def play():
@@ -481,7 +488,7 @@ class PreviewView(Gtk.Widget):
 
         threading.Thread(target=play).start()
 
-    def on_eos(self, *args):
+    def on_eos(self):
         self.eos = True
         self.button_image_play_pause.set_property("icon-name", "media-playback-start-symbolic")
 
@@ -504,7 +511,7 @@ class PreviewView(Gtk.Widget):
     def grab_focus(self):
         self.button_play_pause.grab_focus()
 
-    def on_waiting_for_data(self, waiting_for_data):
+    def on_waiting_for_data(self, waiting_for_data: bool):
         self.waiting_for_data = waiting_for_data
         self.spinner_overlay.set_visible(waiting_for_data)
         if waiting_for_data:
@@ -612,6 +619,16 @@ class PreviewView(Gtk.Widget):
         self._shortcuts_manager.add("preview", "toggle-play-pause", "<Ctrl>space", lambda *args: self.button_play_pause_callback(self.button_play_pause), _("Play/Pause"))
         self._shortcuts_manager.add("preview", "toggle-fullscreen", "f", lambda *args: self.emit("toggle-fullscreen-requested"), _("Enable/Disable fullscreen"))
 
+    def _find_subtitle_file(self, video_file_path: str) -> str | None:
+        """Find SRT subtitle file with the same name as video file."""
+        video_path = pathlib.Path(video_file_path)
+        srt_path = video_path.with_suffix('.srt')
+
+        if srt_path.exists():
+            logger.info(f"Found SRT subtitle file: {srt_path}")
+            return str(srt_path.resolve())
+        return None
+
     def close_thumbnailer(self):
         with self._thumbnailer_lock:
             self._thread_counter += 1 # Invalidate potentially scheduled thread
@@ -627,4 +644,4 @@ class PreviewView(Gtk.Widget):
         if block:
             self.pipeline_manager.close_video_file()
         else:
-            GLib.idle_add(self.pipeline_manager.close_video_file)
+            threading.Thread(target=self.pipeline_manager.close_video_file).start()

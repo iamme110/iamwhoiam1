@@ -1,61 +1,80 @@
 ## Developer Installation (Linux)
-This section describes how to install the app (CLI and GUI) from source.
+This section provides instructions for installing the app (CLI and GUI) from source on Linux.
 
 > [!NOTE]
-> This is the Linux guide. If you're on Windows (and don't want to use WSL) follow the [Windows Installation](windows_install.md).
+> This is for Linux. If you're on Windows (and don't want to use WSL), follow the [Windows Installation](windows_install.md).
 > 
 > Flatpak and Docker Images are available [here](../README.md#using-flatpak)
 
 ### Install CLI
 
-1) Get the code
+1) Install system dependencies
+   * uv
+   * FFmpeg >= 4.4
+   * git
+
+> [!TIP]
+> Arch Linux: `sudo pacman -Syu uv ffmpeg git`
+> 
+> Ubuntu 25.04: `sudo apt install ffmpeg git`. `uv` is not yet available in Ubuntu/Debian repositories, see [uv | Getting Started](https://docs.astral.sh/uv/getting-started/installation/) for alternative installation methods
+> 
+> Ubuntu 24.04: `sudo apt install ffmpeg git`. `uv` is not yet available in Ubuntu/Debian repositories, see [uv | Getting Started](https://docs.astral.sh/uv/getting-started/installation/) for alternative installation methods
+
+> [!TIP]
+> If you have an Intel GPU and want to use QSV hardware video encoding you'll need to install [Intel VPL GPU Runtime](https://github.com/intel/vpl-gpu-rt).
+> 
+> Arch Linux: `sudo pacman -S vpl-gpu-rt`
+
+2) Get the code code
    ```bash
    git clone https://codeberg.org/ladaapp/lada.git
    cd lada
    ```
 
-2) Install system dependencies with your system package manager or compile/install from source
-   * Python >= 3.12, <= 3.13
-   * FFmpeg >= 4.4
-
-> [!TIP]
-> Arch Linux: `sudo pacman -Syu python ffmpeg`
-> 
-> Ubuntu 25.04: `sudo apt install python3.13 python3.13-venv ffmpeg` 
-> 
-> Ubuntu 24.04: `sudo apt install python3.12 python3.12-venv ffmpeg`
-
 3) Create a virtual environment to install python dependencies
     ```bash
-    python3 -m venv .venv
+    uv venv
     source .venv/bin/activate
     ```
+4) Install Python dependencies
+   
+   | extra        | supported GPU architectures                                                                                                                                          | notes                                                              |
+   |--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+   | nvida-legacy | Nvidia Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0)                                                                             | for RTX 10xx, CUDA 12.6                                            |
+   | nvidia       | Nvidia Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)                                                                                 | for RTX 20xx up to including RTX 50xx, CUDA 12.8                   |
+   | intel        | Intel Discrete Arc GPUs: A-series (Alchemist), B-series (Battlemage)<br/>Intel Integrated Arc GPUs of Core Ultra Processors: Meteor Lake-H, Arrow Lake-H, Lunar Lake |                                                                    |
+   | cpu          | -                                                                                                                                                                    | running Lada on CPU will be so slow that it's not really practical |
 
-4) [Install PyTorch](https://pytorch.org/get-started/locally)
+   Based on your hardware, select the appropriate *extra* from the table above and install it with uv.
 
-> [!TIP]
-> Before continuing let's test if the PyTorch installation was successful by checking if your GPU is detected (Skip this step if you're running on CPU)
-> ```bash
-> python -c "import torch ; print(torch.cuda.is_available())"
-> ```
-> If this prints *True* then you're good. It will display *False* if the GPU is not available to PyTorch. Check your GPU drivers and that you chose the correct PyTorch Installation method for your hardware.
+   You have to choose a single option in case your system contains GPUs of multiple vendors like an integrated Intel GPU and a dedicated Nvidia GPU.
 
-5) Install python dependencies
-    ```bash
-    python -m pip install -e '.'
-    ````
+   ```bash
+   uv sync --extra nvidia # Adjust extra according to your available hardware
+   ```
 
-6) Apply patches
+   Before continuing let's test if the installation was successful by checking if [PyTorch](https://pytorch.org) detects your GPU (skip if using CPU):
+
+   ```bash
+   # Nvidia
+   uv run --no-project python -c "import torch ; print(torch.cuda.is_available())"
+   # Intel
+   uv run --no-project python -c "import torch ; print(torch.xpu.is_available())"
+   ```
+   
+   If this prints *True* then you're good. If *False*, check your GPU drivers are up-to-date and ensure you've selected the right *extra* for your hardware.
+
+5) Apply patches
    
     ```bash
-    patch -u -p1 -d .venv/lib/python3.1[23]/site-packages < patches/increase_mms_time_limit.patch
-    patch -u -p1 -d .venv/lib/python3.1[23]/site-packages < patches/remove_ultralytics_telemetry.patch
-    patch -u -p1 -d .venv/lib/python3.1[23]/site-packages < patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff
+    patch -u -p1 -d .venv/lib/python3.13/site-packages < patches/increase_mms_time_limit.patch
+    patch -u -p1 -d .venv/lib/python3.13/site-packages < patches/remove_ultralytics_telemetry.patch
+    patch -u -p1 -d .venv/lib/python3.13/site-packages < patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff
     ```
 
-7) Download model weights
+6) Download model weights
    
-   Download the models from the GitHub Releases page into the `model_weights` directory. The following commands do just that
+   Download the necessary model weights from HuggingFace
    ```shell
    wget 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v2.pt?download=true' -O model_weights/lada_mosaic_detection_model_v2.pt
    wget 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_accurate.pt?download=true' -O model_weights/lada_mosaic_detection_model_v4_accurate.pt
@@ -68,19 +87,19 @@ This section describes how to install the app (CLI and GUI) from source.
    wget 'https://drive.usercontent.google.com/download?id=1ulct4RhRxQp1v5xwEmUH7xz7AK42Oqlw&export=download&confirm=t' -O model_weights/3rd_party/clean_youknow_video.pth
    ```
 
-Now you should be able to run the CLI by calling `lada-cli`.
+You can now run the CLI with `lada-cli`.
 
 > [!TIP]
-> Remember: To start Lada always make sure to:
+> Remember: To start Lada ensure you:
 > * `cd` into the project root directory
-> * Activate the virtual environment via `source .venv/bin/activate`
-> * Run `lada` to start the CLI
+> * Activate the virtual environment with `.\.venv\Scripts\Activate.ps1`
+> * Run the CLI with `lada-cli`
 
 ### Install GUI
 
-1) Install everything mentioned in [Install CLI](#install-cli)
+1) Install the CLI as per instructions [above](#install-cli)
 
-2) Install system dependencies with your system package manager or compile/install from source
+2) Install system dependencies
    * Gstreamer >= 1.14
    * PyGObject
    * GTK >= 4.0
@@ -125,36 +144,30 @@ Now you should be able to run the CLI by calling `lada-cli`.
 
 3) Install python dependencies
     ```bash
-    python -m pip install -e '.[gui]'
+    uv pip install -e '.[gui]'
     ````
 
 > [!TIP]
-> If you intend to hack on the GUI code install also the `gui-dev` group (`--group gui-dev`).
+> If you intend to hack on the GUI code install also the `gui-dev` group: `uv sync --group gui-dev --inexact`.
 
-Now you should be able to run the GUI by calling `lada`.
+You can now run the GUI with `lada`.
 
 > [!TIP]
-> Remember: To start Lada always make sure to:
+> Remember: To start Lada ensure you:
 > * `cd` into the project root directory
-> * Activate the virtual environment via `source .venv/bin/activate`
-> * Run `lada` to start the GUI
+> * Activate the virtual environment with `.\.venv\Scripts\Activate.ps1`
+> * Run the GUI with `lada`
 
 ### Install Translations (optional)
 
-If we have a translation file for your language you might want to use it instead of using the app in English.
+If you prefer the app in a language other than English, you can use translation files if available.
 
 1) Install system dependencies
 
 > [!TIP]
-> Arch Linux: 
-> ```bash
-> sudo pacman -Syu gettext 
-> ```
->   
-> Ubuntu:
-> ```bash
-> sudo apt install gettext
-> ```
+> Arch Linux: `sudo pacman -Syu gettext`
+> 
+> Ubuntu: `sudo apt install gettext`
 
 2) Compile translations
     ```bash

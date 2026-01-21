@@ -93,6 +93,11 @@ class VideoReader:
         self.container.close()
 
     def frames(self) -> Iterator[Tuple[torch.Tensor, int]]:
+        # Print to console via FFmpegs log callback instead of utilizing Pythons logging system
+        # Unfortunately we need this to prevent deadlocks. On certain corrupt video files decode() would hang indefinitely after
+        # encountering an error (always reproducible). See https://github.com/PyAV-Org/PyAV/issues/751 and https://codeberg.org/ladaapp/lada/issues/247
+        # Alternatively, setting thread_type to 'SLICE' would also avoid the deadlock even with av logs enabled but may negatively impact performance.
+        av.logging.restore_default_callback()
         self.container.streams.video[0].thread_type = 'AUTO'
 
         for frame in self.container.decode(video=0):
@@ -248,6 +253,13 @@ class EncodingPreset:
 
     def clone(self): return EncodingPreset(**dataclasses.asdict(self))
 
+def get_default_preset_name():
+    if os_utils.has_nvidia_hardware():
+        return "hevc-nvidia-gpu-hq"
+    if os_utils.has_intel_arc_hardware():
+        return "hevc-intel-gpu-hq"
+    return "h264-cpu-fast"
+
 @cache
 def get_encoding_presets() -> list[EncodingPreset]:
     presets = []
@@ -255,13 +267,39 @@ def get_encoding_presets() -> list[EncodingPreset]:
     if not os.path.exists(encoding_presets_csv_path):
         logger.warning("Could not find encoding_presets.csv!")
         return presets
+    
+    available_encoders_list = get_video_encoder_codecs()
+    available_encoder_names = {e.name.lower() for e in available_encoders_list}
+    has_intel_qsv = False
+    if 'h264_qsv' in available_encoder_names:
+        has_intel_qsv = os_utils.is_intel_qsv_encoding_available()
+    has_nvidia_nvenc = False
+    if 'h264_nvenc' in available_encoder_names:
+        has_nvidia_nvenc = os_utils.is_nvidia_cuda_encoding_available()
+
     with open(encoding_presets_csv_path, mode='r', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile, delimiter='|')
         for row in reader:
-            preset = EncodingPreset(row["preset_name"], _(row["preset_description(translatable)"]), False, row["encoder_name"], row["encoder_options"])
+            encoder_name = row["encoder_name"].lower()
+            preset_name = row["preset_name"].lower()
+            
+            if encoder_name not in available_encoder_names:
+                continue
+
+            is_nvidia_preset = 'nvenc' in encoder_name or 'nvidia' in preset_name
+            is_intel_preset = 'qsv' in encoder_name or 'intel' in preset_name
+            # Nvidia 
+            if is_nvidia_preset and not has_nvidia_nvenc:
+                continue
+            # Intel 
+            if is_intel_preset:
+                if not has_intel_qsv:
+                    continue
+
+            preset = EncodingPreset(row["preset_name"], row["preset_description(translatable)"], False, row["encoder_name"], row["encoder_options"])    
             presets.append(preset)
         return presets
-
+    
 class VideoWriter:
     def _parse_encoder_options(self, encoder_options: str):
         tokens = shlex.split(encoder_options)
@@ -278,6 +316,14 @@ class VideoWriter:
 
         output_container = av.open(output_path, "w", options=container_options)
         video_stream_out: av.VideoStream = output_container.add_stream(encoder, fps)
+
+        encoder_lower = encoder.lower()
+        target_pix_fmt = 'yuv420p'
+        if 'qsv' in encoder_lower:
+            target_pix_fmt = 'nv12'
+        
+        video_stream_out.pix_fmt = target_pix_fmt
+        video_stream_out.codec_context.pix_fmt = target_pix_fmt
 
         video_stream_out.width = width
         video_stream_out.height = height
@@ -368,6 +414,17 @@ class Encoder:
 
     def __hash__(self): return hash(self.name)
 
+def get_human_readable_hardware_device_name(device_type_name: str) -> str:
+    if device_type_name == 'qsv':
+        return 'Intel QSV'
+    elif device_type_name == 'amf':
+        return 'AMD AMF'
+    elif device_type_name == 'cuda':
+        return 'Nvidia CUDA'
+    elif device_type_name == 'videotoolbox':
+        return 'Apple VideoToolbox'
+    return device_type_name
+
 def get_video_encoder_codecs() -> list[Encoder]:
     codecs = set()
     for name in av.codec.codecs_available:
@@ -381,10 +438,12 @@ def get_video_encoder_codecs() -> list[Encoder]:
             continue
         codec_long_name = codec.long_name.lower()
         whitelist_video_codecs = ['hevc', 'h265', "h.265", "h264", "h.264", "vp9", "av1", "ffmpeg video codec #1", "huffyuv", "prores", "mpeg-2"]
+        whitelist_hardware_devices = ['qsv', 'cuda', 'amf', 'videotoolbox']
         if not any(name in codec_long_name for name in whitelist_video_codecs):
             continue
-        is_hardware_encoder = bool(codec.capabilities & av.codec.Capabilities.hardware)
-        encoder = Encoder(codec.name, codec.long_name, is_hardware_encoder, set([hwconfig.device_type.name for hwconfig in codec.hardware_configs] if is_hardware_encoder else []))
+        is_hardware_encoder = codec.hardware_configs is not None and len(codec.hardware_configs) > 0
+        hardware_devices = set([hwconfig.device_type.name for hwconfig in filter(lambda hwconfig: hwconfig.device_type.name in whitelist_hardware_devices, codec.hardware_configs)] if is_hardware_encoder else [] if is_hardware_encoder else [])
+        encoder = Encoder(codec.name, codec.long_name, is_hardware_encoder, hardware_devices)
         codecs.add(encoder)
     return sorted(list(codecs), key=lambda e: e.name)
 

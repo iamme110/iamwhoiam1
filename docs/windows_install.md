@@ -1,27 +1,27 @@
 ## Developer Installation (Windows)
-This section describes how to install the app (CLI and GUI) from source.
+This section provides instructions for installing the app (CLI and GUI) from source on Windows.
 
 > [!NOTE]
-> This is the Windows guide. If you're on Linux (or want to use WSL) follow the [Linux Installation](linux_install.md).
+> This guide is for Windows. If you're using Linux or WSL, follow the [Linux Installation](linux_install.md).
 > 
-> Standalone .exe files are available [here](../README.md#using-windows)
+> Standalone .exe files are available [here](../README.md#using-windows).
 
 ### Install CLI
 
-1) Download and install system dependencies
+1) Install system dependencies
    
-   Open a PowerShell as Administrator and install the following programs via winget
+   Open a PowerShell window as Administrator and run the following commands to install required programs via winget:
    ```Powershell
    winget install --id Gyan.FFmpeg -e --source winget
    winget install --id Git.Git -e --source winget
-   winget install --id Python.Python.3.13 -e --source winget
+   winget install --id astral-sh.uv -e --source winget
    set-ExecutionPolicy RemoteSigned
    ```
-   Then close this PowerShell window
+   Close the PowerShell window once the installation is complete.
 
-2) Get the source
+2) Get the source code
 
-   Open a PowerShell as a regular user. You will not need an Administrator Shell for any of the remaining steps.
+   Open a PowerShell window as a regular user. You will not need an Administrator Shell for any of the remaining steps.
 
    ```Powershell
    git clone https://codeberg.org/ladaapp/lada.git
@@ -31,62 +31,51 @@ This section describes how to install the app (CLI and GUI) from source.
 3) Create a virtual environment to install python dependencies
    
    ```Powershell
-   py -m venv .venv
+   uv venv
    .\.venv\Scripts\Activate.ps1
    ```
 
-4) [Install PyTorch](https://pytorch.org/get-started/locally)
-
-> [!TIP]
-> Before continuing let's test if the PyTorch installation was successful by checking if your GPU is detected (Skip this step if you're running on CPU)
-> ```shell
-> python -c "import torch ; print(torch.cuda.is_available())"
-> ```
-> If this prints *True* then you're good. It will display *False* if the GPU is not available to PyTorch. Check your GPU drivers and that you chose the correct PyTorch Installation method for your hardware.
-
-
-> [!TIP]
-> For AMD Radeon users only:
-> 
-> At the time of writing this, there are currently no official torch builds offered by PyTorch but AMD offers their own torch builds for Windows that you can use.
-> 
-> Note that using ROCm on Radeon cards on Windows is still in preview and there are known issues.
-> You can find which cards are compatible and how to install PyTorch [here](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/index.html).
-> 
-> You might also want to read about and try the latest nightly/experimental PyTorch builds from AMD [here](https://github.com/ROCm/TheRock/blob/main/RELEASES.md).
-> 
-> You might want to consider using Linux or WSL as PyTorch on ROCm is supposedly more stable there at the moment.
-
-5) Install python dependencies
+4) Install Python dependencies
    
+   | extra        | supported GPU architectures                                                                                                                                                       | notes                                                              |
+   |--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+   | nvida-legacy | Nvidia Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0)                                                                             | for RTX 10xx, CUDA 12.6                                            |
+   | nvidia       | Nvidia Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)                                                                                 | for RTX 20xx up to including RTX 50xx, CUDA 12.8                   |
+   | intel        | Intel Discrete Arc GPUs: A-series (Alchemist), B-series (Battlemage)<br/>Intel Integrated Arc GPUs of Core Ultra Processors: Meteor Lake-H, Arrow Lake-H, Lunar Lake |                                                                    |
+   | cpu          | -                                                                                                                                                                    | running Lada on CPU will be so slow that it's not really practical |
+
+   Based on your hardware, select the appropriate *extra* from the table above and install it with uv.
+
+   You have to choose a single option in case your system contains GPUs of multiple vendors like an integrated Intel GPU and a dedicated Nvidia GPU.
+
+   ```bash
+   uv sync --extra nvidia # Adjust extra according to your available hardware
+   ```
+
+   Before continuing let's test if the installation was successful by checking if [PyTorch](https://pytorch.org) detects your GPU (skip if using CPU):
+
+   ```bash
+   # Nvidia
+   uv run --no-project python -c "import torch ; print(torch.cuda.is_available())"
+   # Intel
+   uv run --no-project python -c "import torch ; print(torch.xpu.is_available())"
+   ```
+   
+   If this prints *True* then you're good. If *False*, check your GPU drivers are up-to-date and ensure you've selected the right *extra* for your hardware.
+
+5) Apply patches
+
     ```Powershell
-    pip install -e '.'
+    uv pip install patch
+    uv run --no-project python -m patch -p1 -d .venv/lib/site-packages patches/increase_mms_time_limit.patch
+    uv run --no-project python -m patch -p1 -d .venv/lib/site-packages patches/remove_ultralytics_telemetry.patch
+    uv run --no-project python -m patch -p1 -d .venv/lib/site-packages patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff
+    uv pip uninstall patch
     ````
 
-6) Apply patches
-
-    ```Powershell
-    pip install patch
-    python -m patch -p1 -d .venv/lib/site-packages patches/increase_mms_time_limit.patch
-    python -m patch -p1 -d .venv/lib/site-packages patches/remove_ultralytics_telemetry.patch
-    python -m patch -p1 -d .venv/lib/site-packages patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff
-    pip uninstall patch
-    ````
-
-> [!TIP]
-> For AMD Radeon users only:
-> 
-> At the time of writing this, neither the latest stable/preview build 6.4 nor the latest daily build 7.1 includes support for `torch.dist`
-> 
-> One of our dependencies (mmengine) uses it internally and will crash if `torch.dist` is not available. You can use the following patch to work around that and make Lada work regardless:
-> ```Powershell
-> python -m patch -p1 -d .venv/lib/site-packages patches/remove_use_of_torch_dist_in_mmengine.patch
-> ```
-> If you're reading this and AMD included `torch.dist` in their builds please create a Pull Request or create an issue to update this tip.
-
-7) Download model weights
+6) Download model weights
    
-   Download the models from HuggingFace into the `model_weights` directory. The following commands do just that
+   Download the necessary model weights from HuggingFace
    ```Powershell
    Invoke-WebRequest 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v2.pt?download=true' -OutFile ".\model_weights\lada_mosaic_detection_model_v2.pt"
    Invoke-WebRequest 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_accurate.pt?download=true' -OutFile ".\model_weights\lada_mosaic_detection_model_v4_accurate.pt"
@@ -99,85 +88,88 @@ This section describes how to install the app (CLI and GUI) from source.
    Invoke-WebRequest 'https://drive.usercontent.google.com/download?id=1ulct4RhRxQp1v5xwEmUH7xz7AK42Oqlw&export=download&confirm=t' -OutFile ".\model_weights\3rd_party\clean_youknow_video.pth"
    ```
 
-Now you should be able to run the CLI by calling `lada-cli`.
+You can now run the CLI with `lada-cli`.
 
 > [!TIP]
-> Remember: To start Lada always make sure to:
+> Remember: To start Lada ensure you:
 > * `cd` into the project root directory
-> * Activate the virtual environment via `.\.venv\Scripts\Activate.ps1`
-> * Run `lada` to start the CLI
+> * Activate the virtual environment with `.\.venv\Scripts\Activate.ps1`
+> * Run the CLI with `lada-cli`
 
 ### Install GUI
 
-1) Install everything mentioned in [Install CLI](#install-cli)
+1. Install the CLI as per instructions [above](#install-cli)
 
-2) Download and install build dependencies
-   
-   Open a PowerShell as Administrator and install the following programs via winget
-   ```Powershell
-   winget install --id MSYS2.MSYS2 -e --source winget
-   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --silent --override "--wait --quiet --add ProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-   winget install --id Rustlang.Rustup -e --source winget
-   winget install --id Microsoft.VCRedist.2013.x64  -e --source winget
-   winget install --id Microsoft.VCRedist.2013.x86  -e --source winget
-   ```
-   Then restart your computer.
+2. Install system dependencies
 
-   We need these tools in order to build the app's system dependencies in the next step.
+   You can choose between two methods to install system dependencies for the GUI:
+   
+   #### Option 1: Install pre-compiled dependencies (Recommended)
+   
+   * Download the pre-compiled system dependencies from [here](https://pixeldrain.com/u/SB1nGZJQ) (`sha256: 171152e8df65556f02065e080ec087153aaaa39634346b3dbe08a4f0f0d3ba1f`).
+   * Extract the file and ensure the `build_gtk` folder is located in the project root. The directory should look like this:
+     ```
+     <lada root>
+     ├── pyproject.toml
+     ├── LICENSE.md
+     ├── lada/
+     ├── build_gtk/ # <- extracted from lada_windows_dependencies_python313_gvsbuild202611.7z
+     ...
+     ```
 
-3) Build and install system dependencies via gvsbuild
-   
-   Open a PowerShell as a regular user. You will not need an Administrator Shell for any of the remaining steps.
-   
-   Prepare the build environment
-   ```Powershell
-   py -m venv venv_gtk
-   .\venv_gtk\Scripts\Activate.ps1
-   pip install gvsbuild==2025.11.1
-   pip install patch
-   python -m patch -p1 -d venv_gtk/lib/site-packages patches/gvsbuild_ffmpeg.patch
-   pip uninstall patch
-   ```
-   
-   Now we can start building the dependencies with `gvsbuild`. Grab a coffee, this will take a while...
-   
-   ```Powershell
-   gvsbuild build --configuration=release --build-dir='./build_gtk' --enable-gi --py-wheel gtk4 adwaita-icon-theme pygobject libadwaita gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-plugin-gtk4 gst-libav gst-python gettext
-   ```
-   
-   Congrats! If this command finished successfully you've set up all system dependencies so we can now continue installing Lada and it's python dependencies.
-   
-   Let's exit the gvsbuild build environment and re-activate the project venv
-   ```Powershell
-   deactivate
-   .\.venv\Scripts\Activate.ps1
-   ```
+   #### Option 2: Build system dependencies yourself
+  
+   * Open a PowerShell window as Administrator and install the required build tools using winget:
+     ```Powershell
+     winget install --id MSYS2.MSYS2 -e --source winget
+     winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --silent --override "--wait --quiet --add ProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+     winget install --id Rustlang.Rustup -e --source winget
+     winget install --id Microsoft.VCRedist.2013.x64  -e --source winget
+     winget install --id Microsoft.VCRedist.2013.x86  -e --source winget
+     ```
+     Then restart your computer.
 
-> [!TIP]
-> Do not change `--build-dir` parameter of the gvsbuild command. The app expects this exact directory name and location so it can find these build artifacts.
+   * Open a PowerShell as a regular user and prepare the build envirobnment (You will not need an Administrator Shell for any of the remaining steps)
+   
+     ```Powershell
+     uv venv venv_gtk
+     .\venv_gtk\Scripts\Activate.ps1
+     uv pip install gvsbuild==2026.1.0
+     ```
+   
+   * Build the dependencies with gvsbuild. Grab a coffee, this will take a while...
+   
+     ```Powershell
+     gvsbuild build --configuration=release --build-dir='./build_gtk' --enable-gi --py-wheel gtk4 adwaita-icon-theme pygobject libadwaita gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-plugin-gtk4 gst-libav gst-python gettext
+     ```
+   * Once the build is complete, deactivate the build environment and reactivate the project venv:
+     ```Powershell
+     deactivate
+     .\.venv\Scripts\Activate.ps1
+     ```
 
-4) Install python dependencies
+3. Install python dependencies
 
-   For the GUI we'll need to install the Python wheels we've just built with gvsbuild
+   Install the Python wheels we've built (or downloaded) in the previous step
     ```Powershell
-    pip install --force-reinstall (Resolve-Path ".\build_gtk\gtk\x64\release\python\pygobject*.whl")
-    pip install --force-reinstall (Resolve-Path ".\build_gtk\gtk\x64\release\python\pycairo*.whl")
+    uv pip install --force-reinstall (Resolve-Path ".\build_gtk\gtk\x64\release\python\pygobject*.whl")
+    uv pip install --force-reinstall (Resolve-Path ".\build_gtk\gtk\x64\release\python\pycairo*.whl")
     ````
 
 > [!TIP]
-> If you intend to hack on the GUI code install also the `gui-dev` group (`--group gui-dev`).
+> If you intend to hack on the GUI code install also the `gui-dev` group: `uv sync --group gui-dev --inexact`.
 
-Now you should be able to run the GUI by calling `lada`.
+You can now run the GUI with `lada`.
 
 > [!TIP]
-> Remember: To start Lada always make sure to:
+> Remember: To start Lada ensure you:
 > * `cd` into the project root directory
-> * Activate the virtual environment via `.\.venv\Scripts\Activate.ps1`
-> * Run `lada` to start the GUI
+> * Activate the virtual environment with `.\.venv\Scripts\Activate.ps1`
+> * Run the GUI with `lada`
 
 ### Install Translations (optional)
 
-If we have a translation file for your language you might want to use it instead of using the app in English.
+If you prefer the app in a language other than English, you can use translation files if available.
 
 1) Install system dependencies
   
