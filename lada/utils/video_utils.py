@@ -132,11 +132,9 @@ class VideoReader:
                     logger.warning(f"Corrupted frame detected, duplicating last good frame ({consecutive_errors}/{max_consecutive_errors})")
                     yield last_good_frame[0], last_good_frame[1]
                 else:
-                    if consecutive_errors >= max_consecutive_errors:
-                        raise Exception(f"Too many consecutive corrupted frames ({max_consecutive_errors}), aborting")
-                    else:
-                        # No good frame available yet, skip this frame
-                        continue
+                    # No good frame available yet (first frame corrupt) or too many consecutive errors
+                    # Re-raise the error instead of skipping to fail fast
+                    raise Exception(f"Cannot handle corrupted frame: {'first frame corrupt' if last_good_frame is None else f'too many consecutive corrupted frames ({max_consecutive_errors})'}") from e
             except Exception as e:
                 # For other unexpected errors, re-raise them
                 raise
