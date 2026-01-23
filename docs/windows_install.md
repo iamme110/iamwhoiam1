@@ -135,6 +135,9 @@ You can now run the CLI with `lada-cli`.
      uv venv venv_gtk
      .\venv_gtk\Scripts\Activate.ps1
      uv pip install gvsbuild==2026.1.0
+     uv pip install patch
+     uv run --no-project python -m patch -p1 -d venv_gtk/lib/site-packages patches/gvsbuild_ffmpeg.patch
+     uv pip uninstall patch
      ```
    
    * Build the dependencies with gvsbuild. Grab a coffee, this will take a while...
@@ -173,12 +176,7 @@ If you prefer the app in a language other than English, you can use translation 
 
 1) Install system dependencies
   
-   We'll need the tool gettext. This program is already available if you've installed the GUI so you just have to run this
-
-   ```Powershell
-   $env:Path = (Resolve-Path ".\build_gtk\gtk\x64\release\bin").Path + ";" + $env:Path
-   $env:LIB = (Resolve-Path ".\build_gtk\gtk\x64\release\lib").Path + ";" + $env:LIB
-   ```
+   We'll need the tool gettext. This program is already available if you've installed the [GUI](#install-gui) and you can continue with the next step.
 
    Alternatively, if you've only installed the CLI then it might be the easiest to install gettext this way:
 
