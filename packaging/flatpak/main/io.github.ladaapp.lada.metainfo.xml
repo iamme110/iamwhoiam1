@@ -39,6 +39,7 @@
     <url type="homepage">https://codeberg.org/ladaapp/lada</url>
     <url type="bugtracker">https://codeberg.org/ladaapp/lada/issues</url>
 	<url type="translate">https://translate.codeberg.org/projects/lada/lada/</url>
+	<url type="vcs-browser">https://codeberg.org/ladaapp/lada</url>
 
     <launchable type="desktop-id">io.github.ladaapp.lada.desktop</launchable>
 
