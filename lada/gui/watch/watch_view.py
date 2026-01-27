@@ -4,6 +4,7 @@
 import logging
 import pathlib
 import threading
+from typing import Literal
 
 from gi.repository import Gtk, GObject, GLib, Gio, Gst, Adw, Gdk, Graphene
 
@@ -13,9 +14,9 @@ from lada.gui.config.config import Config
 from lada.gui.config.config_sidebar import ConfigSidebar
 from lada.gui.config.no_gpu_banner import NoGpuBanner
 from lada.gui.frame_restorer_provider import FrameRestorerProvider, FrameRestorerOptions, FRAME_RESTORER_PROVIDER, FrameRestorerOptionsBuilder
-from lada.gui.watch.fullscreen_mouse_activity_controller import FullscreenMouseActivityController
 from lada.gui.watch.gstreamer_pipeline_manager import PipelineManager, PipelineState
 from lada.gui.watch.headerbar_files_drop_down import HeaderbarFilesDropDown
+from lada.gui.watch.overlay_elements_controller import OverlayElementsController
 from lada.gui.watch.seek_preview_popover import SeekPreviewPopover
 from lada.gui.watch.timeline import Timeline
 from lada.gui.shortcuts import ShortcutsManager
@@ -46,9 +47,12 @@ class WatchView(Gtk.Widget):
     config_sidebar: ConfigSidebar = Gtk.Template.Child()
     header_bar: Adw.HeaderBar = Gtk.Template.Child()
     button_toggle_fullscreen: Gtk.Button = Gtk.Template.Child()
+    button_toggle_fullscreen_overlay: Gtk.Button = Gtk.Template.Child()
     stack_video_player: Gtk.Stack = Gtk.Template.Child()
     view_switcher: Adw.ViewSwitcher = Gtk.Template.Child()
     button_open_files: Gtk.Button = Gtk.Template.Child()
+    button_subtitles: Gtk.Button = Gtk.Template.Child()
+    button_image_subtitles = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -91,7 +95,7 @@ class WatchView(Gtk.Widget):
         self.widget_timeline.connect('seek_requested', lambda widget, seek_position: self.seek_video(seek_position))
         self.widget_timeline.connect('cursor_position_changed', lambda widget, cursor_position, x: self.show_cursor_position(cursor_position if cursor_position >= 0 else None, x if x >= 0 else None))
 
-        self.fullscreen_mouse_activity_controller = None
+        self.overlay_elements_controller: OverlayElementsController = OverlayElementsController(self, [self.box_playback_controls, self.button_toggle_fullscreen_overlay], [self.header_bar])
 
         self.pipeline_manager: PipelineManager | None = None
 
@@ -103,7 +107,7 @@ class WatchView(Gtk.Widget):
 
         self.setup_double_click_fullscreen()
 
-        drop_target = utils.create_video_files_drop_target(lambda files: self.emit("files-opened", files))
+        drop_target = utils.create_files_drop_target(lambda files: self.emit("files-opened", files), lambda files: self.emit("subtitle-file-opened", files[0]))
         self.add_controller(drop_target)
 
         def on_files_opened(obj, files):
@@ -119,6 +123,7 @@ class WatchView(Gtk.Widget):
             else:
                 self.drop_down_files.set_sensitive(False)
         self.connect("files-opened", on_files_opened)
+        self.connect("subtitle-file-opened", lambda obj, file: self._adjust_subtitles_pipeline_async(action="open", subtitles_file=file))
 
     @GObject.Property(type=Config)
     def config(self):
@@ -178,8 +183,12 @@ class WatchView(Gtk.Widget):
     def files_opened_signal(self, files: list[Gio.File]):
         pass
 
-    @GObject.Signal(name="window-resize-requested", arg_types=(Gdk.Paintable, Gtk.Widget, Gtk.Widget))
-    def video_size_changed(self, paintable: Gdk.Paintable, playback_controls: Gtk.Widget, headerbar: Gtk.Widget):
+    @GObject.Signal(name="subtitle-file-opened", arg_types=(Gio.File,))
+    def subtitle_file_opened(self, files: list[Gio.File]):
+        pass
+
+    @GObject.Signal(name="window-resize-requested", arg_types=(Gdk.Paintable, Gtk.Widget))
+    def video_size_changed(self, paintable: Gdk.Paintable, headerbar: Gtk.Widget):
         pass
 
     @Gtk.Template.Callback()
@@ -217,6 +226,18 @@ class WatchView(Gtk.Widget):
         dismissed_callback = lambda *args: self.button_open_files.set_sensitive(True)
         utils.show_open_files_dialog(callback, dismissed_callback)
 
+    @Gtk.Template.Callback()
+    def button_subtitles_callback(self, button_clicked):
+        self.button_subtitles.set_sensitive(False)
+        if self.pipeline_manager.has_subtitles:
+            assert self.pipeline_manager.has_subtitles
+            self._adjust_subtitles_pipeline_async(action="hide", subtitles_file=None)
+        else:
+            assert not self.pipeline_manager.has_subtitles
+            callback = lambda file: self.emit("subtitle-file-opened", file)
+            dismissed_callback = lambda *args: self.button_subtitles.set_sensitive(True)
+            utils.show_open_subtitles_file_dialog(callback, dismissed_callback)
+
     @property
     def frame_restorer_options(self):
         return self._frame_restorer_options
@@ -247,6 +268,28 @@ class WatchView(Gtk.Widget):
         self._buffer_queue_min_thresh_time_auto = value
         if self._video_preview_init_done:
             self.update_gst_buffers()
+
+    def _adjust_subtitles_pipeline_async(self, action: Literal["hide", "open"], subtitles_file: Gio.File | None):
+        def adjust_button(icon_name):
+            self.button_subtitles.set_sensitive(True)
+            self.button_image_subtitles.props.icon_name = icon_name
+        def run():
+            self.should_be_paused = True
+            self.pipeline_manager.pause()
+            if action == "open":
+                assert subtitles_file is not None
+                subtitle_added = self.pipeline_manager.adjust_subtitles(subtitles_file.get_path())
+                icon_name = "subtitles-symbolic" if subtitle_added else "subtitles-off-outline-symbolic"
+            elif action == "hide":
+                hide = self.button_image_subtitles.props.icon_name == "subtitles-symbolic"
+                self.pipeline_manager.hide_subtitle(hide)
+                icon_name = "subtitles-off-outline-symbolic" if hide else "subtitles-symbolic"
+            GLib.idle_add(lambda: adjust_button(icon_name))
+            self.should_be_paused = False
+            if not self.eos:
+                self.pipeline_manager.play()
+
+        threading.Thread(target=run, daemon=True).run()
 
     def setup_double_click_fullscreen(self):
             click_gesture = Gtk.GestureClick()
@@ -294,6 +337,8 @@ class WatchView(Gtk.Widget):
             if self._frame_restorer_options:
                 self.frame_restorer_options = FrameRestorerOptionsBuilder(self.frame_restorer_options).detect_face_mosaics(self._config.detect_face_mosaics).build()
         self._config.connect("notify::detect-face-mosaics", on_detect_face_mosaics)
+
+        self._config.connect('notify::subtitles-font-size', lambda obj, spec: self.pipeline_manager.set_subtitle_font_size(self._config.subtitles_font_size))
 
     def set_speaker_icon(self, mute: bool):
         icon_name = "speaker-0-symbolic" if mute else "speaker-4-symbolic"
@@ -348,11 +393,13 @@ class WatchView(Gtk.Widget):
         # popover_width, _, _, _ = self.seek_preview_popover.measure(Gtk.Orientation.HORIZONTAL, controls_width)
         popover_width = self._thumbnail_size[0] + 18 # TODO: Workaround as measuring the Gtk.Popover does not return the expected value
 
+        spacing = 8
+
         pointing_rect = Gdk.Rectangle()
         # Center the popover horizontally on mouse cursor
         pointing_rect.x = int(mouse_x_in_controls - popover_width // 2)
         # Ensure popover stays within horizontal controls area
-        pointing_rect.x = max(0, min(pointing_rect.x, controls_width - popover_width))
+        pointing_rect.x = max(spacing, min(pointing_rect.x, controls_width - popover_width - spacing))
 
         # Vertical Position slightly above the timeline
         timeline_allocation = self.widget_timeline.get_allocation()
@@ -471,14 +518,15 @@ class WatchView(Gtk.Widget):
             self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
         else:
             buffer_queue_min_thresh_time, buffer_queue_max_thresh_time = self.get_gst_buffer_bounds()
-            self.pipeline_manager = PipelineManager(self.frame_restorer_provider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, self.config.mute_audio)
+            self.pipeline_manager = PipelineManager(self.frame_restorer_provider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, self.config.mute_audio, self.config.subtitles_font_size)
             self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
             self.picture_video_player.set_paintable(self.pipeline_manager.paintable)
             self.pipeline_connection_handler_ids = [
-                self.pipeline_manager.connect("paintable-size-changed", lambda obj: GLib.idle_add(lambda: self.emit("window-resize-requested", self.pipeline_manager.paintable, self.box_playback_controls, self.header_bar))),
+                self.pipeline_manager.connect("paintable-size-changed", lambda obj: GLib.idle_add(lambda: self.emit("window-resize-requested", self.pipeline_manager.paintable, self.header_bar))),
                 self.pipeline_manager.connect("eos", lambda obj: GLib.idle_add(lambda: self.on_eos())),
                 self.pipeline_manager.connect("waiting-for-data", lambda obj, waiting_for_data: GLib.idle_add(lambda: self.on_waiting_for_data(waiting_for_data))),
                 self.pipeline_manager.connect("notify::state", lambda obj, spec: GLib.idle_add(lambda: self.on_pipeline_state(obj.get_property(spec.name)))),
+                self.pipeline_manager.connect("opening-subtitles-failed", lambda obj: GLib.idle_add(lambda: self.on_opening_subtitles_failed()))
             ]
             GLib.timeout_add(100, self.update_current_position)
 
@@ -500,6 +548,10 @@ class WatchView(Gtk.Widget):
         if not self._video_preview_init_done and state == PipelineState.PLAYING:
             self._video_preview_init_done = True
             self._show_video_preview()
+
+    def on_opening_subtitles_failed(self):
+        self.button_image_subtitles.props.icon_name = "subtitles-symbolic"
+        # todo: show error dialog. Bonus points to handle the error (pause and remove subtitle elements in pipeline)
 
     def pause_if_currently_playing(self):
         if not self._video_preview_init_done:
@@ -569,34 +621,24 @@ class WatchView(Gtk.Widget):
             time = f"{minutes}:{seconds:02d}" if hours == 0 else f"{hours}:{minutes:02d}:{seconds:02d}"
             return time
 
-    def on_fullscreen_activity(self, fullscreen_activity: bool):
-        if fullscreen_activity:
-            self.header_bar.set_visible(True)
-            self.set_cursor_from_name("default")
-            self.box_playback_controls.set_visible(True)
-            self.button_play_pause.grab_focus()
-        else:
-            self.header_bar.set_visible(False)
-            self.set_cursor_from_name("none")
-            self.box_playback_controls.set_visible(False)
-
     def on_fullscreened(self, fullscreened: bool):
         if fullscreened:
-            self.fullscreen_mouse_activity_controller = FullscreenMouseActivityController(self, self.box_video_player)
+            self.header_bar.set_visible(False)
+            self.button_toggle_fullscreen_overlay.set_visible(True)
             self.banner_no_gpu.set_revealed(False)
             self.button_toggle_fullscreen.set_property("icon-name", "view-restore-symbolic")
+            self.button_toggle_fullscreen_overlay.set_property("icon-name", "view-restore-symbolic")
+            self.button_play_pause.grab_focus()
             self.box_video_player.set_css_classes(["fullscreen-video-player"])
         else:
             self.header_bar.set_visible(True)
-            self.set_cursor_from_name("default")
-            self.button_toggle_fullscreen.set_property("icon-name", "view-fullscreen-symbolic")
-            self.box_playback_controls.set_visible(True)
-            self.button_play_pause.grab_focus()
-            self.box_video_player.remove_css_class("fullscreen-video-player")
+            self.button_toggle_fullscreen_overlay.set_visible(False)
             if self._config.get_property('device') == 'cpu':
                 self.banner_no_gpu.set_revealed(True)
-        self.fullscreen_mouse_activity_controller.on_fullscreened(fullscreened)
-        self.fullscreen_mouse_activity_controller.connect("notify::fullscreen-activity", lambda object, spec: GLib.idle_add(lambda: self.on_fullscreen_activity(object.get_property(spec.name))))
+            self.button_toggle_fullscreen.set_property("icon-name", "view-fullscreen-symbolic")
+            self.button_toggle_fullscreen_overlay.set_property("icon-name", "view-fullscreen-symbolic")
+            self.button_play_pause.grab_focus()
+            self.box_video_player.remove_css_class("fullscreen-video-player")
 
     def _show_spinner(self, *args):
         self.config_sidebar.set_property("disabled", True)
