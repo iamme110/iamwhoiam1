@@ -2,16 +2,18 @@
 # SPDX-License-Identifier: AGPL-3.0
 import csv
 import dataclasses
+import io
 import json
 import logging
 import os
 import re
 import subprocess
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from fractions import Fraction
 from functools import cache
-from typing import Callable, Iterator, Tuple
+from typing import Callable, Iterator, Tuple, Literal
 from collections import deque
 import heapq
 import shlex
@@ -270,9 +272,9 @@ class EncodingPreset:
     def clone(self): return EncodingPreset(**dataclasses.asdict(self))
 
 def get_default_preset_name():
-    if os_utils.has_nvidia_hardware():
+    if os_utils.has_nvidia_gpu() and is_nvidia_cuda_encoding_available():
         return "hevc-nvidia-gpu-hq"
-    if os_utils.has_intel_arc_hardware():
+    if os_utils.has_intel_arc_gpu() and is_intel_qsv_encoding_available():
         return "hevc-intel-gpu-hq"
     return "h264-cpu-fast"
 
@@ -288,10 +290,10 @@ def get_encoding_presets() -> list[EncodingPreset]:
     available_encoder_names = {e.name.lower() for e in available_encoders_list}
     has_intel_qsv = False
     if 'h264_qsv' in available_encoder_names:
-        has_intel_qsv = os_utils.is_intel_qsv_encoding_available()
+        has_intel_qsv = is_intel_qsv_encoding_available()
     has_nvidia_nvenc = False
     if 'h264_nvenc' in available_encoder_names:
-        has_nvidia_nvenc = os_utils.is_nvidia_cuda_encoding_available()
+        has_nvidia_nvenc = is_nvidia_cuda_encoding_available()
 
     with open(encoding_presets_csv_path, mode='r', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile, delimiter='|')
@@ -302,20 +304,58 @@ def get_encoding_presets() -> list[EncodingPreset]:
             if encoder_name not in available_encoder_names:
                 continue
 
+            # Nvidia
             is_nvidia_preset = 'nvenc' in encoder_name or 'nvidia' in preset_name
-            is_intel_preset = 'qsv' in encoder_name or 'intel' in preset_name
-            # Nvidia 
             if is_nvidia_preset and not has_nvidia_nvenc:
                 continue
-            # Intel 
-            if is_intel_preset:
-                if not has_intel_qsv:
-                    continue
+            # Intel
+            is_intel_preset = 'qsv' in encoder_name or 'intel' in preset_name
+            if is_intel_preset and not has_intel_qsv:
+                continue
 
             preset = EncodingPreset(row["preset_name"], row["preset_description(translatable)"], False, row["encoder_name"], row["encoder_options"])    
             presets.append(preset)
         return presets
-    
+
+@cache
+def is_intel_qsv_encoding_available() -> bool:
+    if sys.platform == "win32":
+        return _is_codec_hardware_acceleration_working('h264_qsv', 'qsv')
+    else:
+        # TODO: For some reason the method HWAccel.create() is not working for qsv when using official Linux binary wheel of PyAv 16.1.0
+        # It throws a "Function not implemented" error regardless whether qsv is working or not (cuda/nvenc check works as expected)
+        # It works when building PyAV locally against ffmpeg from ArchLinux on the same system
+        # As a workaround let's encode a dummy frame to see if qsv is working
+        # See issue: #297
+        try:
+            with av.logging.Capture():
+                mem_file = io.BytesIO()
+                with av.open(mem_file, mode='w', format='mp4') as container:
+                    stream = container.add_stream('h264_qsv', rate=30)
+                    stream.width = 64
+                    stream.height = 64
+                    stream.pix_fmt = 'nv12'
+                    dummy_frame = av.VideoFrame(64, 64, format='nv12')
+                    stream.encode(dummy_frame)
+                    return True
+        except Exception:
+            return False
+
+@cache
+def is_nvidia_cuda_encoding_available() -> bool:
+    return _is_codec_hardware_acceleration_working('h264_nvenc', 'cuda')
+
+def _is_codec_hardware_acceleration_working(codec_name: str, hwaccel_device_type: str, codec_mode: Literal["r", "w"]='w') -> bool:
+    try:
+        with av.logging.Capture():
+            hwaccel = av.codec.hwaccel.HWAccel(hwaccel_device_type, allow_software_fallback=False)
+            codec = av.codec.Codec(codec_name, codec_mode)
+            # Initialize hardware context. This will raise if hardware is not available (missing, driver or library issue)
+            hwaccel.create(codec)
+            return True
+    except Exception:
+        return False
+
 class VideoWriter:
     def _parse_encoder_options(self, encoder_options: str):
         tokens = shlex.split(encoder_options)
