@@ -85,6 +85,9 @@ class VideoReader:
         self.container = None
 
     def __enter__(self):
+        # We currently do not pass through metadata to the output file so let's just ignore potential errors. Fixes #127
+        # E.g. metadata could be encoded in CP936 instead of UTF-8 which would raise an error if we don't pass it in metadata_encoding.
+        # If we use it in the future we have to consider non-default character encodings.
         self.container = av.open(self.file, metadata_errors='ignore')
         return self
 
