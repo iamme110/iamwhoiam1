@@ -148,7 +148,7 @@ function Install-PythonDependencies {
 }
 
 function Create-EXE {
-    param([Parameter(Mandatory)] [boolean]$cliOnly)
+    param([Parameter(Mandatory)] [boolean]$cliOnly,[Parameter(Mandatory)] [string]$extra)
 
     Write-Host "Creating executable..."
 
@@ -159,9 +159,11 @@ function Create-EXE {
     $env:LIB = $release_dir + "\lib;" + $env:LIB
     $env:INCLUDE = $release_dir + "\include;" + $release_dir + "\include\cairo;" + $release_dir + "\include\glib-2.0;" + $release_dir + "\include\gobject-introspection-1.0;" + $release_dir + "\lib\glib-2.0\include;" + $env:INCLUDE
 
+    $env:LADA_BUILD_EXTRA = $extra
     $cliOnlyArg = if ($cliOnly) { '--cli-only' } else { '' }
 
     uv run --no-project pyinstaller --noconfirm ./packaging/windows/lada.spec -- $cliOnlyArg
+    Remove-Item Env:\LADA_BUILD_EXTRA
 
     deactivate
 }
@@ -242,7 +244,7 @@ if (-not $skipTranslations) {
 }
 Download-ModelWeights
 Install-PythonDependencies $cliOnly $extra
-Create-EXE $cliOnly
+Create-EXE $cliOnly $extra
 if (-not $skipArchive) {
     Create-7ZArchive $extra
 }
