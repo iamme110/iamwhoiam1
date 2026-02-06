@@ -9,8 +9,7 @@ import shutil
 import os
 import sys
 import pathlib
-
-BUILD_EXTRA = os.environ.get("LADA_BUILD_EXTRA", "nvidia").lower()
+import fnmatch
 
 def get_project_root() -> str:
     project_root = pathlib.Path(".").absolute()
@@ -35,7 +34,7 @@ def get_intel_xpu_runtime_libs(project_root):
     
     if venv_root.exists():
         for p_file in venv_root.rglob("*.dll"):
-            if any(p_file.name.lower().startswith(pat.replace('*', '').lower()) for pat in patterns):
+            if any(fnmatch.fnmatch(p_file.name.lower(), pat.lower()) for pat in patterns):
                 found_binaries.append((str(p_file), "."))
     
     return found_binaries
@@ -188,12 +187,21 @@ def get_cli_components(project_root_dir: str, common_datas: list, common_binarie
     )
     return cli_a, cli_pyz, cli_exe
 
-def parser_args() -> dict:
+def parser_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cli-only", action="store_true", help="Only build the CLI, skipping the GUI.")
+    
+    parser.add_argument(
+        "--extra", 
+        default="nvidia", 
+        choices=["nvidia", "intel"],
+        help="The installation extra/variant to build for (matches pyproject.toml extras)."
+    )
     return parser.parse_args()
 
 args = parser_args()
+BUILD_EXTRA = args.extra.lower()
+
 project_root = get_project_root()
 
 if not args.cli_only:
