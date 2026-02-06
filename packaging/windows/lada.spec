@@ -26,10 +26,7 @@ def get_intel_xpu_runtime_libs(project_root):
     found_binaries = []
 
     patterns = [
-        "sycl*.dll", "ur_win*.dll", "UR_LOADER.dll", "libmmd.dll", 
-        "pti_*.dll", "pi_*.dll", "mkl_*.dll", "svml_*.dll", "impi.dll",
-        "libintel*.dll", "tbb*.dll", "ze_loader.dll", "ze_intel_gpu64.dll",
-        "ur_adapter_level_zero.dll"
+        "ur_win*.dll", "UR_LOADER.dll", "ur_adapter_level_zero.dll"
     ]
     
     if venv_root.exists():
