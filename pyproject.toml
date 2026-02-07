@@ -54,6 +54,7 @@ version = { attr = "lada.VERSION" }
 nvidia-legacy = ["torch==2.8.0; sys_platform == 'linux' or sys_platform == 'win32'", "torchvision==0.23.0; sys_platform == 'linux' or sys_platform == 'win32'"]
 nvidia = ["torch==2.8.0; sys_platform == 'linux' or sys_platform == 'win32'", "torchvision==0.23.0; sys_platform == 'linux' or sys_platform == 'win32'"]
 intel = ["torch==2.9.1; sys_platform == 'linux' or sys_platform == 'win32'", "torchvision==0.24.1; sys_platform == 'linux' or sys_platform == 'win32'", "pytorch-triton-xpu ; sys_platform == 'win32' or sys_platform == 'linux'"]
+amd = ["torch==2.10.0; sys_platform == 'linux'", "torchvision==0.25.0; sys_platform == 'linux'", "triton-rocm==3.6.0; sys_platform == 'linux'"]
 cpu = ["torch==2.9.1", "torchvision==0.24.1"]
 gui = ["pycairo", "PyGObject"]
 
@@ -81,6 +82,11 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm7.1"
+explicit = true
+
+[[tool.uv.index]]
 name = "pytorch-xpu"
 url = "https://download.pytorch.org/whl/xpu"
 explicit = true
@@ -105,6 +111,10 @@ conflicts = [
         { extra = "intel" },
       ],
       [
+        { extra = "cpu" },
+        { extra = "amd" },
+      ],
+      [
         { extra = "nvidia" },
         { extra = "nvidia-legacy" },
       ],
@@ -113,7 +123,19 @@ conflicts = [
         { extra = "intel" },
       ],
       [
+        { extra = "nvidia" },
+        { extra = "amd" },
+      ],
+      [
         { extra = "nvidia-legacy" },
+        { extra = "intel" },
+      ],
+      [
+        { extra = "nvidia-legacy" },
+        { extra = "amd" },
+      ],
+      [
+        { extra = "amd" },
         { extra = "intel" },
       ],
 ]
@@ -124,14 +146,19 @@ torch = [
     { index = "pytorch-cu128", extra = "nvidia" },
     { index = "pytorch-cu126", extra = "nvidia-legacy" },
     { index = "pytorch-xpu", extra = "intel" },
+    { index = "pytorch-rocm", extra = "amd" },
     { index = "pytorch-cpu", extra = "cpu" },
 ]
 torchvision = [
     { index = "pytorch-cu128", extra = "nvidia" },
     { index = "pytorch-cu126", extra = "nvidia-legacy" },
     { index = "pytorch-xpu", extra = "intel" },
+    { index = "pytorch-rocm", extra = "amd" },
     { index = "pytorch-cpu", extra = "cpu" },
 ]
 pytorch-triton-xpu = [
   { index = "pytorch-xpu", marker = "sys_platform == 'win32' or sys_platform == 'linux'" },
+]
+triton-rocm = [
+  { index = "pytorch-rocm", marker = "sys_platform == 'linux'" },
 ]
