@@ -212,6 +212,15 @@ common_runtime_hooks = [ospj(project_root, "packaging/windows/pyinstaller_runtim
 common_icon = [ospj(project_root, 'assets/io.github.ladaapp.lada.png')]
 
 cli_a, cli_pyz, cli_exe = get_cli_components(project_root, common_datas, common_binaries, common_runtime_hooks, common_icon)
+coll = COLLECT(
+    cli_exe,
+    cli_a.binaries,
+    cli_a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='lada',
+)
 
 if args.cli_only:
     coll = COLLECT(
