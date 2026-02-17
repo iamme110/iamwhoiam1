@@ -46,8 +46,8 @@ def _update_env_var(env_var, paths, separator=";"):
     else:
         os.environ[env_var] = separator.join(paths_to_add)
 
-def set_environment_variables(project_root_dir: str):
-    release_dir = (pathlib.Path(project_root_dir) / "build_gtk_release" / "gtk" / "x64" / "release").absolute()
+def set_environment_variables(gvsbuild_dir: str):
+    release_dir = (pathlib.Path(gvsbuild_dir) / "gtk" / "x64" / "release").absolute()
 
     bin_dir = release_dir / "bin"
     lib_dir = release_dir / "lib"
@@ -93,7 +93,7 @@ def get_common_datas(project_root: str):
     common_datas += [(str(p), str(p.relative_to(project_root).parent)) for p in pathlib.Path(ospj(project_root, "lada/locale")).rglob("*.mo")]
     return common_datas
 
-def get_gui_components(project_root_dir: str, common_datas: list, common_binaries: list, common_runtime_hooks: list, common_icon):
+def get_gui_components(project_root_dir: str, gvsbuild_dir: str, common_datas: list, common_binaries: list, common_runtime_hooks: list, common_icon):
     gui_datas = common_datas + [
         (str(p), str(p.relative_to(project_root_dir).parent)) for p in (pathlib.Path(project_root_dir) / "lada" / "gui").rglob("*.ui")
     ] + [
@@ -102,7 +102,7 @@ def get_gui_components(project_root_dir: str, common_datas: list, common_binarie
         (ospj(project_root_dir, 'assets/io.github.ladaapp.lada.png'), 'share/icons/hicolor/128x128/apps'),
     ]
 
-    gtk_release_dir = pathlib.Path(project_root_dir) / "build_gtk_release" / "gtk" / "x64" / "release"
+    gtk_release_dir = pathlib.Path(gvsbuild_dir) / "gtk" / "x64" / "release"
     gtk_bin_dir = gtk_release_dir / "bin"
 
     gui_binaries = common_binaries + [
@@ -187,11 +187,12 @@ def get_cli_components(project_root_dir: str, common_datas: list, common_binarie
 def parser_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cli-only", action="store_true", help="Only build the CLI, skipping the GUI.")
+    parser.add_argument("--gvsbuild-dir", default="./build_gtk", type=str, help="Gvsbuild root directory")
     
     parser.add_argument(
         "--extra", 
         default="nvidia", 
-        choices=["nvidia", "intel"],
+        choices=["nvidia", "nvidia-legacy", "intel"],
         help="The installation extra/variant to build for (matches pyproject.toml extras)."
     )
     return parser.parse_args()
@@ -202,7 +203,7 @@ BUILD_EXTRA = args.extra.lower()
 project_root = get_project_root()
 
 if not args.cli_only:
-    set_environment_variables(project_root)
+    set_environment_variables(args.gvsbuild_dir)
 
 common_datas = get_common_datas(project_root)
 
@@ -233,7 +234,7 @@ if args.cli_only:
         name='lada',
     )
 else:
-    gui_a, gui_pyz, gui_exe = get_gui_components(project_root, common_datas, common_binaries, common_runtime_hooks, common_icon)
+    gui_a, gui_pyz, gui_exe = get_gui_components(project_root, args.gvsbuild_dir, common_datas, common_binaries, common_runtime_hooks, common_icon)
     coll = COLLECT(
         gui_exe,
         gui_a.binaries,

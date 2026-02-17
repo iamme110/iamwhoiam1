@@ -1,0 +1,340 @@
+name: Package
+
+on: workflow_dispatch
+
+env:
+  GVSBUILD_VERSION: "2026.1.0"
+  UV_VERSION: "0.10.6"
+  PYINSTALLER_VERSION: "6.19.0"
+  GVSBUILD_DIR: "C:/gtk-build"
+
+jobs:
+  package-docker:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: "ladaapp/lada"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "${{ env.UV_VERSION }}"
+
+      - name: Extract Lada version
+        run: |
+          version=$(uv run --no-project python -c 'import lada; print(lada.VERSION)')
+          echo "LADA_VERSION=$version" >> $GITHUB_ENV
+          echo "Lada version: $version"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: false # todo
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/docker/Dockerfile
+          build-args: SOURCE_DATE_EPOCH=0
+          push: false # todo
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.LADA_VERSION }}
+            ${{ env.IMAGE_NAME }}:latest
+
+  package-macos:
+    # PyInstaller recommends building on oldest macOS that should be supported. On GitHub this currently is macOS 14
+    # https://pyinstaller.org/en/stable/usage.html#making-macos-apps-forward-compatible
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system deps
+        run: brew install ffmpeg uv gtk4 libadwaita adwaita-icon-theme gstreamer gettext
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "${{ env.UV_VERSION }}"
+
+      - name: Extract Lada version
+        run: |
+          version=$(uv run --no-project python -c 'import lada; print(lada.VERSION)')
+          echo "LADA_VERSION=$version" >> $GITHUB_ENV
+          echo "Lada version: $version"
+
+      - name: Install python deps
+        run: |
+          uv venv --clear
+          uv sync --frozen --extra cpu --extra gui
+          uv pip install pyinstaller==$PYINSTALLER_VERSION
+
+      - name: Apply patches
+        run: |
+          patch -u -p1 -d .venv/lib/python3.13/site-packages < patches/increase_mms_time_limit.patch
+          patch -u -p1 -d .venv/lib/python3.13/site-packages < patches/remove_ultralytics_telemetry.patch
+          patch -u -p1 -d .venv/lib/python3.13/site-packages < patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff
+
+      - name: Compile translations
+        run: bash translations/compile_po.sh --release
+
+      - name: Package
+        run: |
+          source .venv/bin/activate
+          uv run --no-project pyinstaller --noconfirm packaging/macOS/lada.spec
+          ls
+          ls dist
+
+      - name: Create artifacts
+        run: |
+          archive_path="./dist/lada-v${LADA_VERSION}_macos.7z"
+
+          # Split .7z archive into 2GB chunks so they can be uploaded to GitHub Releases
+          7z a -v1999m "$archive_path" "./dist"
+
+          # If single chunk rename to remove suffix
+          single_chunk=$(ls ./dist | grep -E '\.7z\.[0-9]{3}$' | wc -l)
+          if [ "$single_chunk" -eq 1 ]; then
+            old="./dist/lada-v${LADA_VERSION}_macos.7z.001"
+            new="$archive_path"
+            mv "$old" "$new"
+          fi
+
+          ls ./dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-macos
+          path: |
+            ./dist/lada-v*.7z.*
+            ./dist/lada-v*.7z
+
+  run-gvsbuild:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "${{ env.UV_VERSION }}"
+
+      - name: Extract Lada version
+        run: |
+          $version = $(uv run --no-project python -c 'import lada; print(lada.VERSION)')
+          echo "LADA_VERSION=$version" >> $env:GITHUB_ENV
+          echo "Lada version: $version"
+
+      - name: Restore gvsbuild cache
+        id: cache-gvsbuild
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.GVSBUILD_DIR }}/**
+            !${{ env.GVSBUILD_DIR }}/build/**
+            !${{ env.GVSBUILD_DIR }}/logs/**
+            !${{ env.GVSBUILD_DIR }}/tools/**
+            !${{ env.GVSBUILD_DIR }}/export/**
+          key: gvsbuild-${{ env.GVSBUILD_VERSION }}-${{ hashFiles('patches/gvsbuild_*.patch') }}
+
+      - name: Build
+        if: steps.cache-gvsbuild.outputs.cache-hit != 'true'
+        timeout-minutes: 180
+        run: |
+          uv venv --clear
+          .venv/Scripts/Activate.ps1
+ 
+          # pin setuptools to fix build failure of gobject-introspection. Can be removed once https://github.com/wingtk/gvsbuild/pull/1715 is released
+          uv pip install gvsbuild==$env:GVSBUILD_VERSION "setuptools<81.0.0"
+          # Apply ffmpeg patch to support decoding wma audio streams. Can probably once https://github.com/wingtk/gvsbuild/pull/1700 is released
+          uv pip install patch
+          uv run --no-project python -m patch -p1 -d .venv/lib/site-packages patches/gvsbuild_ffmpeg.patch
+          uv pip uninstall patch
+          # Adjust PATH to make sure that msys binaries come before git bash binaries + preserve env vars by using option --use-env. Fixes https://github.com/wingtk/gvsbuild/issues/1723
+          $env:Path = "C:/msys64/usr/bin;$env:Path"
+          gvsbuild build `
+              --ninja-opts -j2 `
+              --configuration=release `
+              --build-dir=$env:GVSBUILD_DIR `
+              --enable-gi `
+              --py-wheel `
+              --use-env `
+              gtk4 adwaita-icon-theme pygobject libadwaita gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-plugin-gtk4 gst-libav gst-python gettext
+
+          deactivate
+          Remove-Item -Path .venv -Recurse -Force
+
+      - name: Create artifact
+        shell: pwsh
+        run: |
+          mkdir ./build_gtk
+          Move-Item -Path "$env:GVSBUILD_DIR/gtk" -Destination "./build_gtk/gtk"
+          7z a "gvsbuild_${env:GVSBUILD_VERSION}_py313_v${env:LADA_VERSION}.7z" build_gtk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-windows-gvsbuild-dir
+          path: gvsbuild_*.7z
+
+  package-windows:
+    needs:
+      - run-gvsbuild
+    runs-on: windows-2025
+    strategy:
+      matrix:
+        value: ["intel", "nvidia", "nvidia-legacy"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "${{ env.UV_VERSION }}"
+
+      - name: Extract Lada version
+        run: |
+          $version = $(uv run --no-project python -c 'import lada; print(lada.VERSION)')
+          echo "LADA_VERSION=$version" >> $env:GITHUB_ENV
+          echo "Lada version: $version"
+
+      - name: Download GitHub Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: artifacts-windows-gvsbuild-dir
+
+      - name: Restore gvsbuild dir
+        run: |
+          ls *.7z
+          7z x gvsbuild_*.7z
+          Move-Item -Path "./build_gtk" -Destination "${{ env.GVSBUILD_DIR }}"
+          ls "${{ env.GVSBUILD_DIR }}"
+
+      - name: Install system deps (2)
+        run: |
+          choco install ffmpeg
+
+      - name: Install python deps
+        run: |
+          uv venv --clear
+          .venv/Scripts/Activate.ps1
+
+          uv sync --active --frozen --extra "${{ matrix.value }}" --no-editable --no-install-project
+          uv pip install --no-deps '.'
+          uv pip install --force-reinstall (Resolve-Path "$env:GVSBUILD_DIR/gtk/x64/release/python/pygobject*.whl").Path
+          uv pip install --force-reinstall (Resolve-Path "$env:GVSBUILD_DIR/gtk/x64/release/python/pycairo*.whl").Path
+
+          uv pip install pyinstaller==$env:PYINSTALLER_VERSION
+
+          uv pip install patch
+          uv run --no-project python -m patch -p1 -d .venv/lib/site-packages patches/increase_mms_time_limit.patch
+          uv run --no-project python -m patch -p1 -d .venv/lib/site-packages patches/remove_ultralytics_telemetry.patch
+          uv run --no-project python -m patch -p1 -d .venv/lib/site-packages patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff
+          uv pip uninstall patch
+
+      - name: Compile translations
+        run: |
+          # Adjust PATH to include gettext tools used in translation compile script
+          $path_backup = $env:Path
+          $gtk_bin_dir = (Resolve-Path "$env:GVSBUILD_DIR/gtk/x64/release/bin").Path
+          $env:Path = $gtk_bin_dir + ";" + $env:Path
+      
+          & ./translations/compile_po.ps1 --release
+      
+          $env:Path = $path_backup
+
+      - name: Download model weights
+        run: |
+          function Is-Downloaded($file_name, $sha256) {
+              $path = ".\model_weights\" + $file_name
+              return (Test-Path $path) -And ((Get-FileHash -Algorithm SHA256 $path).Hash -eq $sha256)
+          }
+
+          function Download($url, $file_name, $sha256) {
+              if (Is-Downloaded $file_name $sha256) {
+                  return
+              }
+              Invoke-WebRequest $url -OutFile (".\model_weights\" + $file_name)
+              if (!(Is-Downloaded $file_name $sha256)) {
+                  Write-Warning "Error downloading " + $url
+                  exit 1
+              }
+          }
+           
+          Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v2.pt?download=true' "lada_mosaic_detection_model_v2.pt" "056756fcab250bcdf0833e75aac33e2197b8809b0ab8c16e14722dcec94269b5"
+          Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_accurate.pt?download=true' "lada_mosaic_detection_model_v4_accurate.pt" "c244d7e49d8f88e264b8dc15f91fb21f5908ad8fb6f300b7bc88462d0801bc1f"
+          Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_fast.pt?download=true' "lada_mosaic_detection_model_v4_fast.pt" "9a6b660d1d3e3797d39515e08b0e72fcc59815f38279faa7a4ab374ab2c1e3b4"
+          Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_restoration_model_generic_v1.2.pth?download=true' "lada_mosaic_restoration_model_generic_v1.2.pth" "d404152576ce64fb5b2f315c03062709dac4f5f8548934866cd01c823c8104ee" 
+          Download 'https://drive.usercontent.google.com/download?id=1ulct4RhRxQp1v5xwEmUH7xz7AK42Oqlw&export=download&confirm=t' "3rd_party\clean_youknow_video.pth" "5643ca297c13920b8ffd39a0d85296e494683a69e5e8204d662653d24c582766"
+
+      - name: Package Lada
+        run: |
+          .venv/Scripts/Activate.ps1
+ 
+          uv run --no-project pyinstaller --noconfirm ./packaging/windows/lada.spec -- --extra="${{ matrix.value }}" --gvsbuild-dir="$env:GVSBUILD_DIR"
+
+      - name: Create artifacts
+        run: |
+          $archive_path = "./dist/lada-v${env:LADA_VERSION}_windows_${{ matrix.value }}.7z"
+
+          # Split .7z archive into 2GB chunks so they can be uploaded to GitHub Releases
+          7z.exe a -v1999m $archive_path "./dist/lada"
+
+          # If single chunk rename to remove suffix
+          $single_chunk = (Get-ChildItem "./dist" -filter "*.7z*" | Where-Object Name -Match '\.7z.\d{3}$' | Measure-Object).Count -eq 1
+          if ($single_chunk) {
+              $old = "./dist/lada-v${env:LADA_VERSION}_windows_${{ matrix.value }}.7z.001"
+              $new = $archive_path
+              mv $old $new
+          }
+
+          ls ./dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-windows-${{ matrix.value }}
+          path: |
+            ./dist/lada-v*.7z.*
+            ./dist/lada-v*.7z
+
+  release:
+    needs:
+      - package-windows
+      - package-macos
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      "contents": "write"
+      "id-token": "write"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "${{ env.UV_VERSION }}"
+
+      - name: Extract Lada version
+        run: |
+          version=$(uv run --no-project python -c 'import lada; print(lada.VERSION)')
+          echo "LADA_VERSION=$version" >> $GITHUB_ENV
+          echo "Lada version: $version"
+
+      - name: Download GitHub Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: artifacts-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        run: |
+          ls -lR artifacts
+          gh release create "$LADA_VERSION" --draft --prerelease --title "$LADA_VERSION" --target "${{ github.sha }}" artifacts/*
+
