@@ -7,6 +7,7 @@ import pathlib
 import sys
 import tempfile
 import textwrap
+from fractions import Fraction
 
 try:
     import torch
@@ -26,7 +27,10 @@ from lada.utils.os_utils import gpu_has_fp16_acceleration, get_default_torch_dev
 from lada.restorationpipeline.frame_restorer import FrameRestorer
 from lada.restorationpipeline import load_models
 from lada.utils.threading_utils import STOP_MARKER, ErrorMarker
-from lada.utils.video_utils import get_video_meta_data, VideoWriter, get_default_preset_name
+from lada.utils.video_utils import (
+    get_video_meta_data, VideoWriter, get_default_preset_name,
+    generate_video_id, count_frames_in_parts, combine_video_segments  # Imported from video_utils
+)
 
 def setup_argparser() -> argparse.ArgumentParser:
     examples_header_text = _("Examples:")
@@ -93,47 +97,125 @@ def setup_argparser() -> argparse.ArgumentParser:
 
     return parser
 
+
 def process_video_file(input_path: str, output_path: str, temp_dir_path: str, device: torch.device, mosaic_restoration_model, mosaic_detection_model,
                        mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, encoder: str, encoder_options: str, mp4_fast_start):
+    """
+    Restores the video file by processing it in scene-aware segments.
+    This allows for resuming from a checkpoint if the process is interrupted.
+    """
     video_metadata = get_video_meta_data(input_path)
+    
+    # Checkpoint configuration
+    video_id = generate_video_id(input_path)
+    work_dir = os.path.join(temp_dir_path, f"lada_resume_{video_id}")
+    os.makedirs(work_dir, exist_ok=True)
+    
+    # Use Fraction to ensure Rational compatibility for PyAV/FFmpeg
+    fps_rational = Fraction(video_metadata.video_fps_exact).limit_denominator()
+    time_base_rational = Fraction(video_metadata.time_base.numerator, video_metadata.time_base.denominator)
+
+    # SEGMENT_FRAME_MIN ensures segments are not too small.
+    # Splitting only occurs at scene boundaries AFTER passing this limit.
+    SEGMENT_FRAME_MIN = 1000 
+    existing_parts = sorted(pathlib.Path(work_dir).glob("part_*.mp4"))
+    
+    if existing_parts:
+        # Safety: Discard the last segment as it's likely corrupted due to interruption
+        last_part = existing_parts.pop()
+        if last_part.exists():
+            last_part.unlink()
+    
+    # Calculate exact resume point
+    finished_frames = count_frames_in_parts(existing_parts)
+    start_ns = int(finished_frames * (10**9 / float(fps_rational)))
+    
+    if finished_frames > 0:
+        print(_("\n♻️ [Resume] Found existing progress. Resuming from frame {frame} (scene boundary).").format(frame=finished_frames))
 
     frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
+    
     success = True
-    video_tmp_file_output_path = os.path.join(temp_dir_path, f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
+    # Temporary file for final merging
+    video_tmp_merged_path = os.path.join(temp_dir_path, f"{os.path.basename(os.path.splitext(output_path)[0])}.merged.tmp.mp4")
     pathlib.Path(output_path).parent.mkdir(exist_ok=True, parents=True)
+    
     frame_restorer_progressbar = utils.Progressbar(video_metadata)
+    
+    segment_paths = [str(p) for p in existing_parts]
+    current_segment_frames = 0
+    segment_index = len(existing_parts)
+    video_writer = None
+
     try:
-        frame_restorer.start()
+        frame_restorer.start(start_ns=start_ns)
         frame_restorer_progressbar.init()
-        with VideoWriter(video_tmp_file_output_path, video_metadata.video_width, video_metadata.video_height,
-                         video_metadata.video_fps_exact, encoder=encoder, encoder_options=encoder_options,
-                         time_base=video_metadata.time_base, mp4_fast_start=mp4_fast_start) as video_writer:
-            for elem in frame_restorer:
-                if elem is STOP_MARKER or isinstance(elem, ErrorMarker):
-                    success = False
-                    frame_restorer_progressbar.error = True
-                    print("Error on export: frame restorer stopped prematurely")
-                    break
-                (restored_frame, restored_frame_pts) = elem
-                video_writer.write(restored_frame, restored_frame_pts, bgr2rgb=True)
-                frame_restorer_progressbar.update()
+        # Fast-forward progress bar to resume point
+        for _ in range(finished_frames):
+            frame_restorer_progressbar.update()
+
+        for elem in frame_restorer:
+            if elem is STOP_MARKER or isinstance(elem, ErrorMarker):
+                success = False
+                frame_restorer_progressbar.error = True
+                break
+            
+            # is_scene_end is a flag indicating the end of a temporal clip
+            (restored_frame, restored_frame_pts, is_scene_end) = elem
+
+            if video_writer is None:
+                segment_index += 1
+                seg_path = os.path.join(work_dir, f"part_{segment_index:04d}.mp4")
+                segment_paths.append(seg_path)
+                
+                video_writer = VideoWriter(seg_path, video_metadata.video_width, video_metadata.video_height,
+                                         fps=fps_rational, encoder=encoder, encoder_options=encoder_options,
+                                         time_base=time_base_rational, mp4_fast_start=mp4_fast_start)
+                current_segment_frames = 0
+
+            video_writer.write(restored_frame, restored_frame_pts, bgr2rgb=True)
+            current_segment_frames += 1
+            frame_restorer_progressbar.update()
+
+            # --- Scene-Aware Splitting Logic ---
+            # We only close the current segment at a scene boundary.
+            # This allows temporal models (like BasicVSR++) to maintain context
+            # and prevents visual artifacts/flickering at segment joins.
+            if current_segment_frames >= SEGMENT_FRAME_MIN and is_scene_end:
+                video_writer.release()
+                video_writer = None 
+
     except (Exception, KeyboardInterrupt) as e:
         success = False
-        if isinstance(e, KeyboardInterrupt):
-            raise e
+        if not isinstance(e, KeyboardInterrupt):
+            import traceback
+            traceback.print_exc()
+            print(_("\n❌ Restoration Error: {error}").format(error=e))
         else:
-            print("Error on export", e)
+            print(_("\n🛑 Interrupted. Progress saved."))
     finally:
+        if video_writer:
+            video_writer.release()
         frame_restorer.stop()
         frame_restorer_progressbar.close(ensure_completed_bar=success)
 
+    # Final assembly
     if success:
-        print(_("Processing audio"))
-        audio_utils.combine_audio_video_files(video_metadata, video_tmp_file_output_path, output_path)
+        print(_("🎬 [Finalizing] Merging segments losslessly..."))
+        try:
+            combine_video_segments(segment_paths, video_tmp_merged_path)
+            audio_utils.combine_audio_video_files(video_metadata, video_tmp_merged_path, output_path)
+            # Cleanup temporary workspace
+            shutil.rmtree(work_dir)
+            if os.path.exists(video_tmp_merged_path):
+                os.remove(video_tmp_merged_path)
+            print(_("✅ Restoration completed: {path}").format(path=output_path))
+        except Exception as e:
+            print(_("❌ Merge Error: {error}").format(error=e))
     else:
-        if os.path.exists(video_tmp_file_output_path):
-            os.remove(video_tmp_file_output_path)
+        print(_("📦 Progress saved to: {dir}").format(dir=work_dir))
+
 
 def main():
     argparser = setup_argparser()

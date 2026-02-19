@@ -318,7 +318,10 @@ class FrameRestorer:
                     self.eof = True
                     self.frame_restoration_queue.put(EOF_MARKER)
                     break
+                
                 num_mosaics_detected, frame, frame_pts = _frame_result
+                is_scene_end = False 
+
                 if num_mosaics_detected > 0:
                     while queue_marker is None and not self._clip_buffer_contains_all_cips_needed_for_current_restoration(frame_num, num_mosaics_detected, clip_buffer):
                         queue_marker = self._read_next_clip(frame_num, clip_buffer)
@@ -326,13 +329,19 @@ class FrameRestorer:
                         break
 
                     self._restore_frame(frame, frame_num, clip_buffer)
-                    self.frame_restoration_queue.put((frame, frame_pts))
+                    
+                    for c in clip_buffer:
+                        if c.frame_end == frame_num:
+                            is_scene_end = True
+                            break
+
+                    self.frame_restoration_queue.put((frame, frame_pts, is_scene_end))
                     if self.stop_requested:
                         logger.debug("frame restoration worker: frame_restoration_queue producer unblocked")
                         break
                     self._collect_garbage(clip_buffer)
                 else:
-                    self.frame_restoration_queue.put((frame, frame_pts))
+                    self.frame_restoration_queue.put((frame, frame_pts, True))
                     if self.stop_requested:
                         logger.debug("frame restoration worker: frame_restoration_queue producer unblocked")
                         break
@@ -341,11 +350,10 @@ class FrameRestorer:
             logger.debug("frame restoration worker: stopped itself, EOF")
         else:
             logger.debug("frame restoration worker: stopped by request")
-
     def __iter__(self):
         return self
 
-    def __next__(self) -> tuple[Image, int] | ErrorMarker | StopMarker:
+    def __next__(self) -> tuple[Image, int, bool] | ErrorMarker | StopMarker:
         if self.eof and self.frame_restoration_queue.empty():
             raise StopIteration
         else:
@@ -356,7 +364,9 @@ class FrameRestorer:
                     return elem
                 if elem is EOF_MARKER:
                     raise StopIteration
+                
                 return elem
 
     def get_frame_restoration_queue(self) -> PipelineQueue:
         return self.frame_restoration_queue
+    
