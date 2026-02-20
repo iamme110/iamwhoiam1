@@ -80,21 +80,10 @@ def VideoReaderOpenCV(*args, **kwargs):
         cap.release()
 
 def generate_video_id(path: str) -> str:
-    """
-    Generates a unique ID based on file path, size, and a hash of the content.
-    This ID is used to create a unique workspace for the resume functionality.
-    
-    Args:
-        path (str): Path to the video file.
-        
-    Returns:
-        str: A unique identifier for the video.
-    """
     path_obj = pathlib.Path(path)
     file_size = path_obj.stat().st_size
     try:
         with open(path, "rb") as f:
-            # Hash only head and tail for performance (2MB total)
             head = f.read(1024 * 1024)
             if file_size > 1024 * 1024:
                 f.seek(-1024 * 1024, os.SEEK_END)
@@ -104,20 +93,9 @@ def generate_video_id(path: str) -> str:
         content_hash = hashlib.md5(head + tail).hexdigest()
         return f"{path_obj.stem}_{file_size}_{content_hash[:8]}"
     except Exception:
-        # Fallback to a simpler ID if file reading fails
         return f"{path_obj.stem}_{file_size}"
 
 def count_frames_in_parts(parts: list) -> int:
-    """
-    Counts the total number of frames across multiple video segments.
-    Used to determine the exact resume point.
-    
-    Args:
-        parts (list): List of paths to video segment files (.mp4).
-        
-    Returns:
-        int: Total frame count.
-    """
     total = 0
     for p in parts:
         try:
@@ -128,13 +106,6 @@ def count_frames_in_parts(parts: list) -> int:
     return total
 
 def combine_video_segments(segment_paths: list, output_path: str):
-    """
-    Losslessly concatenates video segments using the FFmpeg concat demuxer.
-    
-    Args:
-        segment_paths (list): Ordered list of paths to video segments.
-        output_path (str): Target path for the merged video.
-    """
     list_path = output_path + ".concat_list.txt"
     with open(list_path, "w", encoding="utf-8") as f:
         for p in segment_paths:
@@ -142,7 +113,6 @@ def combine_video_segments(segment_paths: list, output_path: str):
     try:
         from lada.utils import os_utils
         cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_path, '-c', 'copy', output_path]
-        # Use startup info to avoid window flickering on Windows
         subprocess.run(cmd, check=True, startupinfo=os_utils.get_subprocess_startup_info())
     finally:
         if os.path.exists(list_path):
