@@ -131,7 +131,7 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
     start_ns = int(finished_frames * (10**9 / float(fps_rational)))
     
     if finished_frames > 0:
-        print(_("\n♻️ [Resume] Found existing progress. Resuming from frame {frame} (scene boundary).").format(frame=finished_frames))
+        print(f"\n♻️ [Resume] Found existing progress. Resuming from frame {finished_frames} (scene boundary).")
 
     frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
