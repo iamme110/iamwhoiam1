@@ -23,9 +23,78 @@ import cv2
 import torch
 import numpy as np
 import pathlib
+import threading
+import queue
+import shutil
 from lada.utils import Image, Mask, VideoMetadata, os_utils
 
 logger = logging.getLogger(__name__)
+
+class IncrementalMerger(threading.Thread):
+    """
+    Thread for incrementally merging video segments in the background and deleting original parts.
+    """
+    def __init__(self, merged_path):
+        super().__init__(name="IncrementalMerger", daemon=True)
+        self.merged_path = merged_path
+        self.queue = queue.Queue()
+        self.error = None
+
+    def add_part(self, part_path):
+        if part_path and os.path.exists(part_path):
+            self.queue.put(part_path)
+
+    def run(self):
+        try:
+            while True:
+                part_path = self.queue.get()
+                if part_path is None: # Termination signal
+                    break
+                
+                try:
+                    if not os.path.exists(self.merged_path):
+                        # Move the first part as the initial merged file
+                        shutil.move(part_path, self.merged_path)
+                    else:
+                        # Append new segment to the existing progress file
+                        tmp_merged = self.merged_path + ".merging.mp4"
+                        combine_video_segments([self.merged_path, part_path], tmp_merged)
+                        # Atomic swap to update progress
+                        os.replace(tmp_merged, self.merged_path)
+                        # Delete the segment after merging
+                        if os.path.exists(part_path):
+                            os.remove(part_path)
+                finally:
+                    self.queue.task_done()
+        except Exception as e:
+            self.error = e
+
+    def stop(self):
+        self.queue.put(None)
+        self.join()
+        if self.error:
+            raise self.error
+
+def get_resume_progress(work_dir, merged_path):
+    """
+    Calculates finished frames and cleanup unfinished parts.
+    Returns (finished_frames, existing_parts)
+    """
+    existing_parts = sorted(pathlib.Path(work_dir).glob("part_*.mp4"))
+    
+    # Cleanup potentially corrupted last part
+    if existing_parts:
+        last_part = existing_parts.pop()
+        if last_part.exists():
+            last_part.unlink()
+
+    parts_to_count = []
+    if os.path.exists(merged_path):
+        parts_to_count.append(merged_path)
+    parts_to_count.extend([str(p) for p in existing_parts])
+
+    finished_frames = count_frames_in_parts(parts_to_count)
+    return finished_frames, existing_parts
 
 def read_video_frames(path: str, float32: bool = True, start_idx: int = 0, end_idx: int | None = None, normalize_neg1_pos1 = False, binary_frames=False) -> list[np.ndarray]:
     with VideoReaderOpenCV(path) as video_reader:

@@ -3,8 +3,11 @@
 
 import argparse
 import mimetypes
+import json
 import os
 import pathlib
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -241,3 +244,38 @@ class Progressbar:
             time_remaining = self._format_duration(time_remaining_s)
             speed_fps = f"{1. / mean_duration:.1f}"
             self.tqdm.desc = _(" | Remaining: {time_remaining} ({frames_remaining}f) | Speed: {speed_fps}fps").format(time_remaining=time_remaining, frames_remaining=frames_remaining, speed_fps=speed_fps)
+
+def validate_resume_config(work_dir, current_config):
+    """
+    Validates the current configuration against the saved one in work_dir.
+    Returns True if valid or if the user chooses to restart.
+    """
+    config_path = os.path.join(work_dir, "resume_config.json")
+    if not os.path.exists(config_path):
+        with open(config_path, "w") as f:
+            json.dump(current_config, f, indent=4)
+        return True
+
+    with open(config_path, "r") as f:
+        prev_config = json.load(f)
+    
+    mismatch = []
+    for key, val in current_config.items():
+        if str(prev_config.get(key)) != str(val):
+            mismatch.append(key)
+    
+    if mismatch:
+        print(_("\n⚠️  [Resume] Configuration mismatch detected: {keys}").format(keys=", ".join(mismatch)))
+        print(_("Resuming with different settings may result in a corrupted output video."))
+        response = input(_("Do you want to clear previous progress and start fresh? (y/N): "))
+        if response.lower() == 'y':
+            shutil.rmtree(work_dir)
+            os.makedirs(work_dir, exist_ok=True)
+            with open(config_path, "w") as f:
+                json.dump(current_config, f, indent=4)
+            return True
+        else:
+            print(_("Aborting to prevent corrupted output."))
+            sys.exit(1)
+            
+    return True
