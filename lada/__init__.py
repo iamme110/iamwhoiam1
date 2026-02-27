@@ -19,10 +19,12 @@ def _get_version(version: str):
     try:
         import pathlib
         import subprocess
-        from lada.utils import os_utils
         here = pathlib.Path(__file__).parent.resolve()
-
-        commit_id_short = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(here), stderr=subprocess.DEVNULL, startupinfo=os_utils.get_subprocess_startup_info()).decode("ascii").strip()
+        startup_info = None
+        if sys.platform == "win32":
+            startup_info = subprocess.STARTUPINFO()
+            startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        commit_id_short = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(here), stderr=subprocess.DEVNULL, startupinfo=startup_info).decode("ascii").strip()
         return f"{version}+{commit_id_short}"
     except Exception:
         return version
