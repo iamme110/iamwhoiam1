@@ -245,13 +245,17 @@ class Progressbar:
             speed_fps = f"{1. / mean_duration:.1f}"
             self.tqdm.desc = _(" | Remaining: {time_remaining} ({frames_remaining}f) | Speed: {speed_fps}fps").format(time_remaining=time_remaining, frames_remaining=frames_remaining, speed_fps=speed_fps)
 
-def validate_resume_config(work_dir, current_config):
+def validate_resume_config(config_path, current_work_dir, current_merged_path, current_config):
     """
-    Validates the current configuration against the saved one in work_dir.
-    Returns True if valid or if the user chooses to restart.
+    Validates current configuration and handles migration if the temp directory changed.
     """
-    config_path = os.path.join(work_dir, "resume_config.json")
+    config_dir = os.path.dirname(config_path)
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir, exist_ok=True)
+
     if not os.path.exists(config_path):
+        current_config["work_dir"] = current_work_dir
+        current_config["merged_path"] = current_merged_path
         with open(config_path, "w") as f:
             json.dump(current_config, f, indent=4)
         return True
@@ -259,9 +263,11 @@ def validate_resume_config(work_dir, current_config):
     with open(config_path, "r") as f:
         prev_config = json.load(f)
     
+    # 1. Check for configuration mismatches (model, encoder, etc.)
     mismatch = []
-    for key, val in current_config.items():
-        if str(prev_config.get(key)) != str(val):
+    keys_to_check = ["restoration_model", "max_clip_length", "encoder", "encoder_options", "video_width", "video_height", "video_fps"]
+    for key in keys_to_check:
+        if str(prev_config.get(key)) != str(current_config.get(key)):
             mismatch.append(key)
     
     if mismatch:
@@ -269,13 +275,48 @@ def validate_resume_config(work_dir, current_config):
         print(_("Resuming with different settings may result in a corrupted output video."))
         response = input(_("Do you want to clear previous progress and start fresh? (y/N): "))
         if response.lower() == 'y':
-            shutil.rmtree(work_dir)
-            os.makedirs(work_dir, exist_ok=True)
+            # Cleanup both old and new if they differ
+            for path_key in ["work_dir", "merged_path"]:
+                old_path = prev_config.get(path_key)
+                if old_path and os.path.exists(old_path):
+                    if os.path.isdir(old_path): shutil.rmtree(old_path)
+                    else: os.remove(old_path)
+            
+            if os.path.exists(current_work_dir): shutil.rmtree(current_work_dir)
+            if os.path.exists(current_merged_path): os.remove(current_merged_path)
+
+            os.makedirs(current_work_dir, exist_ok=True)
+            current_config["work_dir"] = current_work_dir
+            current_config["merged_path"] = current_merged_path
             with open(config_path, "w") as f:
                 json.dump(current_config, f, indent=4)
             return True
         else:
             print(_("Aborting to prevent corrupted output."))
             sys.exit(1)
+
+    # 2. Handle temp directory migration
+    old_work_dir = prev_config.get("work_dir")
+    old_merged_path = prev_config.get("merged_path")
+
+    if old_work_dir and old_work_dir != current_work_dir:
+        if os.path.exists(old_work_dir) and not os.path.exists(current_work_dir):
+            print(_("🚚 [Resume] Temp directory changed. Moving segments to {path}...").format(path=current_work_dir))
+            shutil.move(old_work_dir, current_work_dir)
+        elif os.path.exists(old_work_dir) and os.path.exists(current_work_dir):
+             # Both exist? Maybe a previous failed move. Merge or cleanup?
+             # For safety, if new exists, we trust new.
+             pass
+
+    if old_merged_path and old_merged_path != current_merged_path:
+        if os.path.exists(old_merged_path) and not os.path.exists(current_merged_path):
+            print(_("🚚 [Resume] Moving merged progress to {path}...").format(path=current_merged_path))
+            shutil.move(old_merged_path, current_merged_path)
+
+    # Update the config with the new paths
+    prev_config["work_dir"] = current_work_dir
+    prev_config["merged_path"] = current_merged_path
+    with open(config_path, "w") as f:
+        json.dump(prev_config, f, indent=4)
             
     return True

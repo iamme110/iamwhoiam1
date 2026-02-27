@@ -153,20 +153,25 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
     time_base_rational = Fraction(video_metadata.time_base.numerator, video_metadata.time_base.denominator)
     video_tmp_file_output_path = os.path.join(temp_dir_path, f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
 
-    if resumable:
-        os.makedirs(work_dir, exist_ok=True)
+    # Stable config path (near main.py for now)
+    config_dir = os.path.join(os.path.dirname(__file__), ".lada_resume")
+    config_path = os.path.join(config_dir, f"{video_id}.json")
 
-    # 1. Validate configuration
-    current_config = {
-        "restoration_model": mosaic_restoration_model_name,
-        "max_clip_length": max_clip_length,
-        "encoder": encoder,
-        "encoder_options": encoder_options,
-        "video_width": video_metadata.video_width,
-        "video_height": video_metadata.video_height,
-        "video_fps": str(video_metadata.video_fps_exact)
-    }
-    utils.validate_resume_config(work_dir, current_config)
+    if resumable:
+        # Migration and Validation
+        current_config = {
+            "restoration_model": mosaic_restoration_model_name,
+            "max_clip_length": max_clip_length,
+            "encoder": encoder,
+            "encoder_options": encoder_options,
+            "video_width": video_metadata.video_width,
+            "video_height": video_metadata.video_height,
+            "video_fps": str(video_metadata.video_fps_exact)
+        }
+        utils.validate_resume_config(config_path, work_dir, video_tmp_file_output_path, current_config)
+        
+        # Ensure work_dir exists after possible migration/cleanup
+        os.makedirs(work_dir, exist_ok=True)
 
     # 2. Calculate progress
     SEGMENT_FRAME_MIN = 1000
@@ -249,6 +254,8 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
             audio_utils.combine_audio_video_files(video_metadata, final_temp_path, output_path)
             if os.path.exists(work_dir):
                 shutil.rmtree(work_dir)
+            if os.path.exists(config_path):
+                os.remove(config_path)
             print(_("✅ Restoration completed: {path}").format(path=output_path))
         except Exception as e:
             print(_("❌ Merge Error: {error}").format(error=e))
