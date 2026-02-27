@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from fractions import Fraction
@@ -32,46 +33,78 @@ logger = logging.getLogger(__name__)
 
 class IncrementalMerger(threading.Thread):
     """
-    Thread for incrementally merging video segments in the background and deleting original parts.
+    Thread for incrementally merging video segments in the background.
+    Handles Windows file locking during previews by deferring merging to a 'pending' list.
     """
     def __init__(self, merged_path):
         super().__init__(name="IncrementalMerger", daemon=True)
         self.merged_path = merged_path
         self.queue = queue.Queue()
         self.error = None
+        self.pending_parts = []
 
     def add_part(self, part_path):
         if part_path and os.path.exists(part_path):
             self.queue.put(part_path)
 
     def run(self):
+        running = True
         try:
-            while True:
-                part_path = self.queue.get()
-                if part_path is None: # Termination signal
-                    break
-                
+            while running or self.pending_parts:
+                item = None
                 try:
-                    if not os.path.exists(self.merged_path):
-                        # Move the first part as the initial merged file
-                        shutil.move(part_path, self.merged_path)
+                    # Wait for next part if still running. 
+                    # If stopped, don't block so we can keep trying to merge pending parts.
+                    item = self.queue.get(block=running, timeout=1.0 if not running else None)
+                    if item is None:
+                        running = False
                     else:
-                        # Append new segment to the existing progress file
-                        tmp_merged = self.merged_path + ".merging.mp4"
-                        combine_video_segments([self.merged_path, part_path], tmp_merged)
-                        # Atomic swap to update progress
+                        self.pending_parts.append(item)
+                except queue.Empty:
+                    pass # Timeout reached while waiting for lock to clear during shutdown
+
+                if not self.pending_parts:
+                    if not running:
+                        break
+                    if item is not None:
+                        self.queue.task_done()
+                    continue
+
+                try:
+                    tmp_merged = self.merged_path + ".merging.mp4"
+                    if not os.path.exists(self.merged_path):
+                        if len(self.pending_parts) > 1:
+                            combine_video_segments(self.pending_parts, tmp_merged)
+                            os.replace(tmp_merged, self.merged_path)
+                        else:
+                            shutil.copy(self.pending_parts[0], self.merged_path)
+                    else:
+                        combine_video_segments([self.merged_path] + self.pending_parts, tmp_merged)
                         os.replace(tmp_merged, self.merged_path)
-                        # Delete the segment after merging
-                        if os.path.exists(part_path):
-                            os.remove(part_path)
+
+                    # Success: Cleanup
+                    for p in self.pending_parts:
+                        if os.path.exists(p):
+                            os.remove(p)
+                    self.pending_parts = []
+                except PermissionError:
+                    # Lock detected. If we are shutting down, sleep briefly to let the user close the player.
+                    if not running:
+                        time.sleep(1.0)
                 finally:
-                    self.queue.task_done()
+                    if item is not None:
+                        self.queue.task_done()
         except Exception as e:
             self.error = e
 
     def stop(self):
         self.queue.put(None)
-        self.join()
+        # Give a hint to the user if we are stuck on Windows
+        while self.is_alive():
+            self.join(timeout=1.0)
+            if self.is_alive() and self.pending_parts:
+                print(_("\rWaiting for preview player to close to finalize video..."), end="", flush=True)
+        
         if self.error:
             raise self.error
 

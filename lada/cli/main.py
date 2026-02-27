@@ -23,6 +23,7 @@ except ModuleNotFoundError:
 
 from lada import VERSION, ModelFiles
 from lada.cli import utils
+from lada.cli.utils import ResumeAbortError
 from lada.utils import audio_utils, video_utils
 from lada.utils.os_utils import gpu_has_fp16_acceleration, get_default_torch_device
 from lada.restorationpipeline.frame_restorer import FrameRestorer
@@ -168,7 +169,11 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
             "video_height": video_metadata.video_height,
             "video_fps": str(video_metadata.video_fps_exact)
         }
-        utils.validate_resume_config(config_path, work_dir, video_tmp_file_output_path, current_config)
+        try:
+            utils.validate_resume_config(config_path, work_dir, video_tmp_file_output_path, current_config)
+        except ResumeAbortError as e:
+            print(e)
+            return
         
         # Ensure work_dir exists after possible migration/cleanup
         os.makedirs(work_dir, exist_ok=True)
@@ -204,6 +209,9 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
         for i in range(finished_frames):
             frame_restorer_progressbar.update()
         for elem in frame_restorer:
+            if video_merger.error:
+                raise video_merger.error
+
             if elem is STOP_MARKER or isinstance(elem, ErrorMarker):
                 success = False
                 frame_restorer_progressbar.error = True
@@ -228,7 +236,7 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
         success = False
         import traceback
         traceback.print_exc()
-        print(_("\n❌ Restoration Error: {error}").format(error=e))
+        print(_("Restoration error: {error}").format(error=e))
     except KeyboardInterrupt:
         success = False
         raise # Rethrow to stop main() loop
@@ -241,7 +249,7 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
             if video_merger:
                 video_merger.stop()
         except Exception as merge_err:
-            print(_("\n❌ Merge Background Error: {error}").format(error=merge_err))
+            print(_("Merge background error: {error}").format(error=merge_err))
             success = False
 
         frame_restorer.stop()

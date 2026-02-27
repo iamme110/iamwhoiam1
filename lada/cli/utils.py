@@ -21,6 +21,10 @@ from lada.utils import VideoMetadata, video_utils
 
 COL_SEP = "  "
 
+class ResumeAbortError(Exception):
+    """Raised when the user chooses to abort rather than clear inconsistent progress."""
+    pass
+
 def wcrjust(text, length, padding=' '):
     return text + padding * max(0, (length - wcswidth(text)))
 
@@ -292,8 +296,7 @@ def validate_resume_config(config_path, current_work_dir, current_merged_path, c
                 json.dump(current_config, f, indent=4)
             return True
         else:
-            print(_("Aborting to prevent corrupted output."))
-            sys.exit(1)
+            raise ResumeAbortError(_("Aborting to prevent corrupted output."))
 
     # 2. Handle temp directory migration
     old_work_dir = prev_config.get("work_dir")
