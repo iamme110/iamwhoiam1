@@ -125,7 +125,7 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
                         frame_restorer_progressbar.error = True
                         print("Error on export: frame restorer stopped prematurely")
                         break
-                    (restored_frame, restored_frame_pts, _) = elem
+                    (restored_frame, restored_frame_pts, unused_mask) = elem
                     video_writer.write(restored_frame, restored_frame_pts, bgr2rgb=True)
                     frame_restorer_progressbar.update()
         except (Exception, KeyboardInterrupt) as e:
@@ -179,7 +179,7 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
     start_ns = int(finished_frames * (10**9 / float(fps_rational)))
 
     if finished_frames > 0:
-        print(_("\n♻️ [Resume] Found existing progress. Resuming from frame {frame} (scene boundary).").format(frame=finished_frames))
+        print(_("Found existing progress. Resuming from frame {frame} (scene boundary)").format(frame=finished_frames))
 
     frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
@@ -248,7 +248,7 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
         frame_restorer_progressbar.close(ensure_completed_bar=success)
 
     if success:
-        print(_("🎬 [Finalizing] Adding audio..."))
+        print(_("Processing audio"))
         try:
             final_temp_path = video_merger.merged_path
             audio_utils.combine_audio_video_files(video_metadata, final_temp_path, output_path)
@@ -256,11 +256,11 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
                 shutil.rmtree(work_dir)
             if os.path.exists(config_path):
                 os.remove(config_path)
-            print(_("✅ Restoration completed: {path}").format(path=output_path))
+            print(_("Restoration completed: {path}").format(path=output_path))
         except Exception as e:
-            print(_("❌ Merge Error: {error}").format(error=e))
+            print(_("Merge error: {error}").format(error=e))
     else:
-        print(_("📦 Progress saved to: {dir}").format(dir=work_dir))
+        print(_("Progress saved to: {dir}").format(dir=work_dir))
 
 def main():
     argparser = setup_argparser()

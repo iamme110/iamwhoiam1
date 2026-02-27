@@ -181,8 +181,8 @@ def combine_video_segments(segment_paths: list, output_path: str):
             f.write(f"file '{os.path.abspath(p)}'\n")
     try:
         from lada.utils import os_utils
-        cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_path, '-c', 'copy', output_path]
-        subprocess.run(cmd, check=True, startupinfo=os_utils.get_subprocess_startup_info())
+        cmd = ['ffmpeg', '-y', '-loglevel', 'quiet', '-f', 'concat', '-safe', '0', '-i', list_path, '-c', 'copy', output_path]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=os_utils.get_subprocess_startup_info())
     finally:
         if os.path.exists(list_path):
             os.remove(list_path)

@@ -271,7 +271,7 @@ def validate_resume_config(config_path, current_work_dir, current_merged_path, c
             mismatch.append(key)
     
     if mismatch:
-        print(_("\n⚠️  [Resume] Configuration mismatch detected: {keys}").format(keys=", ".join(mismatch)))
+        print(_("Configuration mismatch detected: {keys}").format(keys=", ".join(mismatch)))
         print(_("Resuming with different settings may result in a corrupted output video."))
         response = input(_("Do you want to clear previous progress and start fresh? (y/N): "))
         if response.lower() == 'y':
@@ -301,7 +301,7 @@ def validate_resume_config(config_path, current_work_dir, current_merged_path, c
 
     if old_work_dir and old_work_dir != current_work_dir:
         if os.path.exists(old_work_dir) and not os.path.exists(current_work_dir):
-            print(_("🚚 [Resume] Temp directory changed. Moving segments to {path}...").format(path=current_work_dir))
+            print(_("Temp directory changed. Moving segments to {path}...").format(path=current_work_dir))
             shutil.move(old_work_dir, current_work_dir)
         elif os.path.exists(old_work_dir) and os.path.exists(current_work_dir):
              # Both exist? Maybe a previous failed move. Merge or cleanup?
@@ -310,7 +310,7 @@ def validate_resume_config(config_path, current_work_dir, current_merged_path, c
 
     if old_merged_path and old_merged_path != current_merged_path:
         if os.path.exists(old_merged_path) and not os.path.exists(current_merged_path):
-            print(_("🚚 [Resume] Moving merged progress to {path}...").format(path=current_merged_path))
+            print(_("Moving merged progress to {path}...").format(path=current_merged_path))
             shutil.move(old_merged_path, current_merged_path)
 
     # Update the config with the new paths
