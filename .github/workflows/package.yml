@@ -27,6 +27,13 @@ jobs:
           echo "LADA_VERSION=$version" >> $GITHUB_ENV
           echo "Lada version: $version"
 
+      - name: Determine image tag
+        run: |
+          # image tags cannot contain + character so for dev versions we need to adjust
+          tag="${LADA_VERSION//+/-}"
+          echo "LADA_IMAGE_TAG=$tag" >> $GITHUB_ENV
+          echo "Image tag: $tag"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -45,7 +52,7 @@ jobs:
           build-args: SOURCE_DATE_EPOCH=0
           push: false # todo
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ env.LADA_VERSION }}
+            ${{ env.IMAGE_NAME }}:${{ env.LADA_IMAGE_TAG }}
             ${{ env.IMAGE_NAME }}:latest
 
   package-macos:
@@ -83,11 +90,42 @@ jobs:
       - name: Compile translations
         run: bash translations/compile_po.sh --release
 
+      - name: Download model weights
+        run: |
+          function is_downloaded() {
+              local file_name=$1
+              local sha256=$2
+              local path="./model_weights/$file_name"
+              [ -f "$path" ] && [ "$(shasum -a 256 "$path" | awk '{ print $1 }')" == "$sha256" ]
+          }
+
+          function download() {
+              local url=$1
+              local file_name=$2
+              local sha256=$3
+
+              if is_downloaded "$file_name" "$sha256"; then
+                  return
+              fi
+
+              curl -L "$url" -o "./model_weights/$file_name"
+
+              if ! is_downloaded "$file_name" "$sha256"; then
+                  echo "Error downloading $url"
+                  exit 1
+              fi
+          }
+
+          download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v2.pt?download=true' "lada_mosaic_detection_model_v2.pt" "056756fcab250bcdf0833e75aac33e2197b8809b0ab8c16e14722dcec94269b5"
+          download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_accurate.pt?download=true' "lada_mosaic_detection_model_v4_accurate.pt" "c244d7e49d8f88e264b8dc15f91fb21f5908ad8fb6f300b7bc88462d0801bc1f"
+          download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_fast.pt?download=true' "lada_mosaic_detection_model_v4_fast.pt" "9a6b660d1d3e3797d39515e08b0e72fcc59815f38279faa7a4ab374ab2c1e3b4"
+          download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_restoration_model_generic_v1.2.pth?download=true' "lada_mosaic_restoration_model_generic_v1.2.pth" "d404152576ce64fb5b2f315c03062709dac4f5f8548934866cd01c823c8104ee"
+          download 'https://drive.usercontent.google.com/download?id=1ulct4RhRxQp1v5xwEmUH7xz7AK42Oqlw&export=download&confirm=t' "3rd_party/clean_youknow_video.pth" "5643ca297c13920b8ffd39a0d85296e494683a69e5e8204d662653d24c582766"
+
       - name: Package
         run: |
           source .venv/bin/activate
           uv run --no-project pyinstaller --noconfirm packaging/macOS/lada.spec
-          ls
           ls dist
 
       - name: Create artifacts
@@ -134,13 +172,26 @@ jobs:
         id: cache-gvsbuild
         uses: actions/cache@v5
         with:
-          path: |
-            ${{ env.GVSBUILD_DIR }}/**
-            !${{ env.GVSBUILD_DIR }}/build/**
-            !${{ env.GVSBUILD_DIR }}/logs/**
-            !${{ env.GVSBUILD_DIR }}/tools/**
-            !${{ env.GVSBUILD_DIR }}/export/**
+          path: ${{ env.GVSBUILD_DIR }}/gtk/**
           key: gvsbuild-${{ env.GVSBUILD_VERSION }}-${{ hashFiles('patches/gvsbuild_*.patch') }}
+
+      - name: Check if artifact exists
+        id: check_artifact
+        run: |
+          $artifactName = "gvsbuild_${env:GVSBUILD_VERSION}_py313_v${env:LADA_VERSION}.7z"
+          $apiUrl = "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$artifactName"
+
+          $response = curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$apiUrl"
+          echo "artifacts api esponse: $response"
+
+          if ($response -match '"total_count": 1') {
+            echo "Artifact $artifactName already exists."
+            echo "artifactExists=true" >> $env:GITHUB_ENV
+          } else {
+            echo "Artifact $artifactName does not exist."
+            echo "artifactExists=false" >> $env:GITHUB_ENV
+          }
+          echo "GVSBUILD_ARTIFACT_NAME=$artifactName" >> $env:GITHUB_ENV
 
       - name: Build
         if: steps.cache-gvsbuild.outputs.cache-hit != 'true'
@@ -148,7 +199,7 @@ jobs:
         run: |
           uv venv --clear
           .venv/Scripts/Activate.ps1
- 
+
           # pin setuptools to fix build failure of gobject-introspection. Can be removed once https://github.com/wingtk/gvsbuild/pull/1715 is released
           uv pip install gvsbuild==$env:GVSBUILD_VERSION "setuptools<81.0.0"
           # Apply ffmpeg patch to support decoding wma audio streams. Can probably once https://github.com/wingtk/gvsbuild/pull/1700 is released
@@ -170,17 +221,31 @@ jobs:
           Remove-Item -Path .venv -Recurse -Force
 
       - name: Create artifact
-        shell: pwsh
+        if: steps.cache-gvsbuild.outputs.cache-hit != 'true' || env.artifactExists == 'false'
         run: |
-          mkdir ./build_gtk
-          Move-Item -Path "$env:GVSBUILD_DIR/gtk" -Destination "./build_gtk/gtk"
-          7z a "gvsbuild_${env:GVSBUILD_VERSION}_py313_v${env:LADA_VERSION}.7z" build_gtk
+          $sourcePath = "$env:GVSBUILD_DIR/gtk"
+          $destPath = "./build_gtk/gtk" # We need to ensure this folder name as it's expected/hardcoded in documentation and code
+
+          $needsRename = $sourcePath -ne $destPath
+          if ($needsRename) {
+            if (-Not (Test-Path -Path './build_gtk')) {
+              mkdir ./build_gtk
+            }
+            Move-Item -Path $sourcePath -Destination $destPath
+          }
+
+          7z a "${env:GVSBUILD_ARTIFACT_NAME}" build_gtk
+
+          if ($needsRename) {
+            Move-Item -Path $destPath -Destination $sourcePath
+          }
 
       - name: Upload artifact
+        if: steps.cache-gvsbuild.outputs.cache-hit != 'true' || env.artifactExists == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-windows-gvsbuild-dir
-          path: gvsbuild_*.7z
+          path: ${{ env.GVSBUILD_ARTIFACT_NAME }}
 
   package-windows:
     needs:
@@ -242,9 +307,9 @@ jobs:
           $path_backup = $env:Path
           $gtk_bin_dir = (Resolve-Path "$env:GVSBUILD_DIR/gtk/x64/release/bin").Path
           $env:Path = $gtk_bin_dir + ";" + $env:Path
-      
+
           & ./translations/compile_po.ps1 --release
-      
+
           $env:Path = $path_backup
 
       - name: Download model weights
@@ -264,17 +329,17 @@ jobs:
                   exit 1
               }
           }
-           
+
           Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v2.pt?download=true' "lada_mosaic_detection_model_v2.pt" "056756fcab250bcdf0833e75aac33e2197b8809b0ab8c16e14722dcec94269b5"
           Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_accurate.pt?download=true' "lada_mosaic_detection_model_v4_accurate.pt" "c244d7e49d8f88e264b8dc15f91fb21f5908ad8fb6f300b7bc88462d0801bc1f"
           Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_detection_model_v4_fast.pt?download=true' "lada_mosaic_detection_model_v4_fast.pt" "9a6b660d1d3e3797d39515e08b0e72fcc59815f38279faa7a4ab374ab2c1e3b4"
-          Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_restoration_model_generic_v1.2.pth?download=true' "lada_mosaic_restoration_model_generic_v1.2.pth" "d404152576ce64fb5b2f315c03062709dac4f5f8548934866cd01c823c8104ee" 
+          Download 'https://huggingface.co/ladaapp/lada/resolve/main/lada_mosaic_restoration_model_generic_v1.2.pth?download=true' "lada_mosaic_restoration_model_generic_v1.2.pth" "d404152576ce64fb5b2f315c03062709dac4f5f8548934866cd01c823c8104ee"
           Download 'https://drive.usercontent.google.com/download?id=1ulct4RhRxQp1v5xwEmUH7xz7AK42Oqlw&export=download&confirm=t' "3rd_party\clean_youknow_video.pth" "5643ca297c13920b8ffd39a0d85296e494683a69e5e8204d662653d24c582766"
 
       - name: Package Lada
         run: |
           .venv/Scripts/Activate.ps1
- 
+
           uv run --no-project pyinstaller --noconfirm ./packaging/windows/lada.spec -- --extra="${{ matrix.value }}" --gvsbuild-dir="$env:GVSBUILD_DIR"
 
       - name: Create artifacts
@@ -310,8 +375,9 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     permissions:
-      "contents": "write"
-      "id-token": "write"
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -332,6 +398,11 @@ jobs:
           pattern: artifacts-*
           path: artifacts
           merge-multiple: true
+
+      - name: Attest
+        uses: actions/attest@v4
+        with:
+          subject-path: artifacts/*
 
       - name: Create GitHub Release
         run: |
