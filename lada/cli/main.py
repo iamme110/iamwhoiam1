@@ -199,7 +199,13 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
         video_merger.add_part(str(p))
 
     current_segment_frames = 0
-    segment_index = len(existing_parts) + (1 if os.path.exists(video_tmp_file_output_path) else 0)
+    if existing_parts:
+        try:
+            segment_index = int(existing_parts[-1].stem.split("_")[-1])
+        except ValueError:
+            segment_index = len(existing_parts)
+    else:
+        segment_index = 0
     video_writer = None
     video_writer_path = None
 
@@ -219,7 +225,7 @@ def process_video_file(input_path: str, output_path: str, temp_dir_path: str, de
             (restored_frame, restored_frame_pts, is_scene_end) = elem
             if video_writer is None:
                 segment_index += 1
-                video_writer_path = os.path.join(work_dir, f"part_{segment_index:04d}.mp4")
+                video_writer_path = os.path.join(work_dir, f"part_{segment_index:06d}.mp4")
                 
                 video_writer = VideoWriter(video_writer_path, video_metadata.video_width, video_metadata.video_height,
                                          fps=fps_rational, encoder=encoder, encoder_options=encoder_options,

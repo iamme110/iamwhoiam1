@@ -51,59 +51,80 @@ class IncrementalMerger(threading.Thread):
         running = True
         try:
             while running or self.pending_parts:
-                item = None
                 try:
-                    # Wait for next part if still running. 
-                    # If stopped, don't block so we can keep trying to merge pending parts.
-                    item = self.queue.get(block=running, timeout=1.0 if not running else None)
+                    # Wait for at least one item
+                    item = self.queue.get(timeout=1.0)
                     if item is None:
                         running = False
                     else:
                         self.pending_parts.append(item)
+                    self.queue.task_done()
+                    
+                    # 🔥 EXPERT FIX: Drain the queue!
+                    # If the AI produced multiple parts while we were busy merging,
+                    # grab ALL of them right now so we can merge them in a SINGLE FFmpeg pass.
+                    while not self.queue.empty():
+                        try:
+                            extra_item = self.queue.get_nowait()
+                            if extra_item is None:
+                                running = False
+                            else:
+                                self.pending_parts.append(extra_item)
+                            self.queue.task_done()
+                        except queue.Empty:
+                            break
+                            
                 except queue.Empty:
-                    pass # Timeout reached while waiting for lock to clear during shutdown
+                    pass
+
+                # Exit loop if nothing is pending and shutdown signal received
+                if not self.pending_parts and not running:
+                    break
 
                 if not self.pending_parts:
-                    if not running:
-                        break
-                    if item is not None:
-                        self.queue.task_done()
                     continue
 
                 try:
                     tmp_merged = self.merged_path + ".merging.mp4"
                     if not os.path.exists(self.merged_path):
                         if len(self.pending_parts) > 1:
+                            # Batch merge multiple parts at once!
                             combine_video_segments(self.pending_parts, tmp_merged)
                             os.replace(tmp_merged, self.merged_path)
                         else:
-                            shutil.copy(self.pending_parts[0], self.merged_path)
+                            # Fast, atomic move instead of slow physical copy
+                            os.replace(self.pending_parts[0], self.merged_path)
                     else:
+                        # Batch merge the existing file + ALL new parts at once!
                         combine_video_segments([self.merged_path] + self.pending_parts, tmp_merged)
                         os.replace(tmp_merged, self.merged_path)
 
-                    # Success: Cleanup
+                    # Success: Cleanup merged parts
                     for p in self.pending_parts:
-                        if os.path.exists(p):
-                            os.remove(p)
+                        try:
+                            if os.path.exists(p):
+                                os.remove(p)
+                        except Exception:
+                            pass
                     self.pending_parts = []
+
                 except PermissionError:
-                    # Lock detected. If we are shutting down, sleep briefly to let the user close the player.
-                    if not running:
-                        time.sleep(1.0)
-                finally:
-                    if item is not None:
-                        self.queue.task_done()
+                    # File locked by player (Windows/preview). Keep parts pending for next retry.
+                    pass
+                except Exception as e:
+                    # Critical internal error
+                    self.error = e
+                    break
         except Exception as e:
             self.error = e
 
     def stop(self):
         self.queue.put(None)
-        # Give a hint to the user if we are stuck on Windows
+        # The thread might be actively merging (FFmpeg) or waiting for a file lock (Windows PermissionError)
         while self.is_alive():
             self.join(timeout=1.0)
             if self.is_alive() and self.pending_parts:
-                print(_("\rWaiting for preview player to close to finalize video..."), end="", flush=True)
+                print(_("\rFinalizing video segments (merging or waiting for player to close)..."), end="", flush=True)
         
         if self.error:
             raise self.error
