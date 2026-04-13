@@ -198,15 +198,8 @@ SPDX-License-Identifier: AGPL-3.0
                                                                         </child>
 
                                                                         <child>
-                                                                            <object class="GtkButton" id="button_mute_unmute">
-                                                                                <property name="receives-default">true</property>
-                                                                                <child>
-                                                                                    <object class="GtkImage" id="button_image_mute_unmute">
-                                                                                        <property name="icon-name">speaker-4-symbolic</property>
-                                                                                    </object>
-                                                                                </child>
-
-                                                                                <signal name="clicked" handler="button_mute_unmute_callback"/>
+                                                                            <object class="GtkVolumeButton" id="button_volume">
+                                                                                <signal name="value-changed" handler="button_volume_value_changed_callback"/>
                                                                             </object>
                                                                         </child>
 

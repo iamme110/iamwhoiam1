@@ -42,6 +42,7 @@ class Config(GObject.Object):
         'mosaic_restoration_model': 'basicvsrpp-v1.2',
         'mp4_fast_start': False,
         'mute_audio': False,
+        'volume_level': 1.0,
         'post_export_action': PostExportAction.NONE,
         'post_export_custom_command': '',
         'preview_buffer_duration': 0,
@@ -66,6 +67,7 @@ class Config(GObject.Object):
         self._mosaic_restoration_model = self._defaults['mosaic_restoration_model']
         self._mp4_fast_start = self._defaults['mp4_fast_start']
         self._mute_audio = self._defaults['mute_audio']
+        self._volume_level = self._defaults['volume_level']
         self._preview_buffer_duration = self._defaults['preview_buffer_duration']
         self._seek_preview_enabled = self._defaults['seek_preview_enabled']
         self._show_mosaic_detections = self._defaults['show_mosaic_detections']
@@ -178,6 +180,17 @@ class Config(GObject.Object):
         if value == self._mute_audio:
             return
         self._mute_audio = value
+        self.save()
+
+    @GObject.Property()
+    def volume_level(self):
+        return self._volume_level
+
+    @volume_level.setter
+    def volume_level(self, value):
+        if value == self._volume_level:
+            return
+        self._volume_level = value
         self.save()
 
     @GObject.Property()
@@ -357,6 +370,7 @@ class Config(GObject.Object):
         self.mosaic_restoration_model = self._defaults['mosaic_restoration_model']
         self.mp4_fast_start = self._defaults['mp4_fast_start']
         self.mute_audio = self._defaults['mute_audio']
+        self.volume_level = self._defaults['volume_level']
         self.post_export_action = self._defaults['post_export_action']
         self.post_export_custom_command = self._defaults['post_export_custom_command']
         self.preview_buffer_duration = self._defaults['preview_buffer_duration']
@@ -390,6 +404,7 @@ class Config(GObject.Object):
             'mosaic_restoration_model': self._mosaic_restoration_model,
             'mp4_fast_start': self._mp4_fast_start,
             'mute_audio': self._mute_audio,
+            'volume_level': self._volume_level,
             'post_export_action': self._post_export_action.value,
             'post_export_custom_command': self._post_export_custom_command,
             'preview_buffer_duration': self._preview_buffer_duration,

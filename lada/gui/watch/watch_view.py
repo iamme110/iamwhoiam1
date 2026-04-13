@@ -32,11 +32,10 @@ class WatchView(Gtk.Widget):
     __gtype_name__ = 'WatchView'
 
     button_play_pause = Gtk.Template.Child()
-    button_mute_unmute = Gtk.Template.Child()
+    button_volume: Gtk.VolumeButton = Gtk.Template.Child()
     picture_video_player: Gtk.Picture = Gtk.Template.Child()
     widget_timeline: Timeline = Gtk.Template.Child()
     button_image_play_pause = Gtk.Template.Child()
-    button_image_mute_unmute = Gtk.Template.Child()
     label_current_time = Gtk.Template.Child()
     label_cursor_time = Gtk.Template.Child()
     box_playback_controls: Gtk.Box = Gtk.Template.Child()
@@ -215,12 +214,11 @@ class WatchView(Gtk.Widget):
             logger.warning(f"unhandled pipeline state in button_play_pause_callback: {self.pipeline_manager.state}")
 
     @Gtk.Template.Callback()
-    def button_mute_unmute_callback(self, button_clicked):
+    def button_volume_value_changed_callback(self, button, value):
         if not (self.has_audio and self._video_preview_init_done):
             return
-        new_mute_state = not self.pipeline_manager.muted
-        self.pipeline_manager.muted = new_mute_state
-        self.set_speaker_icon(new_mute_state)
+        self.pipeline_manager.volume = value
+        self.config.volume_level = value
 
     @Gtk.Template.Callback()
     def button_open_files_callback(self, button_clicked):
@@ -356,9 +354,33 @@ class WatchView(Gtk.Widget):
                 self.pipeline_manager.set_subtitle_font_size(self._config.subtitles_font_size)
         self._config.connect('notify::subtitles-font-size', on_subtitles_font_size)
 
-    def set_speaker_icon(self, mute: bool):
-        icon_name = "speaker-0-symbolic" if mute else "speaker-4-symbolic"
-        self.button_image_mute_unmute.set_property("icon-name", icon_name)
+        def on_mute_audio(object, spec):
+            if self._video_preview_init_done and self.has_audio:
+                if object.mute_audio:
+                    self._volume_before_mute = self.button_volume.get_value()
+                    self.button_volume.set_value(0.0)
+                    self.pipeline_manager.volume = 0.0
+                else:
+                    restore_volume = getattr(self, '_volume_before_mute', self.config.volume_level)
+                    if restore_volume <= 0:
+                        restore_volume = 1.0
+                    self.button_volume.set_value(restore_volume)
+                    self.pipeline_manager.volume = restore_volume
+        self._config.connect('notify::mute-audio', on_mute_audio)
+
+    def _toggle_mute(self):
+        if not (self.has_audio and self._video_preview_init_done):
+            return
+        if self.pipeline_manager.volume > 0:
+            self._volume_before_mute = self.pipeline_manager.volume
+            self.button_volume.set_value(0.0)
+            self.pipeline_manager.volume = 0.0
+        else:
+            restore_volume = getattr(self, '_volume_before_mute', self.config.volume_level)
+            if restore_volume <= 0:
+                restore_volume = 1.0
+            self.button_volume.set_value(restore_volume)
+            self.pipeline_manager.volume = restore_volume
 
     def update_gst_buffers(self):
         buffer_queue_min_thresh_time, buffer_queue_max_thresh_time = self.get_gst_buffer_bounds()
@@ -514,8 +536,14 @@ class WatchView(Gtk.Widget):
                                                            self.config.fp16_enabled,
                                                            self.config.detect_face_mosaics)
         self.has_audio = audio_utils.get_audio_codec(self.video_metadata.video_file) is not None
-        self.button_mute_unmute.set_sensitive(self.has_audio)
-        self.set_speaker_icon(mute=not self.has_audio or self.config.mute_audio)
+        self.button_volume.set_sensitive(self.has_audio)
+        if self.has_audio:
+            initial_volume = 0.0 if self.config.mute_audio else self.config.volume_level
+            self.button_volume.set_value(initial_volume)
+        if self.pipeline_manager:
+            if self.has_audio:
+                self.pipeline_manager.volume = initial_volume
+                self.pipeline_manager.muted = self.config.mute_audio
 
         self.should_be_paused = False
         self.seek_in_progress = False
@@ -534,7 +562,8 @@ class WatchView(Gtk.Widget):
             self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
         else:
             buffer_queue_min_thresh_time, buffer_queue_max_thresh_time = self.get_gst_buffer_bounds()
-            self.pipeline_manager = PipelineManager(self.frame_restorer_provider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, self.config.mute_audio, self.config.subtitles_font_size)
+            initial_volume = 0.0 if self.config.mute_audio else self.config.volume_level
+            self.pipeline_manager = PipelineManager(self.frame_restorer_provider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, self.config.mute_audio, initial_volume if self.has_audio else 0.0, self.config.subtitles_font_size)
             self.pipeline_manager.init_pipeline(self.video_metadata, subtitle_path)
             self.picture_video_player.set_paintable(self.pipeline_manager.paintable)
             self.pipeline_connection_handler_ids = [
@@ -676,7 +705,7 @@ class WatchView(Gtk.Widget):
 
     def _setup_shortcuts(self):
         self._shortcuts_manager.register_group("watch", _("Watch"))
-        self._shortcuts_manager.add("watch", "toggle-mute-unmute", "m", lambda *args: self.button_mute_unmute_callback(self.button_mute_unmute), _("Mute/Unmute"))
+        self._shortcuts_manager.add("watch", "toggle-mute-unmute", "m", lambda *args: self._toggle_mute(), _("Mute/Unmute"))
         self._shortcuts_manager.add("watch", "toggle-play-pause", "<Ctrl>space", lambda *args: self.button_play_pause_callback(self.button_play_pause), _("Play/Pause"))
         self._shortcuts_manager.add("watch", "toggle-fullscreen", "f", lambda *args: self.emit("toggle-fullscreen-requested"), _("Enable/Disable fullscreen"))
 

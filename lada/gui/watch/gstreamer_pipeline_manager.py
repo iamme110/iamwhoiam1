@@ -22,7 +22,7 @@ class PipelineState(Enum):
     PAUSED = 2
 
 class PipelineManager(GObject.Object):
-    def __init__(self, frame_restorer_provider: FrameRestorerProvider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, muted: bool, subtitles_font_size: int):
+    def __init__(self, frame_restorer_provider: FrameRestorerProvider, buffer_queue_min_thresh_time, buffer_queue_max_thresh_time, muted: bool, volume: float, subtitles_font_size: int):
         super().__init__()
         self.frame_restorer_app_src: FrameRestorerAppSrc | None = None
         self.video_metadata: VideoMetadata | None = None
@@ -33,6 +33,7 @@ class PipelineManager(GObject.Object):
         self._state: PipelineState = PipelineState.PAUSED
         self.has_audio: bool = False
         self._muted: bool = muted
+        self._volume: float = max(0.0, min(1.0, volume))
         self.subtitles_font_size = subtitles_font_size
 
         self.audio_uridecodebin: Gst.UriDecodeBin | None = None
@@ -72,6 +73,19 @@ class PipelineManager(GObject.Object):
         self._muted = value
         if self.audio_volume:
             self.audio_volume.set_property("mute", value)
+
+    @GObject.Property()
+    def volume(self):
+        return self._volume
+
+    @volume.setter
+    def volume(self, value):
+        self._volume = max(0.0, min(1.0, value))
+        if self.audio_volume:
+            self.audio_volume.set_property("volume", self._volume)
+            if self._volume > 0:
+                self._muted = False
+                self.audio_volume.set_property("mute", False)
 
     @GObject.Signal(name="waiting-for-data")
     def buffer_queue_underrun(self, waiting_for_data: bool):
@@ -222,6 +236,7 @@ class PipelineManager(GObject.Object):
 
         audio_volume = Gst.ElementFactory.make('volume', None)
         audio_volume.set_property("mute", self._muted)
+        audio_volume.set_property("volume", self._volume)
         self.pipeline.add(audio_volume)
         self.pipeline_audio_elements.append(audio_volume)
 
@@ -355,6 +370,7 @@ class PipelineManager(GObject.Object):
                 self.audio_uridecodebin.set_property('uri', self.path_to_gst_uri(self.video_metadata.video_file))
                 # Restore mute state as we muted audio when closing (previously opened) file
                 self.audio_volume.set_property("mute", self._muted)
+                self.audio_volume.set_property("volume", self._volume)
             else:
                 self.pipeline_add_audio()
         else:
