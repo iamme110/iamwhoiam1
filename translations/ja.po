@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: lada\n"
 "Report-Msgid-Bugs-To: https://codeberg.org/ladaapp/lada/issues\n"
 "POT-Creation-Date: 2026-01-27 16:00+0000\n"
-"PO-Revision-Date: 2026-02-03 11:29+0000\n"
+"PO-Revision-Date: 2026-03-24 01:38+0000\n"
 "Last-Translator: softasa <softasa@noreply.codeberg.org>\n"
 "Language-Team: Japanese <https://translate.codeberg.org/projects/lada/lada/"
 "ja/>\n"
@@ -14,7 +14,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
-"X-Generator: Weblate 5.15.2\n"
+"X-Generator: Weblate 5.16.2\n"
 
 msgid "Settings"
 msgstr "設定"
@@ -76,7 +76,7 @@ msgstr "再生時間: {duration},解像度: {resolution},フレームレート: 
 
 #, python-brace-format
 msgid "Error while processing <span><tt>{filename}</tt></span>"
-msgstr "処理中にエラーが発生しました<span><tt>{filename}</tt></span>"
+msgstr "処理中にエラーが発生しました <span><tt>{filename}</tt></span>"
 
 msgid "Okay"
 msgstr "了解"
