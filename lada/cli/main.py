@@ -101,6 +101,7 @@ def setup_argparser() -> argparse.ArgumentParser:
     group_restoration.add_argument('--mosaic-restoration-model', type=str, default='basicvsrpp-v1.2', help=_('Name of detection model or path to model weights file. Use "--list-mosaic-restoration-models" to see what\'s available. (default: %(default)s)'))
     group_restoration.add_argument('--mosaic-restoration-config-path', type=str, default=None, help=_("Path to restoration model configuration file. You'll not have to set this unless you're training your own custom models"))
     group_restoration.add_argument('--max-clip-length', type=int, default=180, help=_('Maximum number of frames for restoration. Higher values improve temporal stability. Lower values reduce memory footprint. If set too low flickering could appear (default: %(default)s)'))
+    group_restoration.add_argument('--mps-temporal-bucket-size', type=int, default=16, help=_('Rounds restoration clip lengths up to stable temporal shapes on MPS to prevent graph-cache memory growth. Set to 0 to disable. Ignored on other devices. (default: %(default)s)'))
 
     group_detection = parser.add_argument_group(_('Mosaic Detection'))
     group_detection.add_argument('--mosaic-detection-model', type=str, default='v4-fast', help=_('Name of detection model or path to model weights file. Use "--list-mosaic-detection-models" to see what\'s available. (default: %(default)s)'))
@@ -110,11 +111,13 @@ def setup_argparser() -> argparse.ArgumentParser:
     return parser
 
 def process_video_file(input_path: str, output_path: str, temp_dir_path: str, device: torch.device, mosaic_restoration_model, mosaic_detection_model,
-                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, encoder: str, encoder_options: str, mp4_fast_start):
+                       mosaic_restoration_model_name, preferred_pad_mode, max_clip_length, encoder: str, encoder_options: str, mp4_fast_start,
+                       mps_temporal_bucket_size=16):
     video_metadata = get_video_meta_data(input_path)
 
     frame_restorer = FrameRestorer(device, input_path, max_clip_length, mosaic_restoration_model_name,
-                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode)
+                 mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode,
+                 mps_temporal_bucket_size=mps_temporal_bucket_size)
     success = True
     video_tmp_file_output_path = os.path.join(temp_dir_path, f"{os.path.basename(os.path.splitext(output_path)[0])}.tmp{os.path.splitext(output_path)[1]}")
     pathlib.Path(output_path).parent.mkdir(exist_ok=True, parents=True)
@@ -240,6 +243,9 @@ def main():
     assert encoder is not None and encoder_options is not None
 
     device = torch.device(args.device)
+    if args.mps_temporal_bucket_size < 0:
+        print(_("MPS temporal bucket size must be zero or greater"))
+        sys.exit(1)
     mosaic_detection_model, mosaic_restoration_model, preferred_pad_mode = load_models(
         device, mosaic_restoration_model_name, mosaic_restoration_model_path, args.mosaic_restoration_config_path,
         mosaic_detection_model_path, args.fp16, args.detect_face_mosaics
@@ -255,7 +261,8 @@ def main():
         try:
             process_video_file(input_path=input_path, output_path=output_path, temp_dir_path=args.temporary_directory, device=device, mosaic_restoration_model=mosaic_restoration_model, mosaic_detection_model=mosaic_detection_model,
                                mosaic_restoration_model_name=mosaic_restoration_model_name, preferred_pad_mode=preferred_pad_mode, max_clip_length=args.max_clip_length,
-                               encoder=encoder, encoder_options=encoder_options, mp4_fast_start=args.mp4_fast_start)
+                               encoder=encoder, encoder_options=encoder_options, mp4_fast_start=args.mp4_fast_start,
+                               mps_temporal_bucket_size=args.mps_temporal_bucket_size)
         except KeyboardInterrupt:
             print(_("Received Ctrl-C, stopping restoration."))
             break

@@ -25,7 +25,7 @@ logging.basicConfig(level=LOG_LEVEL)
 class FrameRestorer:
     def __init__(self, device, video_file, max_clip_length, mosaic_restoration_model_name,
                  mosaic_detection_model: Yolo11SegmentationModel, mosaic_restoration_model, preferred_pad_mode,
-                 mosaic_detection=False):
+                 mosaic_detection=False, mps_temporal_bucket_size=16):
         self.device = torch.device(device)
         self.mosaic_restoration_model_name = mosaic_restoration_model_name
         self.max_clip_length = max_clip_length
@@ -36,6 +36,7 @@ class FrameRestorer:
         self.start_ns = 0
         self.start_frame = 0
         self.mosaic_detection = mosaic_detection
+        self.mps_temporal_bucket_size = mps_temporal_bucket_size
         self.eof = False
         self.stop_requested = False
 
@@ -168,7 +169,12 @@ class FrameRestorer:
         elif self.mosaic_restoration_model_name.startswith("basicvsrpp"):
             from lada.restorationpipeline.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
             assert isinstance(self.mosaic_restoration_model, BasicvsrppMosaicRestorer)
-            restored_clip_images = self.mosaic_restoration_model.restore(images)
+            temporal_bucket_size = self.mps_temporal_bucket_size if self.device.type == 'mps' else 0
+            restored_clip_images = self.mosaic_restoration_model.restore(
+                images,
+                temporal_bucket_size=temporal_bucket_size,
+                max_frame_count=self.max_clip_length,
+            )
         else:
             raise NotImplementedError()
         return restored_clip_images
@@ -179,6 +185,7 @@ class FrameRestorer:
         Pops starting frame from each restored clip in the process if they actually start at the same frame number as frame.
         """
         is_cpu_input = frame.device.type == 'cpu'
+        use_cpu_variable_crop_ops = is_cpu_input and self.device.type == 'mps'
         target_dtype = torch.float32 if is_cpu_input else self.mosaic_restoration_model.dtype
         def _blend_gpu(blend_mask: torch.Tensor, clip_img: torch.Tensor, orig_clip_box: tuple[int, int, int, int]):
             t, l, b, r = orig_clip_box
@@ -206,11 +213,17 @@ class FrameRestorer:
 
         for buffered_clip in [c for c in restored_clips if c.frame_start == frame_num]:
             clip_img, clip_mask, orig_clip_box, orig_crop_shape, pad_after_resize = buffered_clip.pop()
+            if use_cpu_variable_crop_ops:
+                clip_img = clip_img.cpu()
             clip_img = image_utils.unpad_image(clip_img, pad_after_resize)
             clip_mask = image_utils.unpad_image(clip_mask, pad_after_resize)
             clip_img = image_utils.resize(clip_img, orig_crop_shape[:2])
             clip_mask = image_utils.resize(clip_mask, orig_crop_shape[:2],interpolation=cv2.INTER_NEAREST)
-            blend_mask = mask_utils.create_blend_mask(clip_mask.to(device=self.device).float()).to(device=clip_img.device, dtype=target_dtype)
+            # Full video frames arrive on CPU. On MPS, keep variable-size unpadding,
+            # resizing and blend-mask construction there as well; otherwise MPSGraph
+            # caches a graph for every crop size.
+            blend_device = frame.device if use_cpu_variable_crop_ops else self.device
+            blend_mask = mask_utils.create_blend_mask(clip_mask.to(device=blend_device).float()).to(device=clip_img.device, dtype=target_dtype)
 
             blend(blend_mask, clip_img, orig_clip_box)
 
