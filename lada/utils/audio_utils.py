@@ -7,34 +7,60 @@ import av
 import io
 import os
 import subprocess
-import shutil
 from typing import Optional
 from lada.utils import video_utils, os_utils
 
 logger = logging.getLogger(__name__)
 
+def _append_source_color_metadata(cmd: list[str], metadata: video_utils.VideoMetadata):
+    color_options = (
+        ("-color_range", metadata.color_range),
+        ("-colorspace", metadata.color_space),
+        ("-color_trc", metadata.color_transfer),
+        ("-color_primaries", metadata.color_primaries),
+    )
+    for option, value in color_options:
+        if value and value != "unknown":
+            cmd += [option, value]
+
+
+def _is_mp4_or_mov(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in ('.mp4', '.m4v', '.mov')
+
+
 def combine_audio_video_files(av_video_metadata: video_utils.VideoMetadata, tmp_v_video_input_path, av_video_output_path):
     audio_codec = get_audio_codec(av_video_metadata.video_file)
+    cmd = ["ffmpeg", "-y", "-loglevel", "quiet"]
+    cmd += ["-i", av_video_metadata.video_file]
+
     if audio_codec:
         needs_audio_reencoding = not is_output_container_compatible_with_input_audio_codec(audio_codec, av_video_output_path)
         needs_video_delay = av_video_metadata.start_pts > 0
 
-        cmd = ["ffmpeg", "-y", "-loglevel", "quiet"]
-        cmd += ["-i", av_video_metadata.video_file]
         if needs_video_delay > 0:
             delay_in_seconds = float(av_video_metadata.start_pts * av_video_metadata.time_base)
             cmd += ["-itsoffset", str(delay_in_seconds)]
-        cmd += ["-i", tmp_v_video_input_path]
+    cmd += ["-i", tmp_v_video_input_path]
+
+    if audio_codec:
         if needs_audio_reencoding:
             cmd += ["-c:v", "copy"]
         else:
             cmd += ["-c", "copy"]
         cmd += ["-map", "1:v:0"]
         cmd += ["-map", "0:a:0"]
-        cmd += [av_video_output_path]
-        subprocess.run(cmd, stdout=subprocess.PIPE, startupinfo=os_utils.get_subprocess_startup_info())
     else:
-        shutil.copy(tmp_v_video_input_path, av_video_output_path)
+        cmd += ["-c", "copy"]
+        cmd += ["-map", "1:v:0"]
+
+    # Do not copy structural container tags such as the source's AVC compatible brand
+    # into an HEVC output. Meaningful stream color metadata is copied explicitly below.
+    cmd += ["-map_metadata", "-1"]
+    _append_source_color_metadata(cmd, av_video_metadata)
+    if _is_mp4_or_mov(av_video_output_path):
+        cmd += ["-movflags", "+faststart"]
+    cmd += [av_video_output_path]
+    subprocess.run(cmd, stdout=subprocess.PIPE, startupinfo=os_utils.get_subprocess_startup_info())
     os.remove(tmp_v_video_input_path)
 
 def get_audio_codec(file_path: str) -> Optional[str]:

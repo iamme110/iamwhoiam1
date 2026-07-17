@@ -181,7 +181,11 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         frames_count=frame_count,
         duration=float(json_video_stream.get('duration', json_video_format['duration'])),
         time_base=time_base,
-        start_pts=start_pts
+        start_pts=start_pts,
+        color_range=json_video_stream.get('color_range'),
+        color_space=json_video_stream.get('color_space'),
+        color_transfer=json_video_stream.get('color_transfer'),
+        color_primaries=json_video_stream.get('color_primaries')
     )
     return metadata
 
@@ -441,9 +445,10 @@ class VideoWriter:
         video_stream_out.codec_context.time_base = time_base
 
         stream_options = self._parse_encoder_options(encoder_options)
-        # hevc_videotoolbox needs tag 'hvc1' for compatibility (e.g. Safari in MP4/MOV); preset -tag:v is often ignored by PyAV/ffmpeg
-        if encoder == 'hevc_videotoolbox':
-            stream_options['tag'] = 'hvc1'
+        # Apple software expects VideoToolbox HEVC in MP4/MOV to use the hvc1 sample entry.
+        # This is a codec-context property in PyAV; passing "tag" through stream options is ignored.
+        if encoder == 'hevc_videotoolbox' and os.path.splitext(output_path)[1].lower() in ('.mp4', '.m4v', '.mov'):
+            video_stream_out.codec_context.codec_tag = 'hvc1'
         video_stream_out.options = stream_options
         self.output_container = output_container
         self.video_stream = video_stream_out
